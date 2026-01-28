@@ -1,0 +1,25 @@
+{
+  "appId": "com.zero-employee.app",
+  "productName": "0号员工",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist-electron/**/*",
+    "dist/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": "nsis"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  },
+  "extraMetadata": {
+    "main": "dist-electron/main/index.js"
+  }
+}

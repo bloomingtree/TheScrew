@@ -1,0 +1,43 @@
+{
+  "name": "zero-employee",
+  "productName": "0号员工",
+  "version": "1.0.0",
+  "description": "AI Chat Assistant - 你的零号员工",
+  "main": "dist-electron/main/index.js",
+  "author": "Your Company",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "electron": "cross-env NODE_ENV=development electron .",
+    "build": "tsc && vite build && electron-builder --win --x64",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "electron-store": "^8.1.0",
+    "lucide-react": "^0.300.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9.0.0",
+    "react-syntax-highlighter": "^15.5.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/react-syntax-highlighter": "^15.5.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^22.3.27",
+    "electron-builder": "^24.9.1",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.3.0",
+    "typescript": "^5.1.6",
+    "vite": "^4.5.0",
+    "vite-plugin-electron": "^0.14.0",
+    "wait-on": "^9.0.3"
+  }
+}
