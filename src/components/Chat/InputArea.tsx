@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { Send, Paperclip, X, StopCircle } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { useConfigStore } from '../../store/configStore';
@@ -111,35 +112,44 @@ const InputArea: React.FC = () => {
   };
 
   return (
-    <div className="border-t border-gray-200 bg-white p-4">
+    <div className="glass border-t border-white/10 p-6">
       {images.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="mb-4 flex flex-wrap gap-3">
           {images.map((image, index) => (
-            <div key={index} className="relative inline-block">
+            <motion.div
+              key={index}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="relative inline-block"
+            >
               <img
                 src={image}
                 alt="上传的图片"
-                className="w-20 h-20 object-cover rounded-lg border border-gray-200"
+                className="w-20 h-20 object-cover rounded-xl border border-white/20 glass"
               />
-              <button
+              <motion.button
                 onClick={() => handleRemoveImage(index)}
-                className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500/90 backdrop-blur text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg"
               >
                 <X size={12} />
-              </button>
-            </div>
+              </motion.button>
+            </motion.div>
           ))}
         </div>
       )}
 
-      <div className="flex gap-2">
-        <button
+      <div className="flex gap-3">
+        <motion.button
           onClick={handleImageUpload}
-          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          whileHover={{ scale: 1.1, boxShadow: "0 0 15px rgba(167, 139, 250, 0.6)" }}
+          whileTap={{ scale: 0.9 }}
+          className="p-3 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-xl transition-all border border-white/10"
           title="上传图片"
         >
           <Paperclip size={20} />
-        </button>
+        </motion.button>
 
         <div className="flex-1 relative">
           <textarea
@@ -148,28 +158,32 @@ const InputArea: React.FC = () => {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="输入消息... (Shift+Enter 换行)"
-            className="w-full px-4 py-2 pr-12 resize-none border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent max-h-[200px]"
+            className="w-full px-5 py-3 pr-12 resize-none glass-input rounded-xl focus:outline-none transition-all text-white/90 placeholder-white/40 max-h-[200px]"
             rows={1}
           />
         </div>
 
         {isStreaming ? (
-          <button
+          <motion.button
             onClick={handleStop}
-            className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            whileHover={{ scale: 1.05, boxShadow: "0 0 20px rgba(239, 68, 68, 0.6)" }}
+            whileTap={{ scale: 0.95 }}
+            className="p-3 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl shadow-lg neon-glow"
             title="停止生成"
           >
             <StopCircle size={20} />
-          </button>
+          </motion.button>
         ) : (
-          <button
+          <motion.button
             onClick={handleSend}
             disabled={!input.trim() && images.length === 0}
-            className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            whileHover={{ scale: 1.05, boxShadow: "0 0 20px rgba(167, 139, 250, 0.6)" }}
+            whileTap={{ scale: 0.95 }}
+            className="p-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-xl shadow-lg neon-glow disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
             title="发送"
           >
             <Send size={20} />
-          </button>
+          </motion.button>
         )}
       </div>
     </div>

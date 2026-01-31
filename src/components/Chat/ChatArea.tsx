@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { Plus, Settings } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { useConversationStore } from '../../store/conversationStore';
@@ -23,22 +24,26 @@ const ChatArea: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-50">
-      <div className="border-b border-gray-200 bg-white px-4 py-3 flex gap-2">
-        <button
+    <div className="flex-1 flex flex-col">
+      <div className="glass border-b border-white/10 px-6 py-4 flex gap-3">
+        <motion.button
           onClick={handleNewChat}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+          whileHover={{ scale: 1.05, boxShadow: "0 0 20px rgba(167, 139, 250, 0.6)" }}
+          whileTap={{ scale: 0.95 }}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-white/90 bg-white/10 hover:bg-white/20 rounded-xl transition-all border border-white/10"
         >
           <Plus size={16} />
           <span>新建对话</span>
-        </button>
-        <button
+        </motion.button>
+        <motion.button
           onClick={() => setConfigOpen(true)}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+          whileHover={{ scale: 1.05, boxShadow: "0 0 20px rgba(167, 139, 250, 0.6)" }}
+          whileTap={{ scale: 0.95 }}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-white/90 bg-white/10 hover:bg-white/20 rounded-xl transition-all border border-white/10"
         >
           <Settings size={16} />
           <span>设置</span>
-        </button>
+        </motion.button>
       </div>
       <MessageList />
       <InputArea />
