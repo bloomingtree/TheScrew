@@ -35,22 +35,20 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, index }) => {
       className={`flex gap-4 ${isUser ? 'justify-end' : 'justify-start'}`}
     >
       {!isUser && (
-        <motion.div
-          whileHover={{ scale: 1.1, rotate: 5 }}
-          className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center shadow-lg neon-glow"
+        <div
+          className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-primary-blue to-primary-cyan rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all"
         >
           <Bot size={20} className="text-white" />
-        </motion.div>
+        </div>
       )}
 
       <div className={cn("max-w-[75%] space-y-2", isUser && "order-2")}>
-        <motion.div
-          whileHover={{ scale: 1.02 }}
+        <div
           className={cn(
-            "rounded-2xl p-5 backdrop-blur-xl border border-white/10",
-            isUser 
-              ? "bg-gradient-to-br from-purple-500/20 to-blue-500/20 text-white/90 shadow-lg" 
-              : "glass-dark text-white/90"
+            "rounded-2xl p-5 backdrop-blur-xl border border-gray-200/50",
+            isUser
+              ? "bg-gradient-to-br from-primary-blue/10 to-primary-cyan/10 text-cream-900 shadow-lg hover:shadow-md transition-all"
+              : "bg-white/80 text-cream-900 hover:shadow-md transition-all"
           )}
         >
           {message.images && message.images.length > 0 && (
@@ -60,7 +58,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, index }) => {
                   key={idx}
                   src={image}
                   alt="附件"
-                  className="max-w-[200px] rounded-xl border border-white/20"
+                  className="max-w-[200px] rounded-xl border border-gray-200/50"
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: idx * 0.1 }}
@@ -69,7 +67,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, index }) => {
             </div>
           )}
 
-          <div className={isUser ? 'text-white' : 'text-white/90'}>
+          <div className={isUser ? 'text-cream-900' : 'text-cream-900'}>
             <ReactMarkdown
               components={{
                 code({ node, inline, className, children, ...props }: any) {
@@ -88,7 +86,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, index }) => {
                       className={cn(
                         className,
                         "px-2 py-1 rounded-lg text-sm font-mono",
-                        isUser ? "bg-purple-500/30 text-white" : "bg-white/10 text-white/90"
+                        isUser ? "bg-purple-500/20 text-cream-900" : "bg-gray-200/50 text-cream-900"
                       )}
                       {...props}
                     >
@@ -97,45 +95,40 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, index }) => {
                   );
                 },
                 pre({ children }: any) {
-                  return <div className="overflow-x-auto rounded-lg bg-black/30">{children}</div>;
+                  return <div className="overflow-x-auto rounded-lg bg-gray-100/50">{children}</div>;
                 },
               }}
             >
               {message.content}
             </ReactMarkdown>
           </div>
-        </motion.div>
+        </div>
 
-        <div className={cn("flex gap-3 text-sm text-white/40", isUser ? "justify-end" : "justify-start")}>
+        <div className={cn("flex gap-3 text-sm text-cream-400", isUser ? "justify-end" : "justify-start")}>
           <span className="opacity-60">{new Date(message.timestamp).toLocaleTimeString()}</span>
-          <motion.button
+          <button
             onClick={handleCopy}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            className="hover:text-purple-400 transition-colors opacity-0 group-hover:opacity-100"
+            className="hover:text-primary-blue transition-colors opacity-0 group-hover:opacity-100"
             title="复制"
           >
             <Copy size={14} />
-          </motion.button>
-          <motion.button
+          </button>
+          <button
             onClick={handleDelete}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            className="hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+            className="hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
             title="删除"
           >
             <Trash2 size={14} />
-          </motion.button>
+          </button>
         </div>
       </div>
 
       {isUser && (
-        <motion.div
-          whileHover={{ scale: 1.1, rotate: -5 }}
-          className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-pink-500 to-purple-500 rounded-full flex items-center justify-center shadow-lg neon-glow"
+        <div
+          className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-primary-orange to-pink-500 rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all"
         >
           <User size={20} className="text-white" />
-        </motion.div>
+        </div>
       )}
     </motion.div>
   );

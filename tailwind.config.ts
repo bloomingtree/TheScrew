@@ -7,6 +7,29 @@ export default {
   theme: {
     extend: {
       colors: {
+        primary: {
+          orange: '#f36f11',
+          blue: '#034c7a',
+          cyan: '#00c5d4',
+        },
+        background: {
+          cream: '#fff1e8',
+          workspace: '#fffffe',
+        },
+        button: {
+          bg: '#f5f4f2',
+          text: '#292929',
+        },
+        cream: {
+          50: '#fff1e8',
+          900: '#292929',
+          700: '#292929',
+          600: '#292929',
+          500: '#034c7a',
+        },
+        workspace: {
+          50: '#fffffe',
+        },
         glass: {
           bg: 'rgba(255, 255, 255, 0.1)',
           border: 'rgba(255, 255, 255, 0.2)',

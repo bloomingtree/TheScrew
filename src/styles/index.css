@@ -15,7 +15,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
-  background: #1e1b4b;
+  background: #fff1e8;
 }
 
 code {
@@ -34,53 +34,68 @@ code {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.03);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.15);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .glass {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
 }
 
 .glass-dark {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.05);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .glass-input {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(3, 76, 122, 0.2);
 }
 
 .glass-input:focus {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(167, 139, 250, 0.5);
-  box-shadow: 0 0 20px rgba(167, 139, 250, 0.3);
+  background: rgba(255, 255, 255, 1);
+  border-color: rgba(3, 76, 122, 0.4);
+  box-shadow: 0 0 0 3px rgba(3, 76, 122, 0.1);
 }
 
 .neon-glow {
-  box-shadow: 0 0 10px rgba(167, 139, 250, 0.5),
-              0 0 20px rgba(167, 139, 250, 0.3),
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.4),
+              0 0 20px rgba(167, 139, 250, 0.2),
               0 0 30px rgba(167, 139, 250, 0.1);
 }
 
+.gradient-bg-cream {
+  background: linear-gradient(135deg, #fef9f3 0%, #fdf6e9 25%, #f8f0e6 50%, #f9f4ec 75%, #fefcf8 100%);
+  background-size: 400% 400%;
+  animation: gradient-x 15s ease infinite;
+}
+
 .gradient-bg {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+  background: linear-gradient(135deg, #fef9f3 0%, #f8f0e6 50%, #fdf6e9 100%);
   background-size: 400% 400%;
   animation: gradient-x 15s ease infinite;
 }
@@ -93,7 +108,7 @@ code {
   content: '';
   position: absolute;
   inset: -2px;
-  background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
+  background: linear-gradient(135deg, #f8f0e6, #fef9f3, #fdf6e9);
   background-size: 400% 400%;
   animation: gradient-x 15s ease infinite;
   border-radius: inherit;
@@ -104,4 +119,54 @@ code {
 
 .gradient-border:hover::before {
   opacity: 1;
+}
+
+@keyframes gradient-x {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.bg-cream-50 {
+  background-color: #fff1e8;
+}
+
+.bg-workspace-50 {
+  background-color: #fffffe;
+}
+
+.text-cream-900 {
+  color: #292929;
+}
+
+.text-cream-700 {
+  color: #292929;
+}
+
+.text-cream-600 {
+  color: #292929;
+}
+
+.text-cream-500 {
+  color: #034c7a;
+}
+
+.transition-opacity {
+  transition: opacity 0.2s ease-in-out;
 }

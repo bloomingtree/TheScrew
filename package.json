@@ -1,8 +1,8 @@
 {
   "name": "zero-employee",
-  "productName": "0号员工",
+  "productName": "螺丝钉",
   "version": "1.0.0",
-  "description": "AI Chat Assistant - 你的零号员工",
+  "description": "AI Chat Assistant - 你的螺丝钉",
   "main": "dist-electron/main/index.js",
   "author": "Your Company",
   "license": "MIT",
@@ -15,9 +15,12 @@
   "dependencies": {
     "axios": "^1.6.0",
     "clsx": "^2.1.1",
+    "docx": "^9.5.1",
+    "docxtemplater": "^3.67.6",
     "electron-store": "^8.1.0",
     "framer-motion": "^12.29.2",
     "lucide-react": "^0.300.0",
+    "pizzip": "^3.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^9.0.0",

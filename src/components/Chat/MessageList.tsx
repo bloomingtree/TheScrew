@@ -1,11 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import MessageItem from './MessageItem';
+import ToolStatus from '../ToolStatus/ToolStatus';
 
 const MessageList: React.FC = () => {
-  const { messages, isStreaming } = useChatStore();
+  const { messages, isStreaming, toolCalls, toolResults } = useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -13,32 +13,25 @@ const MessageList: React.FC = () => {
   }, [messages, isStreaming]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+    <div className="h-full overflow-y-auto p-6 space-y-6">
       {messages.length === 0 && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
-          className="flex flex-col items-center justify-center h-full text-white/60"
+          className="flex flex-col items-center justify-center h-full"
         >
-          <motion.div
-            animate={{ 
-              scale: [1, 1.2, 1],
-              rotate: [0, 5, -5, 0]
-            }}
-            transition={{ 
-              duration: 3,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-            className="mb-6"
-          >
-            <Sparkles size={64} className="text-purple-400 neon-glow" />
-          </motion.div>
-          <p className="text-2xl font-semibold mb-2 text-white">👋 欢迎使用 0号员工</p>
-          <p className="text-sm text-white/50">开始你的第一次对话吧！</p>
+          
+          <p className="text-2xl font-semibold mb-2 text-cream-900">螺丝钉，有什么可以帮助您的吗？</p>
+          <p className="text-sm text-cream-600">今天是{new Date().toLocaleDateString('zh-CN', { weekday: 'long' })}</p>
         </motion.div>
       )}
+
+      <ToolStatus
+        toolCalls={toolCalls}
+        toolResults={toolResults}
+        isVisible={isStreaming}
+      />
 
       {messages.map((message, index) => (
         <MessageItem key={message.id} message={message} index={index} />
@@ -69,7 +62,7 @@ const MessageList: React.FC = () => {
           </div>
         </motion.div>
       )}
-      
+
       <div ref={messagesEndRef} />
     </div>
   );

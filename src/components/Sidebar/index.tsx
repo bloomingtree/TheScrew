@@ -1,18 +1,23 @@
 import React from 'react';
-import { Plus, Settings, MessageSquare } from 'lucide-react';
+import { Settings, MessageSquare, ChevronLeft, ChevronRight, Pencil, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useConversationStore } from '../../store/conversationStore';
 import { useConfigStore } from '../../store/configStore';
 
-const Sidebar: React.FC = () => {
-  const { 
-    conversations, 
+interface SidebarProps {
+  isOpen: boolean;
+  onToggle: () => void;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
+  const {
+    conversations,
     currentConversationId,
-    createConversation, 
-    deleteConversation, 
-    selectConversation, 
-    renameConversation 
+    createConversation,
+    deleteConversation,
+    selectConversation
   } = useConversationStore();
-  
+
   const { setConfigOpen } = useConfigStore();
 
   const handleNewChat = () => {
@@ -30,82 +35,99 @@ const Sidebar: React.FC = () => {
     }
   };
 
-  const handleRenameConversation = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const newTitle = window.prompt('请输入新的对话名称：');
-    if (newTitle) {
-      renameConversation(id, newTitle);
-    }
-  };
-
   return (
-    <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
-      <div className="p-4 border-b border-gray-200">
-        <button
-          onClick={handleNewChat}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={20} />
-          <span>新建对话</span>
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-4">
-          <h2 className="text-sm font-semibold text-gray-500 mb-2">历史对话</h2>
-          <div className="space-y-2">
-            {conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                onClick={() => handleSelectConversation(conversation.id)}
-                className={`group relative p-3 rounded-lg cursor-pointer transition-colors ${
-                  currentConversationId === conversation.id
-                    ? 'bg-blue-50 border-blue-200 border'
-                    : 'hover:bg-gray-50 border border-transparent'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <MessageSquare size={16} className="text-gray-400" />
-                  <span className="text-sm text-gray-700 truncate flex-1">
-                    {conversation.title}
-                  </span>
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  {new Date(conversation.updatedAt).toLocaleDateString()}
-                </div>
-
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex gap-1">
-                  <button
-                    onClick={(e) => handleRenameConversation(e, conversation.id)}
-                    className="p-1 hover:bg-gray-200 rounded"
-                    title="重命名"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={(e) => handleDeleteConversation(e, conversation.id)}
-                    className="p-1 hover:bg-red-100 rounded text-red-500"
-                    title="删除"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="p-4 border-t border-gray-200">
+    <motion.div
+      initial={{ width: 64 }}
+      animate={{ width: isOpen ? 256 : 64 }}
+      transition={{ duration: 0.2 }}
+      className="backdrop-blur-sm border-r border-gray-200/50 flex flex-col overflow-hidden flex-shrink-0 relative"
+      style={{backgroundColor: 'rgba(255, 255, 255, 0.6)'}}
+    >
+      <div className="p-2 border-b border-gray-200/50">
         <button
           onClick={() => setConfigOpen(true)}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+          className="w-full flex items-center justify-center gap-2 p-1 rounded-xl hover:shadow-md transition-all border border-gray-200/50 bg-button-bg text-button-text"
         >
-          <Settings size={18} />
-          <span>设置</span>
+          <Settings size={16} />
+          {isOpen && <span className="text-sm">设置</span>}
         </button>
       </div>
-    </div>
+
+      <div className="p-2 border-b border-gray-200/50">
+        <button
+          onClick={handleNewChat}
+          className="w-full flex items-center justify-center gap-2 p-1 rounded-xl hover:shadow-md hover:opacity-90 transition-all text-white bg-primary-orange"
+        >
+          <Pencil size={18} />
+          {isOpen && <span className="text-sm font-medium">新建对话</span>}
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="flex-1 overflow-y-auto"
+          >
+            <div className="p-2">
+              <h2 className="text-xs font-semibold text-cream-500 mb-3 uppercase tracking-wider">历史对话</h2>
+              <div className="space-y-2">
+                {conversations.map((conversation) => (
+                  <div
+                    key={conversation.id}
+                    onClick={() => handleSelectConversation(conversation.id)}
+                    className={`group relative py-2 px-3 rounded-xl cursor-pointer transition-all ${
+                      currentConversationId === conversation.id
+                        ? 'bg-primary-blue/10 border-primary-blue/30 border shadow-sm'
+                        : 'hover:bg-white/60 border border-gray-200/50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <MessageSquare size={14} className="text-cream-500" />
+                      <span className="text-sm text-cream-900 truncate flex-1">
+                        {conversation.title === '新对话' ? (
+                          <span className="flex items-center gap-2">
+                            <Loader2 size={12} className="animate-spin" />
+                            正在生成标题...
+                          </span>
+                        ) : (
+                          conversation.title
+                        )}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-cream-400 mt-1">
+                      {new Date(conversation.updatedAt).toLocaleDateString('zh-CN')}
+                    </div>
+
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100">
+                      <button
+                        onClick={(e) => handleDeleteConversation(e, conversation.id)}
+                        className="p-1 hover:bg-red-100 rounded text-red-500 transition-colors"
+                        title="删除"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+      </div>
+    </motion.div>
+        )}
+      </AnimatePresence>
+
+      <button
+        onClick={onToggle}
+        className="absolute right-4 bottom-4 z-20 backdrop-blur-sm p-2 rounded-full shadow-md border border-gray-200/50 hover:bg-white hover:shadow-md transition-all bg-white/80 text-button-text"
+      >
+        {isOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+      </button>
+
+
+    </motion.div>
   );
 };
 

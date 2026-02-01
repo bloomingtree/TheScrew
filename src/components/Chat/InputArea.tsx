@@ -3,14 +3,16 @@ import { motion } from 'framer-motion';
 import { Send, Paperclip, X, StopCircle } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { useConfigStore } from '../../store/configStore';
+import { useConversationStore } from '../../store/conversationStore';
 
 const InputArea: React.FC = () => {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   
-  const { messages, isStreaming, addMessage, updateLastMessage, setStreaming } = useChatStore();
+const { messages, isStreaming, addMessage, updateLastMessage, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution } = useChatStore();
   const { apiKey } = useConfigStore();
+  const { currentConversationId, generateTitle } = useConversationStore();
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -27,15 +29,17 @@ const InputArea: React.FC = () => {
       return;
     }
 
+    const userInput = input.trim();
+    const userImages = images.length > 0 ? images : undefined;
+
     const userMessage = {
       id: Date.now().toString(),
       role: 'user' as const,
-      content: input.trim(),
+      content: userInput,
       timestamp: Date.now(),
-      images: images.length > 0 ? images : undefined,
+      images: userImages,
     };
 
-    addMessage(userMessage);
     setInput('');
     setImages([]);
 
@@ -46,8 +50,13 @@ const InputArea: React.FC = () => {
       timestamp: Date.now(),
     };
 
+addMessage(userMessage);
     addMessage(assistantMessage);
     setStreaming(true);
+
+    if (currentConversationId && messages.length === 0) {
+      generateTitle(currentConversationId, userInput);
+    }
 
     try {
       const chatMessages = messages
@@ -57,6 +66,11 @@ const InputArea: React.FC = () => {
           content: m.content,
         }));
 
+      chatMessages.push({
+        role: 'user',
+        content: userInput,
+      });
+
       let accumulatedContent = '';
 
       const handleChunk = (chunk: string) => {
@@ -64,11 +78,41 @@ const InputArea: React.FC = () => {
         updateLastMessage(accumulatedContent);
       };
 
-      const removeListener = window.electronAPI.onChatChunk(handleChunk);
+      const handleToolCalls = (toolCalls: any[]) => {
+        setToolCalls(toolCalls);
+      };
+
+      const handleToolResults = (results: any[]) => {
+        setToolResults(results);
+      };
+
+      const handleToolStart = (data: any) => {
+        startToolExecution({
+          toolCallId: data.toolCallId,
+          name: data.name,
+          arguments: data.arguments,
+          description: data.description,
+          startTime: data.timestamp,
+        });
+      };
+
+      const handleToolComplete = (data: any) => {
+        completeToolExecution(data.toolCallId, data.success, data.duration);
+      };
+
+      const removeChunkListener = window.electronAPI.onChatChunk(handleChunk);
+      const removeToolCallsListener = window.electronAPI.onToolCalls(handleToolCalls);
+      const removeToolResultsListener = window.electronAPI.onToolResults(handleToolResults);
+      const removeToolStartListener = window.electronAPI.onToolStart(handleToolStart);
+      const removeToolCompleteListener = window.electronAPI.onToolComplete(handleToolComplete);
 
       const result = await window.electronAPI.chat.stream(chatMessages);
 
-      removeListener();
+      removeChunkListener();
+      removeToolCallsListener();
+      removeToolResultsListener();
+      removeToolStartListener();
+      removeToolCompleteListener();
 
       if (result.success) {
         updateLastMessage(accumulatedContent);
@@ -91,9 +135,9 @@ const InputArea: React.FC = () => {
 
   const handleImageUpload = async () => {
     try {
-      const result = await window.electronAPI.file.selectImage();
-      if (!result.canceled) {
-        setImages(prev => [...prev, result.data]);
+const result = await window.electronAPI.file.selectImage();
+      if (!result.canceled && result.data) {
+        setImages(prev => [...prev, result.data!]);
       }
     } catch (error) {
       console.error('图片上传失败:', error);
@@ -111,8 +155,8 @@ const InputArea: React.FC = () => {
     }
   };
 
-  return (
-    <div className="glass border-t border-white/10 p-6">
+return (
+    <div className="glass border-t border-gray-200/50 p-2 flex-shrink-0">
       {images.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-3">
           {images.map((image, index) => (
@@ -125,66 +169,60 @@ const InputArea: React.FC = () => {
               <img
                 src={image}
                 alt="上传的图片"
-                className="w-20 h-20 object-cover rounded-xl border border-white/20 glass"
+                className="w-20 h-20 object-cover rounded-xl border border-gray-200/50 bg-white/50"
               />
-              <motion.button
+              <button
                 onClick={() => handleRemoveImage(index)}
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
                 className="absolute -top-2 -right-2 w-6 h-6 bg-red-500/90 backdrop-blur text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg"
               >
                 <X size={12} />
-              </motion.button>
+              </button>
             </motion.div>
           ))}
         </div>
       )}
 
-      <div className="flex gap-3">
-        <motion.button
-          onClick={handleImageUpload}
-          whileHover={{ scale: 1.1, boxShadow: "0 0 15px rgba(167, 139, 250, 0.6)" }}
-          whileTap={{ scale: 0.9 }}
-          className="p-3 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-xl transition-all border border-white/10"
-          title="上传图片"
-        >
-          <Paperclip size={20} />
-        </motion.button>
-
+      <div className="space-y-3">
         <div className="flex-1 relative">
-          <textarea
+<textarea
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="输入消息... (Shift+Enter 换行)"
-            className="w-full px-5 py-3 pr-12 resize-none glass-input rounded-xl focus:outline-none transition-all text-white/90 placeholder-white/40 max-h-[200px]"
+            className="w-full px-2 py-1 resize-none rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500 max-h-[200px] focus:ring-0 focus:border-transparent focus:shadow-none border-none scrollbar-hide"
             rows={1}
           />
         </div>
 
-        {isStreaming ? (
-          <motion.button
+        <div className="flex gap-3 justify-between items-center">
+<button
+            onClick={handleImageUpload}
+            className="p-2 rounded-full transition-all border border-gray-200/50 shadow-sm hover:shadow-md bg-button-bg text-button-text"
+            title="上传图片"
+          >
+            <Paperclip size={16} />
+          </button>
+
+          {isStreaming ? (
+<button
             onClick={handleStop}
-            whileHover={{ scale: 1.05, boxShadow: "0 0 20px rgba(239, 68, 68, 0.6)" }}
-            whileTap={{ scale: 0.95 }}
-            className="p-3 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl shadow-lg neon-glow"
+            className="p-2 text-white rounded-full shadow-lg hover:shadow-xl hover:opacity-90 transition-all bg-primary-orange"
             title="停止生成"
           >
-            <StopCircle size={20} />
-          </motion.button>
-        ) : (
-          <motion.button
+              <StopCircle size={16} />
+            </button>
+          ) : (
+<button
             onClick={handleSend}
             disabled={!input.trim() && images.length === 0}
-            whileHover={{ scale: 1.05, boxShadow: "0 0 20px rgba(167, 139, 250, 0.6)" }}
-            whileTap={{ scale: 0.95 }}
-            className="p-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-xl shadow-lg neon-glow disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+            className="p-2 text-white rounded-full shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none hover:shadow-xl hover:opacity-90 transition-all bg-primary-blue"
             title="发送"
           >
-            <Send size={20} />
-          </motion.button>
-        )}
+              <Send size={16} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

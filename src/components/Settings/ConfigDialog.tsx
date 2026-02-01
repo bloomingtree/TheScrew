@@ -43,6 +43,11 @@ const ConfigDialog: React.FC = () => {
     try {
       const result = await window.electronAPI.config.validate(localConfig);
       setValidationResult(result);
+
+      if (result.valid) {
+        await window.electronAPI.config.set(localConfig);
+        setConfig(localConfig);
+      }
     } catch (error: any) {
       setValidationResult({ valid: false, error: error.message });
     } finally {
@@ -61,76 +66,74 @@ const ConfigDialog: React.FC = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-cream-900/10 backdrop-blur-sm flex items-center justify-center z-50"
         >
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="glass-dark rounded-2xl shadow-2xl w-full max-w-md mx-4 border border-white/10"
+            className="glass rounded-2xl shadow-2xl w-full max-w-md mx-4 border border-gray-200/50"
           >
-            <div className="flex items-center justify-between p-5 border-b border-white/10">
-              <h2 className="text-lg font-semibold text-white">配置设置</h2>
-              <motion.button
+            <div className="flex items-center justify-between p-5 border-b border-gray-200/50">
+              <h2 className="text-lg font-semibold text-cream-900">配置设置</h2>
+              <button
                 onClick={handleClose}
-                whileHover={{ scale: 1.1, rotate: 90 }}
-                whileTap={{ scale: 0.9 }}
-                className="text-white/60 hover:text-white transition-colors"
+                className="text-cream-600 hover:text-cream-900 transition-colors"
               >
                 <X size={20} />
-              </motion.button>
+              </button>
             </div>
 
             <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
               <div>
-                <label className="block text-sm font-medium text-white/80 mb-2">
-                  API Key <span className="text-red-400">*</span>
+                <label className="block text-sm font-medium text-cream-700 mb-2">
+                  API Key <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="password"
                   value={localConfig.apiKey}
                   onChange={(e) => setLocalConfig({ ...localConfig, apiKey: e.target.value })}
                   placeholder="输入你的 API Key"
-                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-white/90 placeholder-white/40"
+                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-white/80 mb-2">
-                  API 地址 <span className="text-red-400">*</span>
+                <label className="block text-sm font-medium text-cream-700 mb-2">
+                  API 地址 <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={localConfig.baseUrl}
                   onChange={(e) => setLocalConfig({ ...localConfig, baseUrl: e.target.value })}
                   placeholder="https://api.openai.com/v1"
-                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-white/90 placeholder-white/40"
+                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
                 />
-                <p className="text-xs text-white/40 mt-1.5">
+                <p className="text-xs text-cream-500 mt-1.5">
                   支持 OpenAI、Azure、本地模型等兼容接口
                 </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-white/80 mb-2">
-                  模型名称 <span className="text-red-400">*</span>
+                <label className="block text-sm font-medium text-cream-700 mb-2">
+                  模型名称 <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={localConfig.model}
                   onChange={(e) => setLocalConfig({ ...localConfig, model: e.target.value })}
                   placeholder="gpt-3.5-turbo"
-                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-white/90 placeholder-white/40"
+                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
                 />
-                <p className="text-xs text-white/40 mt-1.5">
+                <p className="text-xs text-cream-500 mt-1.5">
                   例如: gpt-3.5-turbo, gpt-4, gpt-4-turbo
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-white/80 mb-2">
+                  <label className="block text-sm font-medium text-cream-700 mb-2">
                     温度 ({localConfig.temperature})
                   </label>
                   <input
@@ -142,13 +145,13 @@ const ConfigDialog: React.FC = () => {
                     onChange={(e) => setLocalConfig({ ...localConfig, temperature: parseFloat(e.target.value) })}
                     className="w-full accent-purple-500"
                   />
-                  <p className="text-xs text-white/40 mt-1.5">
+                  <p className="text-xs text-cream-500 mt-1.5">
                     值越低越确定性
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-white/80 mb-2">
+                  <label className="block text-sm font-medium text-cream-700 mb-2">
                     最大 Token 数
                   </label>
                   <input
@@ -157,7 +160,7 @@ const ConfigDialog: React.FC = () => {
                     max="4000"
                     value={localConfig.maxTokens}
                     onChange={(e) => setLocalConfig({ ...localConfig, maxTokens: parseInt(e.target.value) })}
-                    className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-white/90 placeholder-white/40"
+                    className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
                   />
                 </div>
               </div>
@@ -168,13 +171,13 @@ const ConfigDialog: React.FC = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className={`p-4 rounded-xl border ${
                     validationResult.valid
-                      ? 'bg-green-500/20 border-green-500/30 text-green-300'
-                      : 'bg-red-500/20 border-red-500/30 text-red-300'
+                      ? 'bg-green-50 border-green-200 text-green-700'
+                      : 'bg-red-50 border-red-200 text-red-700'
                   } backdrop-blur-sm`}
                 >
                   <div className="flex items-center gap-2">
                     {validationResult.valid ? (
-                      <Check size={18} className="neon-glow" />
+                      <Check size={18} />
                     ) : (
                       <X size={18} />
                     )}
@@ -186,25 +189,21 @@ const ConfigDialog: React.FC = () => {
               )}
             </div>
 
-            <div className="flex gap-3 p-5 border-t border-white/10">
-              <motion.button
+            <div className="flex gap-3 p-5 border-t border-gray-200/50">
+              <button
                 onClick={handleValidate}
                 disabled={isValidating || !localConfig.apiKey || !localConfig.baseUrl}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="flex-1 px-4 py-3 bg-white/10 hover:bg-white/20 text-white/90 rounded-xl border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="flex-1 px-4 py-3 text-sm text-cream-900 bg-white/60 hover:bg-white/90 rounded-xl border border-gray-200/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 {isValidating ? '验证中...' : '验证配置'}
-              </motion.button>
-              <motion.button
+              </button>
+              <button
                 onClick={handleSave}
                 disabled={!localConfig.apiKey || !localConfig.baseUrl}
-                whileHover={{ scale: 1.02, boxShadow: "0 0 20px rgba(167, 139, 250, 0.6)" }}
-                whileTap={{ scale: 0.98 }}
-                className="flex-1 px-4 py-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-xl shadow-lg neon-glow disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all"
+                className="flex-1 px-4 py-3 bg-gradient-to-br from-primary-blue to-primary-cyan hover:opacity-90 text-white rounded-xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all"
               >
                 保存
-              </motion.button>
+              </button>
             </div>
           </motion.div>
         </motion.div>

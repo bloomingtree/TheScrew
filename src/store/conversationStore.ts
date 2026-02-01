@@ -10,6 +10,8 @@ interface ConversationState {
   selectConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
   updateConversationMessages: (id: string, messages: Conversation['messages']) => void;
+  updateConversationTitle: (id: string, title: string) => void;
+  generateTitle: (id: string, firstMessage: string) => Promise<void>;
 }
 
 export const useConversationStore = create<ConversationState>((set) => ({
@@ -51,4 +53,26 @@ export const useConversationStore = create<ConversationState>((set) => ({
       c.id === id ? { ...c, messages, updatedAt: Date.now() } : c
     ),
   })),
+
+  updateConversationTitle: (id, title) => set((state) => ({
+    conversations: state.conversations.map(c =>
+      c.id === id ? { ...c, title, updatedAt: Date.now() } : c
+    ),
+  })),
+
+  generateTitle: async (id, firstMessage) => {
+    try {
+      const result = await window.electronAPI.chat.generateTitle(firstMessage);
+      if (result.success && result.title) {
+        const title = result.title;
+        set((state) => ({
+          conversations: state.conversations.map(c =>
+            c.id === id ? { ...c, title, updatedAt: Date.now() } : c
+          ),
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to generate conversation title:', error);
+    }
+  },
 }));
