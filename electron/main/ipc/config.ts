@@ -8,7 +8,7 @@ export function registerConfigHandlers(store: Store) {
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-3.5-turbo',
       temperature: 0.7,
-      maxTokens: 2000,
+      maxTokens: 32768,
     });
   });
 
@@ -37,7 +37,7 @@ export function registerConfigHandlers(store: Store) {
       );
 
       const result = await client.validate();
-      
+
       if (result.valid) {
         store.set('config', config);
       }

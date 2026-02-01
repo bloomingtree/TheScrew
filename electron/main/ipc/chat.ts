@@ -1,9 +1,10 @@
 import { ipcMain } from 'electron';
 import { OpenAIClient } from '../api/openai';
 import Store from 'electron-store';
-import { toolManager } from '../tools/ToolManager';
+import { toolManager, ToolGroup, ToolManager } from '../tools/ToolManager';
 import { fileTools } from '../tools/FileTools';
 import { wordTools } from '../tools/WordTools';
+import { templateTools } from '../tools/TemplateTools';
 
 let currentClient: OpenAIClient | null = null;
 let currentAbortController: AbortController | null = null;
@@ -53,13 +54,44 @@ let currentAbortController: AbortController | null = null;
   }
 
 export function registerChatHandlers(store: Store) {
-  fileTools.forEach(tool => {
-    toolManager.registerTool(tool);
-  });
+  // 注册基础工具组
+  const baseToolGroup: ToolGroup = {
+    name: 'base',
+    tools: fileTools,
+    keywords: [],
+    triggers: {
+      keywords: [],
+      fileExtensions: [],
+      dependentTools: [],
+    },
+  };
+  toolManager.registerToolGroup(baseToolGroup);
 
-  wordTools.forEach(tool => {
-    toolManager.registerTool(tool);
-  });
+  // 注册 Word 工具组
+  const wordToolGroup: ToolGroup = {
+    name: 'word',
+    tools: wordTools,
+    keywords: ToolManager.getGroupKeywords('word'),
+    triggers: {
+      keywords: ToolManager.getGroupKeywords('word'),
+      fileExtensions: ['.docx', '.doc'],
+      dependentTools: ['read_file', 'search_files', 'search_in_files'],
+    },
+  };
+  toolManager.registerToolGroup(wordToolGroup);
+
+  // 注册模板工具组
+  const templateToolGroup: ToolGroup = {
+    name: 'template',
+    tools: templateTools,
+    keywords: ['模板', 'template', '格式转换', '生成文档', '报告', '工作汇总', '周报', '值班记录'],
+    triggers: {
+      keywords: ['模板', 'template', '格式转换', '周报', '值班记录', '工作汇总', '助手'],
+      fileExtensions: ['.docx', '.doc'],
+      dependentTools: ['read_file', 'create_word'],
+    },
+  };
+  toolManager.registerToolGroup(templateToolGroup);
 
   ipcMain.handle('chat:generateTitle', async (_event, message: string) => {
     try {
@@ -112,7 +144,7 @@ export function registerChatHandlers(store: Store) {
     }
   });
 
-  ipcMain.handle('chat:stream', async (event, messages: any[]) => {
+  ipcMain.handle('chat:stream', async (event, messages: any[], conversationId?: string) => {
     try {
       const config = store.get('config') as any;
 
@@ -138,12 +170,34 @@ export function registerChatHandlers(store: Store) {
       currentClient = client;
 
       const chunks: string[] = [];
-      const tools = toolManager.getOpenAIFunctionDefinitions();
+
+      // 重置对话的工具组状态（每次新对话都从基础工具开始）
+      if (conversationId) {
+        toolManager.resetForConversation(conversationId);
+      }
+
+      // 预处理：检测用户消息中的关键词，预加载相关工具组
+      const lastUserMessage = messages[messages.length - 1];
+      if (lastUserMessage && lastUserMessage.content) {
+        const detectedGroups = toolManager.detectRequiredGroups(lastUserMessage.content);
+        for (const groupName of detectedGroups) {
+          if (conversationId) {
+            toolManager.activateGroup(groupName, conversationId);
+          }
+        }
+      }
+
+      // 获取当前激活的工具定义
+      let tools = conversationId
+        ? toolManager.getActiveToolDefinitions(conversationId)
+        : toolManager.getOpenAIFunctionDefinitions();
 
       while (true) {
         let hasToolCalls = false;
 
         messages = trimMessages(messages, 10);
+
+        console.log('[DEBUG] Starting streamChat request, messages count:', messages.length);
 
         for await (const chunk of client.streamChat(messages, currentAbortController.signal, tools)) {
           try {
@@ -173,21 +227,35 @@ export function registerChatHandlers(store: Store) {
                 }
 
                 const results = await toolManager.executeToolCalls(parsed.toolCalls);
-                
+
+                // 检测是否需要加载新的工具组
                 for (let i = 0; i < results.length; i++) {
                   const result = results[i];
                   const endTime = Date.now();
                   const startTime = startTimes.get(result.toolCallId) || endTime;
                   const duration = endTime - startTime;
-                  
+
                   event.sender.send('chat:tool_complete', {
                     toolCallId: result.toolCallId,
                     duration,
                     success: result.success,
                     timestamp: endTime,
                   });
+
+                  // 动态工具加载：检测是否需要加载 Word 工具
+                  if (conversationId && toolManager.shouldLoadWordTools(result.name, result)) {
+                    toolManager.activateGroup('word', conversationId);
+                    // 更新工具定义，包含新加载的工具组
+                    tools = toolManager.getActiveToolDefinitions(conversationId);
+
+                    event.sender.send('chat:tools_loaded', {
+                      group: 'word',
+                      reason: `Detected Word file access via ${result.name}`,
+                      toolCount: tools.length,
+                    });
+                  }
                 }
-                
+
                 event.sender.send('chat:tool_results', results);
 
                 messages.push({
@@ -216,7 +284,13 @@ export function registerChatHandlers(store: Store) {
             event.sender.send('chat:chunk', chunk);
           }
         }
-        
+
+        if (hasToolCalls) {
+          console.log('[DEBUG] Tool calls detected, continuing loop...');
+        } else {
+          console.log('[DEBUG] No tool calls, exiting loop');
+        }
+
         if (!hasToolCalls) {
           break;
         }
@@ -227,12 +301,27 @@ export function registerChatHandlers(store: Store) {
 
       return { success: true, content: chunks.join('') };
     } catch (error: any) {
+      const status = error.response?.status;
+      const isRateLimit = status === 429;
+
       console.error('\n========== Chat Stream Error ==========');
-      console.error('Error:', error.message);
-      console.error('Error stack:', error.stack);
+      console.error('Status:', status || 'Unknown');
+      console.error('Message:', error.message);
+
+      if (isRateLimit) {
+        console.error('Type: Rate Limit Exceeded (429)');
+        console.error('Tip: Please wait a moment before retrying');
+      }
+
+      console.error('==========================================\n');
+
       currentClient = null;
       currentAbortController = null;
-      return { success: false, error: error.message };
+
+      return {
+        success: false,
+        error: isRateLimit ? '请求过于频繁，请稍后再试' : error.message
+      };
     }
   });
 

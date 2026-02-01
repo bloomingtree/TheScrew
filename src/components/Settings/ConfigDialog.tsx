@@ -1,21 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Check } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useConfigStore } from '../../store/configStore';
+import { toast } from '../../store/toastStore';
 
 const ConfigDialog: React.FC = () => {
   const { isConfigOpen, setConfigOpen, apiKey, baseUrl, model, temperature, maxTokens, setConfig } = useConfigStore();
-  
+
   const [localConfig, setLocalConfig] = useState({
     apiKey: '',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-3.5-turbo',
     temperature: 0.7,
-    maxTokens: 2000,
+    maxTokens: 32768,
   });
-  
+
   const [isValidating, setIsValidating] = useState(false);
-  const [validationResult, setValidationResult] = useState<{ valid: boolean; error?: string } | null>(null);
 
   useEffect(() => {
     if (isConfigOpen) {
@@ -26,30 +26,31 @@ const ConfigDialog: React.FC = () => {
         temperature,
         maxTokens,
       });
-      setValidationResult(null);
     }
   }, [isConfigOpen, apiKey, baseUrl, model, temperature, maxTokens]);
 
   const handleSave = async () => {
     await window.electronAPI.config.set(localConfig);
     setConfig(localConfig);
+    toast.success('配置已保存');
     setConfigOpen(false);
   };
 
   const handleValidate = async () => {
     setIsValidating(true);
-    setValidationResult(null);
 
     try {
       const result = await window.electronAPI.config.validate(localConfig);
-      setValidationResult(result);
 
       if (result.valid) {
         await window.electronAPI.config.set(localConfig);
         setConfig(localConfig);
+        toast.success('配置验证成功！');
+      } else {
+        toast.error(result.error || '配置验证失败');
       }
     } catch (error: any) {
-      setValidationResult({ valid: false, error: error.message });
+      toast.error(error.message || '配置验证失败');
     } finally {
       setIsValidating(false);
     }
@@ -157,36 +158,16 @@ const ConfigDialog: React.FC = () => {
                   <input
                     type="number"
                     min="1"
-                    max="4000"
+                    max="128000"
                     value={localConfig.maxTokens}
-                    onChange={(e) => setLocalConfig({ ...localConfig, maxTokens: parseInt(e.target.value) })}
+                    onChange={(e) => setLocalConfig({ ...localConfig, maxTokens: parseInt(e.target.value) || 32768 })}
                     className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
                   />
+                  <p className="text-xs text-cream-500 mt-1.5">
+                    默认 32768，可根据模型调整
+                  </p>
                 </div>
               </div>
-
-              {validationResult && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`p-4 rounded-xl border ${
-                    validationResult.valid
-                      ? 'bg-green-50 border-green-200 text-green-700'
-                      : 'bg-red-50 border-red-200 text-red-700'
-                  } backdrop-blur-sm`}
-                >
-                  <div className="flex items-center gap-2">
-                    {validationResult.valid ? (
-                      <Check size={18} />
-                    ) : (
-                      <X size={18} />
-                    )}
-                    <span className="text-sm font-medium">
-                      {validationResult.valid ? '配置验证成功！' : validationResult.error}
-                    </span>
-                  </div>
-                </motion.div>
-              )}
             </div>
 
             <div className="flex gap-3 p-5 border-t border-gray-200/50">

@@ -23,6 +23,12 @@ export interface ToolResult {
   success: boolean;
   result?: any;
   error?: string;
+  // 截断元数据
+  truncated?: boolean;
+  originalSize?: number;
+  displaySize?: number;
+  sizeFormatted?: string;
+  savedPath?: string;
 }
 
 export interface ToolExecution {

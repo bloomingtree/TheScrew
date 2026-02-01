@@ -1,69 +1,74 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useChatStore } from '../../store/chatStore';
-import MessageItem from './MessageItem';
-import ToolStatus from '../ToolStatus/ToolStatus';
+import MessageThread from './MessageThread';
+import { groupMessages } from '../../utils/messageGrouping';
 
 const MessageList: React.FC = () => {
-  const { messages, isStreaming, toolCalls, toolResults } = useChatStore();
+  const { messages, isStreaming } = useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 使用 useMemo 缓存分组结果
+  const threads = useMemo(() => groupMessages(messages), [messages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
-      {messages.length === 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="flex flex-col items-center justify-center h-full"
-        >
-          
-          <p className="text-2xl font-semibold mb-2 text-cream-900">螺丝钉，有什么可以帮助您的吗？</p>
-          <p className="text-sm text-cream-600">今天是{new Date().toLocaleDateString('zh-CN', { weekday: 'long' })}</p>
-        </motion.div>
-      )}
+    <div className="h-full overflow-y-auto py-6 px-4">
+      {/* 居中布局容器 */}
+      <div className="max-w-[900px] mx-auto space-y-6">
+        {messages.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="flex flex-col items-center justify-center h-full"
+          >
+            <p className="text-2xl font-semibold mb-2 text-[#374151]">螺丝钉，有什么可以帮助您的吗？</p>
+            <p className="text-sm text-[#9CA3AF]">今天是{new Date().toLocaleDateString('zh-CN', { weekday: 'long' })}</p>
+          </motion.div>
+        )}
 
-      <ToolStatus
-        toolCalls={toolCalls}
-        toolResults={toolResults}
-        isVisible={isStreaming}
-      />
+        {/* 渲染消息线程 */}
+        {threads.map((thread, index) => (
+          <MessageThread
+            key={thread.id}
+            thread={thread}
+            messageIndexStart={index * 10} // 简化处理，实际需要追踪消息索引
+          />
+        ))}
 
-      {messages.map((message, index) => (
-        <MessageItem key={message.id} message={message} index={index} />
-      ))}
+        {/* 流式响应加载指示器 */}
+        {isStreaming && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex justify-center py-4"
+          >
+            <div className="flex gap-2">
+              <motion.span
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut" }}
+                className="w-2 h-2 bg-[#10B981] rounded-full"
+              />
+              <motion.span
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.1 }}
+                className="w-2 h-2 bg-[#1E40AF] rounded-full"
+              />
+              <motion.span
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.2 }}
+                className="w-2 h-2 bg-[#8B5CF6] rounded-full"
+              />
+            </div>
+          </motion.div>
+        )}
 
-      {isStreaming && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="flex justify-center"
-        >
-          <div className="flex gap-2">
-            <motion.span
-              animate={{ y: [0, -10, 0] }}
-              transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut" }}
-              className="w-2 h-2 bg-purple-400 rounded-full neon-glow"
-            />
-            <motion.span
-              animate={{ y: [0, -10, 0] }}
-              transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.1 }}
-              className="w-2 h-2 bg-blue-400 rounded-full neon-glow"
-            />
-            <motion.span
-              animate={{ y: [0, -10, 0] }}
-              transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.2 }}
-              className="w-2 h-2 bg-pink-400 rounded-full neon-glow"
-            />
-          </div>
-        </motion.div>
-      )}
-
-      <div ref={messagesEndRef} />
+        <div ref={messagesEndRef} />
+      </div>
     </div>
   );
 };

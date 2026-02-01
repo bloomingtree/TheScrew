@@ -1,18 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Send, Paperclip, X, StopCircle } from 'lucide-react';
+import { Send, Paperclip, X, StopCircle, FileText, Sparkles } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { useConfigStore } from '../../store/configStore';
 import { useConversationStore } from '../../store/conversationStore';
+import { useTemplateStore } from '../../store/templateStore';
 
 const InputArea: React.FC = () => {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  
-const { messages, isStreaming, addMessage, updateLastMessage, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution } = useChatStore();
+
+const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution } = useChatStore();
   const { apiKey } = useConfigStore();
   const { currentConversationId, generateTitle } = useConversationStore();
+  const {
+    assistantTools,
+    setTemplateDialogOpen,
+    setConvertPanelOpen,
+    setAssistantPanelOpen
+  } = useTemplateStore();
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -79,6 +86,7 @@ addMessage(userMessage);
       };
 
       const handleToolCalls = (toolCalls: any[]) => {
+        updateLastMessageToolCalls(toolCalls);
         setToolCalls(toolCalls);
       };
 
@@ -106,7 +114,7 @@ addMessage(userMessage);
       const removeToolStartListener = window.electronAPI.onToolStart(handleToolStart);
       const removeToolCompleteListener = window.electronAPI.onToolComplete(handleToolComplete);
 
-      const result = await window.electronAPI.chat.stream(chatMessages);
+      const result = await window.electronAPI.chat.stream(chatMessages, currentConversationId || undefined);
 
       removeChunkListener();
       removeToolCallsListener();
@@ -157,6 +165,42 @@ const result = await window.electronAPI.file.selectImage();
 
 return (
     <div className="glass border-t border-gray-200/50 p-2 flex-shrink-0">
+      {/* 模板快捷工具栏 */}
+      <div className="flex items-center gap-2 px-2 py-1 mb-2">
+        <button
+          onClick={() => setTemplateDialogOpen(true)}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-white/60 text-xs text-cream-600 hover:text-cream-900 transition-all"
+          title="浏览模板"
+        >
+          <FileText size={14} />
+          <span>模板</span>
+        </button>
+
+        <button
+          onClick={() => setConvertPanelOpen(true)}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-white/60 text-xs text-cream-600 hover:text-cream-900 transition-all"
+          title="格式转换"
+        >
+          <FileText size={14} />
+          <span>转换</span>
+        </button>
+
+        <div className="w-px h-4 bg-gray-200/50" />
+
+        {/* 快捷助手 */}
+        {assistantTools.slice(0, 2).map((assistant) => (
+          <button
+            key={assistant.id}
+            onClick={() => setAssistantPanelOpen(true, assistant)}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-primary-blue/10 text-xs text-cream-600 hover:text-primary-blue transition-all"
+            title={assistant.description}
+          >
+            <Sparkles size={14} />
+            <span>{assistant.name}</span>
+          </button>
+        ))}
+      </div>
+
       {images.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-3">
           {images.map((image, index) => (
@@ -182,46 +226,46 @@ return (
         </div>
       )}
 
-      <div className="space-y-3">
-        <div className="flex-1 relative">
-<textarea
+      <div className="relative">
+        <div className="flex flex-col gap-2 px-3 py-2 rounded-xl bg-white/60 border border-gray-200/50 shadow-sm focus-within:ring-2 focus-within:ring-primary-blue/30 focus-within:border-primary-blue transition-all">
+          <textarea
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="输入消息... (Shift+Enter 换行)"
-            className="w-full px-2 py-1 resize-none rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500 max-h-[200px] focus:ring-0 focus:border-transparent focus:shadow-none border-none scrollbar-hide"
+            className="w-full px-2 py-1 resize-none focus:outline-none text-cream-900 placeholder-cream-500 max-h-[200px] min-h-[32px] bg-transparent border-none scrollbar-hide"
             rows={1}
           />
-        </div>
 
-        <div className="flex gap-3 justify-between items-center">
-<button
-            onClick={handleImageUpload}
-            className="p-2 rounded-full transition-all border border-gray-200/50 shadow-sm hover:shadow-md bg-button-bg text-button-text"
-            title="上传图片"
-          >
-            <Paperclip size={16} />
-          </button>
+          <div className="flex justify-between items-center">
+            <button
+              onClick={handleImageUpload}
+              className="p-1.5 rounded-lg transition-all hover:bg-gray-200/50 text-cream-500 hover:text-cream-700"
+              title="上传图片"
+            >
+              <Paperclip size={16} />
+            </button>
 
-          {isStreaming ? (
-<button
-            onClick={handleStop}
-            className="p-2 text-white rounded-full shadow-lg hover:shadow-xl hover:opacity-90 transition-all bg-primary-orange"
-            title="停止生成"
-          >
-              <StopCircle size={16} />
-            </button>
-          ) : (
-<button
-            onClick={handleSend}
-            disabled={!input.trim() && images.length === 0}
-            className="p-2 text-white rounded-full shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none hover:shadow-xl hover:opacity-90 transition-all bg-primary-blue"
-            title="发送"
-          >
-              <Send size={16} />
-            </button>
-          )}
+            {isStreaming ? (
+              <button
+                onClick={handleStop}
+                className="p-1.5 text-white rounded-lg shadow-sm hover:shadow-md transition-all bg-primary-orange"
+                title="停止生成"
+              >
+                <StopCircle size={16} />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() && images.length === 0}
+                className="p-1.5 text-white rounded-lg shadow-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none hover:shadow-md transition-all bg-primary-blue"
+                title="发送"
+              >
+                <Send size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

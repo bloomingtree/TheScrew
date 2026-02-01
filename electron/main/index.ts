@@ -5,6 +5,7 @@ import { registerChatHandlers } from './ipc/chat';
 import { registerConfigHandlers } from './ipc/config';
 import { registerFileHandlers } from './ipc/file';
 import { registerWorkspaceHandlers } from './ipc/workspace';
+import { registerTemplateHandlers } from './ipc/template';
 import { setWorkspacePath } from './tools/FileTools';
 
 const store = new Store();
@@ -21,9 +22,7 @@ mainWindow = new BrowserWindow({
     contextIsolation: true,
     nodeIntegration: false,
   },
-  autoHideMenuBar: true,
-  frame: false,
-  titleBarStyle: 'hidden'
+  autoHideMenuBar: true
   });
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173');
@@ -44,6 +43,7 @@ app.whenReady().then(() => {
   registerConfigHandlers(store);
   registerFileHandlers();
   registerWorkspaceHandlers(store);
+  registerTemplateHandlers();
   createWindow();
 
   const savedWorkspacePath = store.get('workspacePath') as string | undefined;

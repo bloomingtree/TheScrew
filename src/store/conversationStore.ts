@@ -61,18 +61,15 @@ export const useConversationStore = create<ConversationState>((set) => ({
   })),
 
   generateTitle: async (id, firstMessage) => {
-    try {
-      const result = await window.electronAPI.chat.generateTitle(firstMessage);
-      if (result.success && result.title) {
-        const title = result.title;
-        set((state) => ({
-          conversations: state.conversations.map(c =>
-            c.id === id ? { ...c, title, updatedAt: Date.now() } : c
-          ),
-        }));
-      }
-    } catch (error) {
-      console.error('Failed to generate conversation title:', error);
-    }
+    // 直接截取用户输入作为标题，避免额外的 API 请求
+    // 移除换行符和多余空格，取前 15 个字符
+    const trimmed = firstMessage.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    const title = trimmed.length > 15 ? trimmed.substring(0, 15) + '...' : trimmed;
+
+    set((state) => ({
+      conversations: state.conversations.map(c =>
+        c.id === id ? { ...c, title, updatedAt: Date.now() } : c
+      ),
+    }));
   },
 }));

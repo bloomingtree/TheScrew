@@ -14,36 +14,13 @@ export class OpenAIClient {
     this.setupInterceptors();
   }
 
-  private safeStringify(obj: any, indent: number | string = 2): string {
-    try {
-      return JSON.stringify(obj, null, indent);
-    } catch (e) {
-      const cache = new Set();
-      return JSON.stringify(
-        obj,
-        (_key, value) => {
-          if (typeof value === 'object' && value !== null) {
-            if (cache.has(value)) {
-              return '[Circular Reference]';
-            }
-            cache.add(value);
-          }
-          return value;
-        },
-        indent
-      );
-    }
-  }
-
   private setupInterceptors() {
     this.axiosInstance.interceptors.request.use(
       (config: any) => {
         return config;
       },
       (error: any) => {
-        console.error('\n========== Axios Request Error ==========');
-        console.error('Error:', error.message);
-        console.error('========================================\n');
+        console.error('[Axios Request Error]:', error.message);
         return Promise.reject(error);
       }
     );
@@ -53,14 +30,8 @@ export class OpenAIClient {
         return response;
       },
       (error: any) => {
-        console.error('\n========== Axios Response Error ==========');
-        console.error('URL:', error.config?.url || 'Unknown');
-        console.error('Status:', error.response?.status || 'No status');
-        console.error('Error:', error.message);
-        if (error.response?.data) {
-          console.error('Response Data:', this.safeStringify(error.response.data, 2));
-        }
-        console.error('==========================================\n');
+        const status = error.response?.status;
+        console.error('[Axios Response Error] Status:', status || 'No status');
         return Promise.reject(error);
       }
     );
@@ -90,6 +61,76 @@ export class OpenAIClient {
     }
   }
 
+  // 获取模型信息和推荐的 maxTokens
+  async getModelInfo(): Promise<{ maxTokens?: number; modelInfo?: any }> {
+    try {
+      // 尝试从 /models 端点获取模型列表
+      const response = await this.axiosInstance.get(`${this.baseUrl}/models`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+      });
+
+      if (response.data && response.data.data) {
+        // 查找当前模型
+        const currentModel = response.data.data.find((m: any) => m.id === this.model);
+
+        if (currentModel) {
+          // 从模型信息中获取 max_tokens（某些 API 提供商会返回）
+          const maxTokens = currentModel.max_tokens || this.getDefaultMaxTokens();
+          return { maxTokens, modelInfo: currentModel };
+        }
+      }
+
+      // 如果找不到特定模型信息，返回基于模型名称的默认值
+      return { maxTokens: this.getDefaultMaxTokens() };
+    } catch (error: any) {
+      // 失败时返回基于模型名称的默认值
+      return { maxTokens: this.getDefaultMaxTokens() };
+    }
+  }
+
+  // 根据模型名称获取默认的 maxTokens
+  private getDefaultMaxTokens(): number {
+    const modelLower = this.model.toLowerCase();
+
+    // GPT-4 系列
+    if (modelLower.includes('gpt-4-turbo') || modelLower.includes('gpt-4-1106')) {
+      return 128000;
+    }
+    if (modelLower.includes('gpt-4-32k')) {
+      return 32768;
+    }
+    if (modelLower.includes('gpt-4')) {
+      return 8192;
+    }
+
+    // GPT-3.5 系列
+    if (modelLower.includes('gpt-3.5-turbo-16k')) {
+      return 16385;
+    }
+    if (modelLower.includes('gpt-3.5-turbo')) {
+      return 4096;
+    }
+
+    // Claude 系列（如果使用兼容 API）
+    if (modelLower.includes('claude-3-opus')) {
+      return 200000;
+    }
+    if (modelLower.includes('claude-3-sonnet')) {
+      return 200000;
+    }
+    if (modelLower.includes('claude-3-haiku')) {
+      return 200000;
+    }
+    if (modelLower.includes('claude-2')) {
+      return 100000;
+    }
+
+    // 默认值
+    return 4096;
+  }
+
   async *streamChat(messages: any[], signal?: AbortSignal, tools?: any[]): AsyncGenerator<string> {
     const requestBody: any = {
       model: this.model,
@@ -102,6 +143,8 @@ export class OpenAIClient {
     if (tools && tools.length > 0) {
       requestBody.tools = tools;
     }
+
+    console.log('[DEBUG] Sending request - model:', this.model, 'messages:', messages.length, 'tools:', tools?.length || 0);
 
     const response = await this.axiosInstance.post(`${this.baseUrl}/chat/completions`, requestBody, {
       headers: {

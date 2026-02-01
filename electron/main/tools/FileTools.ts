@@ -1,8 +1,53 @@
 import { readdir, readFile, stat } from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { Tool } from './ToolManager';
+import { outputTruncator } from '../utils/OutputTruncator';
 
 let workspacePath: string | null = null;
+
+/**
+ * 搜索配置常量
+ */
+const SEARCH_CONFIG = {
+  /** 默认忽略的目录列表 */
+  IGNORED_DIRS: new Set([
+    // Windows 系统目录
+    'System Volume Information',
+    '$RECYCLE.BIN',
+    'Recovery',
+    'Windows',
+    'Program Files',
+    'Program Files (x86)',
+    'ProgramData',
+    // Node.js 项目
+    'node_modules',
+    '.yarn',
+    '.pnpm-store',
+    // Git
+    '.git',
+    // IDE
+    '.idea',
+    '.vscode',
+    '.vs',
+    'dist',
+    'build',
+    'out',
+    // macOS
+    '.DS_Store',
+    '.Spotlight-V100',
+    '.Trashes',
+    // Linux
+    '.cache',
+    '.local',
+  ]),
+
+  /** 最大搜索深度（防止无限递归） */
+  MAX_DEPTH: 50,
+
+  /** 最大返回结果数量 */
+  MAX_RESULTS: 1000,
+};
 
 export function setWorkspacePath(path: string | null) {
   workspacePath = path;
@@ -15,7 +60,7 @@ export function getWorkspacePath(): string | null {
 export const fileTools: Tool[] = [
   {
     name: 'get_workspace',
-    description: '获取当前工作空间的信息。工作空间相当于一个项目目录，文件夹下的所有文件都是为了实现某个明确的目标或功能而组合在一起的。通过了解工作空间，你可以更好地理解项目结构和文件关系。',
+    description: '获取工作空间信息，包括文件列表和目录结构',
     parameters: {
       type: 'object',
       properties: {},
@@ -34,7 +79,7 @@ export const fileTools: Tool[] = [
           name: path.basename(workspacePath),
           files: files.filter(f => f.type === 'file'),
           directories: files.filter(f => f.type === 'directory'),
-          description: `当前工作空间位于 ${workspacePath}，是一个项目目录，包含了 ${files.filter(f => f.type === 'file').length} 个文件和 ${files.filter(f => f.type === 'directory').length} 个目录。这个文件夹下的所有文件都是为了实现某个明确的目标或功能而组合在一起的。`,
+          description: `当前工作空间位于 ${workspacePath}，是一个项目目录，包含了 ${files.filter(f => f.type === 'file').length} 个文件和 ${files.filter(f => f.type === 'directory').length} 个目录。`,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -44,7 +89,7 @@ export const fileTools: Tool[] = [
 
   {
     name: 'list_directory',
-    description: '列出指定目录中的文件和文件夹',
+    description: '列出目录内容（支持递归）',
     parameters: {
       type: 'object',
       properties: {
@@ -82,7 +127,7 @@ export const fileTools: Tool[] = [
 
   {
     name: 'read_file',
-    description: '读取指定文件的内容',
+    description: '读取文件内容',
     parameters: {
       type: 'object',
       properties: {
@@ -93,27 +138,29 @@ export const fileTools: Tool[] = [
       },
       required: ['filepath'],
     },
-    handler: async ({ filepath }) => {
+    handler: async ({ filepath, _toolCallId }) => {
       try {
         if (!workspacePath) {
           return { success: false, error: '工作空间未设置' };
         }
 
         const fullPath = path.resolve(workspacePath, filepath);
-        let content = await readFile(fullPath, 'utf-8');
+        const content = await readFile(fullPath, 'utf-8');
         const stats = await stat(fullPath);
 
-        const maxSize = 10000;
-        if (content.length > maxSize) {
-          content = content.substring(0, maxSize) + `\n...[文件已截断，共${stats.size}字节，仅显示前${maxSize}字节]`;
-        }
+        // 使用统一截断器
+        const truncationResult = await outputTruncator.truncate(
+          content,
+          _toolCallId || randomUUID(),
+          'read_file'
+        );
 
         return {
           success: true,
-          content,
-          size: stats.size,
+          content: truncationResult.displayContent,
           path: filepath,
-          truncated: content.length !== stats.size,
+          size: stats.size,
+          ...truncationResult.metadata,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -123,7 +170,7 @@ export const fileTools: Tool[] = [
 
   {
     name: 'search_files',
-    description: '在工作空间中搜索文件（按文件名）',
+    description: '按文件名搜索文件',
     parameters: {
       type: 'object',
       properties: {
@@ -187,7 +234,7 @@ export const fileTools: Tool[] = [
       },
       required: ['keyword'],
     },
-    handler: async ({ keyword, directory = '.', extensions = [] }) => {
+    handler: async ({ keyword, directory = '.', extensions = [], _toolCallId }) => {
       try {
         if (!workspacePath) {
           return { success: false, error: '工作空间未设置' };
@@ -196,10 +243,21 @@ export const fileTools: Tool[] = [
         const fullPath = path.resolve(workspacePath, directory);
         const results = await searchInFilesRecursive(fullPath, keyword, extensions, workspacePath);
 
+        // 将结果序列化为字符串
+        const resultString = JSON.stringify(results, null, 2);
+
+        // 应用截断
+        const truncationResult = await outputTruncator.truncate(
+          resultString,
+          _toolCallId || randomUUID(),
+          'search_in_files'
+        );
+
         return {
           success: true,
-          results,
+          results: JSON.parse(truncationResult.displayContent),
           count: results.length,
+          ...truncationResult.metadata,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -209,7 +267,7 @@ export const fileTools: Tool[] = [
 
   {
     name: 'get_file_info',
-    description: '获取文件的详细信息',
+    description: '获取文件详细信息（大小、修改时间等）',
     parameters: {
       type: 'object',
       properties: {
@@ -249,15 +307,46 @@ export const fileTools: Tool[] = [
 async function listFiles(
   dirPath: string,
   recursive: boolean,
-  basePath: string
+  basePath: string,
+  currentDepth: number = 0
 ): Promise<any[]> {
-  const entries = await readdir(dirPath, { withFileTypes: true });
+  // 深度限制检查
+  if (recursive && currentDepth >= SEARCH_CONFIG.MAX_DEPTH) {
+    console.warn(`[listFiles] Reached max depth ${SEARCH_CONFIG.MAX_DEPTH} at ${dirPath}`);
+    return [];
+  }
+
+  let entries: any[];
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch (error: any) {
+    // 跳过无权限访问的目录
+    if (error.code === 'EPERM' || error.code === 'EACCES') {
+      console.warn(`[listFiles] Skipping directory (no permission): ${dirPath}`);
+      return [];
+    }
+    throw error;
+  }
+
   const files: any[] = [];
 
   for (const entry of entries) {
     const fullPath = path.join(dirPath, entry.name);
     const relativePath = path.relative(basePath, fullPath);
-    const stats = await stat(fullPath);
+
+    // 跳过忽略的目录（仅在递归模式下生效）
+    if (recursive && entry.isDirectory() && SEARCH_CONFIG.IGNORED_DIRS.has(entry.name)) {
+      continue;
+    }
+
+    let stats: any;
+    try {
+      stats = await stat(fullPath);
+    } catch (statError: any) {
+      // 跳过无法获取状态的文件/目录
+      console.warn(`[listFiles] Cannot stat: ${fullPath}`);
+      continue;
+    }
 
     if (entry.isDirectory()) {
       if (recursive) {
@@ -266,7 +355,7 @@ async function listFiles(
           name: entry.name,
           path: relativePath,
         });
-        const subFiles = await listFiles(fullPath, recursive, basePath);
+        const subFiles = await listFiles(fullPath, recursive, basePath, currentDepth + 1);
         files.push(...subFiles);
       } else {
         files.push({
@@ -294,28 +383,65 @@ async function searchFilesRecursive(
   pattern: string,
   extensions: string[],
   basePath: string,
-  results: any[] = []
+  results: any[] = [],
+  currentDepth: number = 0
 ): Promise<any[]> {
-  const entries = await readdir(dirPath, { withFileTypes: true });
+  // 深度限制检查
+  if (currentDepth >= SEARCH_CONFIG.MAX_DEPTH) {
+    console.warn(`[searchFiles] Reached max depth ${SEARCH_CONFIG.MAX_DEPTH} at ${dirPath}`);
+    return results;
+  }
+
+  // 结果数量限制检查
+  if (results.length >= SEARCH_CONFIG.MAX_RESULTS) {
+    console.warn(`[searchFiles] Reached max results ${SEARCH_CONFIG.MAX_RESULTS}`);
+    return results;
+  }
+
+  let entries: any[];
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch (error: any) {
+    // 跳过无权限访问的目录
+    if (error.code === 'EPERM' || error.code === 'EACCES') {
+      console.warn(`[searchFiles] Skipping directory (no permission): ${dirPath}`);
+      return results;
+    }
+    throw error;
+  }
 
   for (const entry of entries) {
+    // 检查是否达到结果上限
+    if (results.length >= SEARCH_CONFIG.MAX_RESULTS) {
+      break;
+    }
+
     const fullPath = path.join(dirPath, entry.name);
     const relativePath = path.relative(basePath, fullPath);
 
     if (entry.isDirectory()) {
-      await searchFilesRecursive(fullPath, pattern, extensions, basePath, results);
+      // 跳过忽略的目录
+      if (SEARCH_CONFIG.IGNORED_DIRS.has(entry.name)) {
+        continue;
+      }
+      await searchFilesRecursive(fullPath, pattern, extensions, basePath, results, currentDepth + 1);
     } else {
       const ext = path.extname(entry.name).toLowerCase();
       const matchesExtension = extensions.length === 0 || extensions.includes(ext.slice(1));
 
       if (matchesExtension && matchesPattern(entry.name, pattern)) {
-        const stats = await stat(fullPath);
-        results.push({
-          name: entry.name,
-          path: relativePath,
-          extension: ext,
-          size: stats.size,
-        });
+        try {
+          const stats = await stat(fullPath);
+          results.push({
+            name: entry.name,
+            path: relativePath,
+            extension: ext,
+            size: stats.size,
+          });
+        } catch (statError: any) {
+          // 跳过无法获取状态的文件
+          console.warn(`[searchFiles] Cannot stat file: ${fullPath}`);
+        }
       }
     }
   }
@@ -337,16 +463,48 @@ async function searchInFilesRecursive(
   keyword: string,
   extensions: string[],
   basePath: string,
-  results: any[] = []
+  results: any[] = [],
+  currentDepth: number = 0
 ): Promise<any[]> {
-  const entries = await readdir(dirPath, { withFileTypes: true });
+  // 深度限制检查
+  if (currentDepth >= SEARCH_CONFIG.MAX_DEPTH) {
+    console.warn(`[searchInFiles] Reached max depth ${SEARCH_CONFIG.MAX_DEPTH} at ${dirPath}`);
+    return results;
+  }
+
+  // 结果数量限制检查
+  if (results.length >= SEARCH_CONFIG.MAX_RESULTS) {
+    console.warn(`[searchInFiles] Reached max results ${SEARCH_CONFIG.MAX_RESULTS}`);
+    return results;
+  }
+
+  let entries: any[];
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch (error: any) {
+    // 跳过无权限访问的目录
+    if (error.code === 'EPERM' || error.code === 'EACCES') {
+      console.warn(`[searchInFiles] Skipping directory (no permission): ${dirPath}`);
+      return results;
+    }
+    throw error;
+  }
 
   for (const entry of entries) {
+    // 检查是否达到结果上限
+    if (results.length >= SEARCH_CONFIG.MAX_RESULTS) {
+      break;
+    }
+
     const fullPath = path.join(dirPath, entry.name);
     const relativePath = path.relative(basePath, fullPath);
 
     if (entry.isDirectory()) {
-      await searchInFilesRecursive(fullPath, keyword, extensions, basePath, results);
+      // 跳过忽略的目录
+      if (SEARCH_CONFIG.IGNORED_DIRS.has(entry.name)) {
+        continue;
+      }
+      await searchInFilesRecursive(fullPath, keyword, extensions, basePath, results, currentDepth + 1);
     } else {
       const ext = path.extname(entry.name).toLowerCase();
       const matchesExtension = extensions.length === 0 || extensions.includes(ext.slice(1));
@@ -372,8 +530,11 @@ async function searchInFilesRecursive(
               lineNumbers: matches.slice(0, 10),
             });
           }
-        } catch (e) {
-          console.warn(`Cannot read file: ${fullPath}`);
+        } catch (e: any) {
+          // 跳过无法读取的文件（可能是二进制文件或权限问题）
+          if (e.code !== 'EPERM' && e.code !== 'EACCES') {
+            console.warn(`[searchInFiles] Cannot read file: ${fullPath}`, e.message);
+          }
         }
       }
     }

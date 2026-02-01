@@ -1,8 +1,19 @@
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx';
-import { readFile, writeFile } from 'fs/promises';
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  HeadingLevel,
+  AlignmentType,
+} from 'docx';
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
+import { outputTruncator } from '../utils/OutputTruncator';
+import { getWorkspacePath } from './FileTools';
+import { htmlToWordConverter } from '../utils/HtmlToWordConverter';
 
 let currentDoc: Docxtemplater | null = null;
 let currentDocPath: string | null = null;
@@ -43,6 +54,11 @@ interface WordToolArgs {
   headerText?: string;
   footerText?: string;
   align?: 'left' | 'center' | 'right';
+  // 富文本相关参数
+  richContent?: string;           // HTML富文本内容
+  contentType?: 'plain' | 'html'; // 内容类型
+  parseAsRich?: boolean;          // 是否解析为富文本
+  _toolCallId?: string;  // 内部参数，由 ToolManager 传递
 }
 
 interface ParagraphInfo {
@@ -448,23 +464,23 @@ function extractHeaderFooterInfo(zip: PizZip, docXml: string): HeaderFooterInfo 
 export const wordTools = [
   {
     name: 'read_word',
-    description: '读取 Word 文档的文本内容和结构信息',
+    description: '读取 Word 文档内容和结构',
     parameters: {
       type: 'object' as const,
       properties: {
         filepath: {
           type: 'string',
-          description: 'Word 文件路径（相对于工作空间）',
+          description: 'Word 文件路径',
         },
       },
       required: ['filepath'],
     },
-    handler: async ({ filepath }: WordToolArgs) => {
+    handler: async ({ filepath, _toolCallId }: WordToolArgs) => {
       if (!filepath) {
         return { success: false, error: 'filepath 参数缺失' };
       }
       try {
-        const { content, structure } = await readWordDocument(filepath);
+        const { content, structure } = await readWordDocument(filepath, _toolCallId);
         return {
           success: true,
           content,
@@ -479,57 +495,195 @@ export const wordTools = [
 
   {
     name: 'create_word',
-    description: '创建新的 Word 文档',
+    description: '创建新的 Word 文档（支持HTML富文本内容）',
     parameters: {
       type: 'object' as const,
       properties: {
         filepath: {
           type: 'string',
-          description: '保存路径（相对于工作空间）',
+          description: '保存路径',
         },
         content: {
           type: 'string',
-          description: '文档内容（支持 HTML 格式，会自动转换为 Word 格式）',
+          description: '文档内容（纯文本或HTML格式）',
         },
         title: {
           type: 'string',
           description: '文档标题（可选）',
         },
+        richContent: {
+          type: 'string',
+          description: 'HTML格式的富文本内容（可选，与content二选一）',
+        },
+        contentType: {
+          type: 'string',
+          description: '内容类型：plain（纯文本）或 html（HTML富文本）',
+          enum: ['plain', 'html'],
+        },
+        parseAsRich: {
+          type: 'boolean',
+          description: '是否将内容解析为富文本（自动检测HTML标签时默认启用）',
+        },
       },
-      required: ['filepath', 'content'],
+      required: ['filepath'],
     },
-    handler: async ({ filepath, content, title }: WordToolArgs) => {
-      if (!filepath || !content) {
-        return { success: false, error: 'filepath 和 content 参数缺失' };
+    handler: async ({ filepath, content, title, richContent, contentType, parseAsRich }: WordToolArgs) => {
+      if (!filepath) {
+        return { success: false, error: 'filepath 参数缺失' };
+      }
+      if (!content && !richContent) {
+        return { success: false, error: 'content 或 richContent 参数必须提供其中一个' };
       }
       try {
+        // 确定要处理的内容
+        const contentToProcess = richContent || content || '';
+        const shouldParseRich = parseAsRich || contentType === 'html' || richContent !== undefined;
+
+        // 构建文档子元素
+        let children: any[] = [];
+
+        // 添加标题
+        if (title) {
+          children.push(new Paragraph({
+            text: title,
+            heading: HeadingLevel.HEADING_1,
+            alignment: AlignmentType.CENTER,
+            spacing: {
+              after: 400,
+            },
+          }));
+        }
+
+        // 添加内容
+        if (shouldParseRich) {
+          // 使用富文本转换器
+          const result = htmlToWordConverter.convert(contentToProcess);
+          children.push(...result.elements);
+        } else {
+          // 使用纯文本解析器
+          children.push(...parseContentToParagraphs(contentToProcess));
+        }
+
         const doc = new Document({
           sections: [{
             properties: {},
-            children: [
-              ...(title ? [new Paragraph({
-                text: title,
-                heading: HeadingLevel.HEADING_1,
-                alignment: AlignmentType.CENTER,
-                spacing: {
-                  after: 400,
-                },
-              })] : []),
-              ...parseContentToParagraphs(content),
-            ],
+            children,
           }],
         });
 
         const buffer = await Packer.toBuffer(doc);
-        const workspacePath = process.cwd();
-        const fullPath = path.join(workspacePath, filepath);
-        
+        const workspacePath = getWorkspacePath();
+        if (!workspacePath) {
+          return { success: false, error: '工作空间未设置，请先设置工作空间' };
+        }
+
+        const fullPath = path.resolve(workspacePath, filepath);
+
+        // 确保父目录存在
+        const parentDir = path.dirname(fullPath);
+        await mkdir(parentDir, { recursive: true });
+
         await writeFile(fullPath, buffer);
-        
+
         return {
           success: true,
           path: filepath,
+          fullPath,
           message: 'Word 文档创建成功',
+          contentType: shouldParseRich ? 'html' : 'plain',
+        };
+      } catch (error: any) {
+        return { success: false, error: error.message };
+      }
+    },
+  },
+
+  {
+    name: 'add_rich_content',
+    description: '在文档中添加内容（支持HTML格式，将自动转换为Word格式）',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        content: {
+          type: 'string',
+          description: 'HTML格式的内容（支持h1-h6, p, b/strong, i/em, u, table, ul/ol, li等标签及style属性）',
+        },
+        position: {
+          type: 'number',
+          description: '插入位置（段落索引，默认添加到末尾）',
+        },
+      },
+      required: ['content'],
+    },
+    handler: async ({ content, position }: WordToolArgs) => {
+      if (!content) {
+        return { success: false, error: 'content 参数缺失' };
+      }
+      try {
+        if (!currentDoc) {
+          return { success: false, error: '没有打开的文档，请先使用 open_word' };
+        }
+
+        // 检测内容类型
+        const hasHtml = /<[a-z][\s\S]*>/i.test(content);
+        const hasComplexElements = /<(table|ul|ol|li|h[1-6])[\s>]/i.test(content);
+
+        // 如果包含复杂元素（表格、列表等），建议用户使用create_word
+        if (hasComplexElements) {
+          return {
+            success: false,
+            error: '检测到复杂HTML元素（表格、列表等）。编辑现有文档时只支持纯文本插入。请使用 create_word 工具创建新文档并设置 contentType: "html" 来完整支持富文本格式。',
+            suggestion: '使用 create_word 工具并设置 contentType: "html" 参数',
+          };
+        }
+
+        // 对于简单的HTML内容，提取文本并插入
+        let textContent = content;
+        if (hasHtml) {
+          // 提取纯文本
+          textContent = content
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/p>/gi, '\n\n')
+            .replace(/<[^>]*>/g, '')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&')
+            .replace(/&nbsp;/g, ' ')
+            .trim();
+        }
+
+        const paragraphs = extractParagraphs(currentDoc);
+        const insertPosition = position !== undefined ? position : paragraphs.length;
+
+        if (insertPosition < 0 || insertPosition > paragraphs.length) {
+          return { success: false, error: `插入位置 ${insertPosition} 超出范围` };
+        }
+
+        paragraphs.splice(insertPosition, 0, textContent);
+
+        const zip = currentDoc.getZip();
+        const xmlContent = zip.file('word/document.xml')?.asText() || '';
+        const updatedXml = addParagraphToXml(xmlContent, textContent, insertPosition);
+        zip.file('word/document.xml', updatedXml);
+
+        currentDoc = new Docxtemplater(zip, {
+          paragraphLoop: true,
+          linebreaks: true,
+        });
+
+        // 自动保存
+        const saveResult = await saveCurrentDoc();
+
+        return {
+          success: saveResult.success,
+          message: hasHtml
+            ? `已提取文本并添加到位置 ${insertPosition}（格式已简化）`
+            : `已添加内容到位置 ${insertPosition}`,
+          savedPath: saveResult.path,
+          content: textContent,
+          originalContentType: hasHtml ? 'html' : 'plain',
+          note: hasHtml ? '编辑现有文档时只支持纯文本。如需保留格式，请使用 create_word 工具。' : undefined,
+          error: saveResult.error,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -545,7 +699,7 @@ export const wordTools = [
       properties: {
         filepath: {
           type: 'string',
-          description: 'Word 文件路径（相对于工作空间）',
+          description: 'Word 文件路径',
         },
       },
       required: ['filepath'],
@@ -555,8 +709,12 @@ export const wordTools = [
         return { success: false, error: 'filepath 参数缺失' };
       }
       try {
-        const workspacePath = process.cwd();
-        const fullPath = path.join(workspacePath, filepath);
+        const workspacePath = getWorkspacePath();
+        if (!workspacePath) {
+          return { success: false, error: '工作空间未设置' };
+        }
+
+        const fullPath = path.resolve(workspacePath, filepath);
         const content = await readFile(fullPath);
         const zip = new PizZip(content);
         const doc = new Docxtemplater(zip, {
@@ -583,78 +741,40 @@ export const wordTools = [
   },
 
   {
-    name: 'save_word',
-    description: '保存当前编辑的 Word 文档',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        filepath: {
-          type: 'string',
-          description: '保存路径（可选，不提供则覆盖原文件）',
-        },
-      },
-      required: [],
-    },
-    handler: async ({ filepath }: WordToolArgs) => {
-      try {
-        if (!currentDoc) {
-          return { success: false, error: '没有打开的文档，请先使用 open_word' };
-        }
-
-        const savePath = filepath || currentDocPath;
-        if (!savePath) {
-          return { success: false, error: '无法确定保存路径' };
-        }
-
-        const buffer = currentDoc.getZip().generate({
-          type: 'nodebuffer',
-          compression: 'DEFLATE',
-        });
-
-        const workspacePath = process.cwd();
-        const fullPath = path.join(workspacePath, savePath);
-        await writeFile(fullPath, buffer);
-
-        if (filepath && filepath !== currentDocPath) {
-          currentDocPath = filepath;
-        }
-
-        return {
-          success: true,
-          path: savePath,
-          message: '文档保存成功',
-        };
-      } catch (error: any) {
-        return { success: false, error: error.message };
-      }
-    },
-  },
-
-  {
     name: 'get_structure',
-    description: '获取 Word 文档的详细结构信息（段落、表格、图片等）',
+    description: '获取 Word 文档结构（段落、表格、图片等）',
     parameters: {
       type: 'object' as const,
       properties: {
         filepath: {
           type: 'string',
-          description: 'Word 文件路径（可选，不提供则使用当前打开的文档）',
+          description: 'Word 文件路径（可选）',
         },
       },
       required: [],
     },
-    handler: async ({ filepath }: WordToolArgs) => {
+    handler: async ({ filepath, _toolCallId }: WordToolArgs) => {
       try {
         const targetPath = filepath || currentDocPath;
         if (!targetPath) {
           return { success: false, error: '请提供文件路径或先打开文档' };
         }
 
-        const { structure } = await readWordDocument(targetPath);
+        const { structure } = await readWordDocument(targetPath, _toolCallId);
+
+        // 对结构信息也应用截断
+        const structureString = JSON.stringify(structure, null, 2);
+        const truncationResult = await outputTruncator.truncate(
+          structureString,
+          _toolCallId || randomUUID(),
+          'get_structure'
+        );
+
         return {
           success: true,
-          structure,
+          structure: JSON.parse(truncationResult.displayContent),
           path: targetPath,
+          ...truncationResult.metadata,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -670,7 +790,7 @@ export const wordTools = [
       properties: {
         paragraphIndex: {
           type: 'number',
-          description: '段落索引（从 0 开始）',
+          description: '段落索引（从0开始）',
         },
         newText: {
           type: 'string',
@@ -706,11 +826,16 @@ export const wordTools = [
           linebreaks: true,
         });
 
+        // 自动保存
+        const saveResult = await saveCurrentDoc();
+
         return {
-          success: true,
-          message: `段落 ${paragraphIndex} 已更新`,
+          success: saveResult.success,
+          message: `段落 ${paragraphIndex} 已更新并保存`,
+          savedPath: saveResult.path,
           oldContent,
           newContent: newText,
+          error: saveResult.error,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -720,7 +845,7 @@ export const wordTools = [
 
   {
     name: 'add_paragraph',
-    description: '在指定位置添加新段落',
+    description: '在指定位置添加新段落（纯文本，如需富文本请使用 create_word 的 contentType: html 参数）',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -728,21 +853,40 @@ export const wordTools = [
           type: 'string',
           description: '段落文本内容',
         },
+        richContent: {
+          type: 'string',
+          description: 'HTML富文本内容（注意：编辑现有文档时只支持纯文本，建议使用 create_word 创建新文档来支持富文本）',
+        },
         position: {
           type: 'number',
-          description: '插入位置（索引，默认添加到末尾）',
+          description: '插入位置（默认添加到末尾）',
         },
         heading: {
           type: 'string',
           description: '标题级别（可选：1-6）',
         },
       },
-      required: ['text'],
+      required: [],
     },
-    handler: async ({ text, position }: WordToolArgs) => {
-      if (!text) {
-        return { success: false, error: 'text 参数缺失' };
+    handler: async ({ text, richContent, position }: WordToolArgs) => {
+      const contentToAdd = richContent || text;
+      if (!contentToAdd) {
+        return { success: false, error: 'text 或 richContent 参数必须提供其中一个' };
       }
+
+      // 检测是否包含HTML标签
+      const hasHtml = /<[a-z][\s\S]*>/i.test(contentToAdd);
+
+      // 如果有HTML标签，给出提示但仍继续处理（提取纯文本）
+      let processedContent = contentToAdd;
+      let warning = undefined;
+
+      if (hasHtml) {
+        // 提取纯文本
+        processedContent = contentToAdd.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+        warning = '检测到HTML内容，已提取纯文本。如需保留格式，请使用 create_word 工具并设置 contentType: "html"';
+      }
+
       try {
         if (!currentDoc) {
           return { success: false, error: '没有打开的文档，请先使用 open_word' };
@@ -755,11 +899,11 @@ export const wordTools = [
           return { success: false, error: `插入位置 ${insertPosition} 超出范围` };
         }
 
-        paragraphs.splice(insertPosition, 0, text);
+        paragraphs.splice(insertPosition, 0, processedContent);
 
         const zip = currentDoc.getZip();
         const xmlContent = zip.file('word/document.xml')?.asText() || '';
-        const updatedXml = addParagraphToXml(xmlContent, text, insertPosition);
+        const updatedXml = addParagraphToXml(xmlContent, processedContent, insertPosition);
         zip.file('word/document.xml', updatedXml);
 
         currentDoc = new Docxtemplater(zip, {
@@ -767,10 +911,16 @@ export const wordTools = [
           linebreaks: true,
         });
 
+        // 自动保存
+        const saveResult = await saveCurrentDoc();
+
         return {
-          success: true,
-          message: `段落已添加到位置 ${insertPosition}`,
-          content: text,
+          success: saveResult.success,
+          message: `段落已添加到位置 ${insertPosition} 并保存`,
+          savedPath: saveResult.path,
+          content: processedContent,
+          warning,
+          error: saveResult.error,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -780,7 +930,7 @@ export const wordTools = [
 
   {
     name: 'replace_text',
-    description: '替换文档中的所有匹配文本',
+    description: '替换文档中所有匹配的文本',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -794,7 +944,7 @@ export const wordTools = [
         },
         caseSensitive: {
           type: 'boolean',
-          description: '是否区分大小写（默认 false）',
+          description: '是否区分大小写（默认false）',
         },
       },
       required: ['searchText', 'replaceWith'],
@@ -832,12 +982,17 @@ export const wordTools = [
           linebreaks: true,
         });
 
+        // 自动保存
+        const saveResult = await saveCurrentDoc();
+
         return {
-          success: true,
-          message: `成功替换 ${replaceCount} 处文本`,
+          success: saveResult.success,
+          message: `成功替换 ${replaceCount} 处文本并保存`,
           replaceCount,
           searchText,
           replaceWith,
+          savedPath: saveResult.path,
+          error: saveResult.error,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -873,7 +1028,7 @@ export const wordTools = [
         },
         hasHeader: {
           type: 'boolean',
-          description: '是否包含表头（默认 true）',
+          description: '是否包含表头（默认true）',
         },
       },
       required: ['rows', 'columns'],
@@ -901,12 +1056,17 @@ export const wordTools = [
           linebreaks: true,
         });
 
+        // 自动保存
+        const saveResult = await saveCurrentDoc();
+
         return {
-          success: true,
-          message: `已添加 ${rows}x${columns} 表格`,
+          success: saveResult.success,
+          message: `已添加 ${rows}x${columns} 表格并保存`,
           rows,
           columns,
           data: tableData,
+          savedPath: saveResult.path,
+          error: saveResult.error,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -922,15 +1082,15 @@ export const wordTools = [
       properties: {
         tableIndex: {
           type: 'number',
-          description: '表格索引（从 0 开始）',
+          description: '表格索引（从0开始）',
         },
         rowIndex: {
           type: 'number',
-          description: '行索引（从 0 开始）',
+          description: '行索引（从0开始）',
         },
         columnIndex: {
           type: 'number',
-          description: '列索引（从 0 开始）',
+          description: '列索引（从0开始）',
         },
         newText: {
           type: 'string',
@@ -964,10 +1124,15 @@ export const wordTools = [
           linebreaks: true,
         });
 
+        // 自动保存
+        const saveResult = await saveCurrentDoc();
+
         return {
-          success: true,
-          message: `表格 ${tableIndex} 的单元格 [${rowIndex},${columnIndex}] 已更新`,
+          success: saveResult.success,
+          message: `表格 ${tableIndex} 的单元格 [${rowIndex},${columnIndex}] 已更新并保存`,
           newText,
+          savedPath: saveResult.path,
+          error: saveResult.error,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -983,7 +1148,7 @@ export const wordTools = [
       properties: {
         imagePath: {
           type: 'string',
-          description: '图片文件路径（相对于工作空间）',
+          description: '图片文件路径',
         },
         position: {
           type: 'number',
@@ -1009,8 +1174,12 @@ export const wordTools = [
           return { success: false, error: '没有打开的文档，请先使用 open_word' };
         }
 
-        const workspacePath = process.cwd();
-        const fullImagePath = path.join(workspacePath, imagePath);
+        const workspacePath = getWorkspacePath();
+        if (!workspacePath) {
+          return { success: false, error: '工作空间未设置' };
+        }
+
+        const fullImagePath = path.resolve(workspacePath, imagePath);
         const imageContent = await readFile(fullImagePath);
         const base64Image = imageContent.toString('base64');
 
@@ -1035,12 +1204,17 @@ export const wordTools = [
           linebreaks: true,
         });
 
+        // 自动保存
+        const saveResult = await saveCurrentDoc();
+
         return {
-          success: true,
-          message: '图片已添加到文档',
+          success: saveResult.success,
+          message: '图片已添加到文档并保存',
           imagePath,
           width,
           height,
+          savedPath: saveResult.path,
+          error: saveResult.error,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -1050,13 +1224,13 @@ export const wordTools = [
 
   {
     name: 'export_as_html',
-    description: '将 Word 文档导出为 HTML 格式（用于预览）',
+    description: '将 Word 文档导出为 HTML 格式',
     parameters: {
       type: 'object' as const,
       properties: {
         filepath: {
           type: 'string',
-          description: 'Word 文件路径（可选，不提供则使用当前打开的文档）',
+          description: 'Word 文件路径（可选）',
         },
         outputPath: {
           type: 'string',
@@ -1065,27 +1239,44 @@ export const wordTools = [
       },
       required: [],
     },
-    handler: async ({ filepath, outputPath }: WordToolArgs) => {
+    handler: async ({ filepath, outputPath, _toolCallId }: WordToolArgs) => {
       try {
         const targetPath = filepath || currentDocPath;
         if (!targetPath) {
           return { success: false, error: '请提供文件路径或先打开文档' };
         }
 
-        const { content, structure } = await readWordDocument(targetPath);
+        const { content, structure } = await readWordDocument(targetPath, _toolCallId);
         const htmlContent = convertToHtml(content, structure);
 
+        // 对 HTML 应用截断
+        const truncationResult = await outputTruncator.truncate(
+          htmlContent,
+          _toolCallId || randomUUID(),
+          'export_as_html'
+        );
+
         if (outputPath) {
-          const workspacePath = process.cwd();
-          const fullOutputPath = path.join(workspacePath, outputPath);
+          const workspacePath = getWorkspacePath();
+          if (!workspacePath) {
+            return { success: false, error: '工作空间未设置' };
+          }
+
+          const fullOutputPath = path.resolve(workspacePath, outputPath);
+
+          // 确保父目录存在
+          const parentDir = path.dirname(fullOutputPath);
+          await mkdir(parentDir, { recursive: true });
+
           await writeFile(fullOutputPath, htmlContent);
         }
 
         return {
           success: true,
-          html: htmlContent,
+          html: truncationResult.displayContent,
           outputPath,
           message: '文档已转换为 HTML',
+          ...truncationResult.metadata,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -1095,17 +1286,17 @@ export const wordTools = [
 
   {
     name: 'modify_header_footer_distance',
-    description: '修改页眉页脚距离和页面边距（单位：缇，1英寸=1440缇）',
+    description: '调整页眉页脚位置和页边距（单位：缇）',
     parameters: {
       type: 'object' as const,
       properties: {
         headerDistance: {
           type: 'number',
-          description: '页眉距离页面的距离（缇）',
+          description: '页眉距离（缇）',
         },
         footerDistance: {
           type: 'number',
-          description: '页脚距离页面的距离（缇）',
+          description: '页脚距离（缇）',
         },
         margin: {
           type: 'object',
@@ -1232,7 +1423,7 @@ export const wordTools = [
       properties: {
         footerText: {
           type: 'string',
-          description: '页脚文本内容（支持 {PAGE} 表示页码，{NUMPAGES} 表示总页数）',
+          description: '页脚文本内容（支持{PAGE}页码）',
         },
         footerType: {
           type: 'string',
@@ -1367,13 +1558,13 @@ export const wordTools = [
 
   {
     name: 'add_footer_text',
-    description: '添加或更新页脚文本（支持页码，自动创建页脚）',
+    description: '添加/编辑页脚（支持{PAGE}页码，自动创建）',
     parameters: {
       type: 'object' as const,
       properties: {
         footerText: {
           type: 'string',
-          description: '页脚文本内容（支持 {PAGE} 表示页码，{NUMPAGES} 表示总页数）',
+          description: '页脚文本内容（支持{PAGE}页码）',
         },
         footerType: {
           type: 'string',
@@ -1567,9 +1758,13 @@ export const wordTools = [
   },
 ];
 
-async function readWordDocument(filepath: string) {
-  const workspacePath = process.cwd();
-  const fullPath = path.join(workspacePath, filepath);
+async function readWordDocument(filepath: string, toolCallId?: string) {
+  const workspacePath = getWorkspacePath();
+  if (!workspacePath) {
+    throw new Error('工作空间未设置');
+  }
+
+  const fullPath = path.resolve(workspacePath, filepath);
   const content = await readFile(fullPath);
   const zip = new PizZip(content);
 
@@ -1581,7 +1776,47 @@ async function readWordDocument(filepath: string) {
   const textContent = doc.getFullText();
   const structure = analyzeDocumentStructure(zip);
 
-  return { content: textContent, structure };
+  // 应用截断
+  const truncationResult = await outputTruncator.truncate(
+    textContent,
+    toolCallId || randomUUID(),
+    'read_word'
+  );
+
+  return {
+    content: truncationResult.displayContent,
+    structure,
+    metadata: truncationResult.metadata,
+  };
+}
+
+/**
+ * 自动保存当前打开的文档
+ * 所有编辑操作后自动调用此函数保存
+ */
+async function saveCurrentDoc(): Promise<{ success: boolean; path?: string; error?: string }> {
+  if (!currentDoc || !currentDocPath) {
+    return { success: false, error: '没有打开的文档' };
+  }
+
+  try {
+    const buffer = currentDoc.getZip().generate({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+    });
+
+    const workspacePath = getWorkspacePath();
+    if (!workspacePath) {
+      return { success: false, error: '工作空间未设置' };
+    }
+
+    const fullPath = path.resolve(workspacePath, currentDocPath);
+    await writeFile(fullPath, buffer);
+
+    return { success: true, path: currentDocPath };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
 }
 
 function analyzeDocumentStructure(zip: PizZip): DocumentStructure {
@@ -1700,8 +1935,19 @@ function extractParagraphs(doc: Docxtemplater): string[] {
 }
 
 function parseContentToParagraphs(content: string): Paragraph[] {
+  // 检测是否包含HTML标签
+  const hasHtml = /<[a-z][\s\S]*>/i.test(content);
+
+  if (hasHtml) {
+    // 使用富文本转换器
+    const result = htmlToWordConverter.convert(content);
+    // 过滤出 Paragraph 元素
+    return result.elements.filter((e): e is Paragraph => e instanceof Paragraph);
+  }
+
+  // 纯文本处理（原有逻辑）
   const lines = content.split('\n').filter(line => line.trim());
-  return lines.map(line => 
+  return lines.map(line =>
     new Paragraph({
       children: [
         new TextRun({

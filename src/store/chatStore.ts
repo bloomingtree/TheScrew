@@ -19,7 +19,9 @@ interface ChatState {
 
   addMessage: (message: Message) => void;
   updateLastMessage: (content: string) => void;
+  updateLastMessageToolCalls: (toolCalls: ToolCall[]) => void;
   deleteMessage: (index: number) => void;
+  setMessages: (messages: Message[]) => void;
   setStreaming: (isStreaming: boolean) => void;
   clearMessages: () => void;
   setConversationId: (id: string) => void;
@@ -57,9 +59,28 @@ export const useChatStore = create<ChatState>((set) => ({
     return { messages: updated };
   }),
 
+  updateLastMessageToolCalls: (toolCalls) => set((state) => {
+    if (state.messages.length === 0) return state;
+
+    const updated = [...state.messages];
+    const lastIndex = updated.length - 1;
+
+    // 确保最后一条消息是 assistant 角色
+    if (updated[lastIndex].role === 'assistant') {
+      updated[lastIndex] = {
+        ...updated[lastIndex],
+        toolCalls,
+      };
+    }
+
+    return { messages: updated };
+  }),
+
   deleteMessage: (index) => set((state) => ({
     messages: state.messages.filter((_, i) => i !== index),
   })),
+
+  setMessages: (messages) => set({ messages }),
 
   setStreaming: (isStreaming) => set({ isStreaming }),
 
