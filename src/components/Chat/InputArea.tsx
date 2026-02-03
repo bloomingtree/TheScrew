@@ -62,6 +62,8 @@ addMessage(userMessage);
     setStreaming(true);
 
     if (currentConversationId && messages.length === 0) {
+      // await generateTitle(currentConversationId, userInput);
+      // 不阻塞发送，异步生成标题
       generateTitle(currentConversationId, userInput);
     }
 

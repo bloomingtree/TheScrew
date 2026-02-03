@@ -7,7 +7,7 @@ import InputArea from './InputArea';
 import WorkspaceSelector from '../Workspace/WorkspaceSelector';
 
 const ChatArea: React.FC = () => {
-  const { currentConversationId, createConversation, conversations, updateConversationMessages } = useConversationStore();
+  const { currentConversationId, createConversation, updateConversationMessages } = useConversationStore();
   const { setMessages, clearMessages, messages } = useChatStore();
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);
@@ -90,8 +90,8 @@ const ChatArea: React.FC = () => {
     }
   };
 
-  const handleNewChat = () => {
-    createConversation();
+  const handleNewChat = async () => {
+    await createConversation();
   };
 
   return (

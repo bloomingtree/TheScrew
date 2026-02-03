@@ -10,6 +10,7 @@ const electronAPI = {
     select: () => ipcRenderer.invoke('workspace:select'),
     getPath: () => ipcRenderer.invoke('workspace:get_path'),
     setPath: (path: string) => ipcRenderer.invoke('workspace:set_path', path),
+    listFiles: () => ipcRenderer.invoke('workspace:list_files'),
   },
   config: {
     get: () => ipcRenderer.invoke('config:get'),
@@ -34,6 +35,29 @@ const electronAPI = {
     getAssistant: (id: string) => ipcRenderer.invoke('template:getAssistant', id),
     getByCategory: (category: string) => ipcRenderer.invoke('template:getByCategory', category),
     getByType: (type: string) => ipcRenderer.invoke('template:getByType', type),
+  },
+  word: {
+    preview: (filepath: string) => ipcRenderer.invoke('word:preview', filepath),
+    parseDocument: (filepath: string) => ipcRenderer.invoke('word:parseDocument', filepath),
+    edit: (filepath: string, location: any, newContent: string) => ipcRenderer.invoke('word:edit', filepath, location, newContent),
+  },
+  conversation: {
+    getAll: () => ipcRenderer.invoke('conversation:getAll'),
+    getById: (id: string) => ipcRenderer.invoke('conversation:getById', id),
+    create: (conversation: any) => ipcRenderer.invoke('conversation:create', conversation),
+    updateTitle: (id: string, title: string) => ipcRenderer.invoke('conversation:updateTitle', id, title),
+    touch: (id: string) => ipcRenderer.invoke('conversation:touch', id),
+    delete: (id: string) => ipcRenderer.invoke('conversation:delete', id),
+    search: (query: string) => ipcRenderer.invoke('conversation:search', query),
+    getStats: () => ipcRenderer.invoke('conversation:getStats'),
+    export: () => ipcRenderer.invoke('conversation:export'),
+    clear: () => ipcRenderer.invoke('conversation:clear'),
+  },
+  message: {
+    getByConversationId: (conversationId: string) => ipcRenderer.invoke('message:getByConversationId', conversationId),
+    add: (message: any) => ipcRenderer.invoke('message:add', message),
+    addBatch: (messages: any[]) => ipcRenderer.invoke('message:addBatch', messages),
+    delete: (id: string) => ipcRenderer.invoke('message:delete', id),
   },
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   onChatChunk: (callback: (chunk: string) => void) => {

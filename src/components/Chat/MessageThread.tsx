@@ -8,9 +8,10 @@ import { useChatStore } from '../../store/chatStore';
 interface MessageThreadProps {
   thread: MessageThreadType;
   messageIndexStart: number;
+  prevThread?: MessageThreadType | null;
 }
 
-const MessageThread: React.FC<MessageThreadProps> = ({ thread, messageIndexStart }) => {
+const MessageThread: React.FC<MessageThreadProps> = ({ thread, messageIndexStart, prevThread }) => {
   const { toolResults } = useChatStore();
 
   // 获取消息在线程中的实际索引
@@ -37,16 +38,23 @@ const MessageThread: React.FC<MessageThreadProps> = ({ thread, messageIndexStart
     return hasError ? 'error' : 'completed';
   };
 
+  // 判断是否显示用户消息的时间戳
+  // 规则：如果前一个线程有最终回答（AI消息），或者这是第一个线程，则显示时间戳
+  const showUserTimestamp = !prevThread || !!prevThread.finalMessage;
+
+  // 判断是否显示最终回答的时间戳（始终显示）
+  const showFinalTimestamp = true;
+
+  // 判断是否显示思考消息的时间戳（始终显示）
+  const showThinkingTimestamp = true;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: "easeOut" }}
-      className="relative pl-6 py-4"
+      className="py-3"
     >
-      {/* 左侧垂直引导线 */}
-      <div className="absolute left-0 top-2 bottom-2 w-[2px] bg-[#E0E0E0]" />
-
       {/* 消息卡片容器 */}
       <div className="space-y-3">
         {/* 用户消息 */}
@@ -55,6 +63,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({ thread, messageIndexStart
           kind="user"
           index={getMessageIndex()}
           threadId={thread.id}
+          showTimestamp={showUserTimestamp}
         />
 
         {/* 助手思考消息 */}
@@ -64,6 +73,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({ thread, messageIndexStart
             kind="thinking"
             index={getMessageIndex()}
             threadId={thread.id}
+            showTimestamp={showThinkingTimestamp}
           />
         )}
 
@@ -83,6 +93,8 @@ const MessageThread: React.FC<MessageThreadProps> = ({ thread, messageIndexStart
             kind="result"
             index={getMessageIndex()}
             threadId={thread.id}
+            toolResults={getThreadToolResults()}
+            showTimestamp={showFinalTimestamp}
           />
         )}
       </div>

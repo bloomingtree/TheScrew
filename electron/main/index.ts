@@ -6,13 +6,17 @@ import { registerConfigHandlers } from './ipc/config';
 import { registerFileHandlers } from './ipc/file';
 import { registerWorkspaceHandlers } from './ipc/workspace';
 import { registerTemplateHandlers } from './ipc/template';
+import { registerWordHandlers } from './ipc/word';
+import { registerConversationHandlers } from './ipc/conversation';
 import { setWorkspacePath } from './tools/FileTools';
+import { initDatabase } from './db';
 
 const store = new Store();
 
 let mainWindow: BrowserWindow | null = null;
 function createWindow() {
 mainWindow = new BrowserWindow({
+  title: '螺丝钉',
   width: 1200,
   height: 800,
   minWidth: 800,
@@ -38,12 +42,17 @@ mainWindow = new BrowserWindow({
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // 初始化数据库
+  await initDatabase();
+
   registerChatHandlers(store);
   registerConfigHandlers(store);
   registerFileHandlers();
   registerWorkspaceHandlers(store);
   registerTemplateHandlers();
+  registerWordHandlers();
+  registerConversationHandlers();
   createWindow();
 
   const savedWorkspacePath = store.get('workspacePath') as string | undefined;

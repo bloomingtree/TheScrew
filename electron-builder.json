@@ -1,6 +1,6 @@
 {
-  "appId": "com.zero-employee.app",
-  "productName": "0号员工",
+  "appId": "com.luosiding.app",
+  "productName": "螺丝钉",
   "directories": {
     "output": "release",
     "buildResources": "build"

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle, Clock, Eye } from 'lucide-react';
 import { ToolCall, ToolResult } from '../../types';
 import { getToolNameCN } from '../../types/thread';
+import { WordPreviewDialog } from '../WordPreview';
 
 interface ToolCallSimpleProps {
   toolCalls: ToolCall[];
@@ -13,9 +14,16 @@ interface ToolCallSimpleProps {
 const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
   toolCalls,
   toolResults = [],
-  status,
 }) => {
   const [expandedCalls, setExpandedCalls] = useState<Set<string>>(new Set());
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // 检测是否是Word文档
+  const isWordFile = (filepath?: string): boolean => {
+    if (!filepath) return false;
+    return filepath.toLowerCase().endsWith('.docx');
+  };
 
   const toggleExpand = (toolCallId: string) => {
     setExpandedCalls(prev => {
@@ -29,13 +37,6 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
     });
   };
 
-  const formatDuration = (startTime: number, endTime?: number) => {
-    if (!endTime) return '';
-    const duration = endTime - startTime;
-    if (duration < 1000) return `${duration}ms`;
-    return `${(duration / 1000).toFixed(2)}s`;
-  };
-
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString('zh-CN', {
       hour: '2-digit',
@@ -44,7 +45,20 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
     });
   };
 
+  // 打开Word预览
+  const handleOpenPreview = (filepath: string) => {
+    setPreviewFile(filepath);
+    setIsPreviewOpen(true);
+  };
+
+  // 关闭Word预览
+  const handleClosePreview = () => {
+    setIsPreviewOpen(false);
+    setPreviewFile(null);
+  };
+
   return (
+    <>
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
@@ -106,7 +120,7 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
               {result && (
                 <div className="flex items-center gap-1 text-xs text-[#9CA3AF] flex-shrink-0">
                   <Clock size={12} />
-                  <span>{formatTime(result.timestamp || Date.now())}</span>
+                  <span>{formatTime(Date.now())}</span>
                 </div>
               )}
 
@@ -138,8 +152,20 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                     {/* 截断信息提示 */}
                     {result.truncated && (
                       <div className="p-2 bg-amber-50 border border-amber-200 rounded text-sm">
-                        <div className="font-medium text-amber-800 mb-1 text-xs">
-                          输出过大 ({result.sizeFormatted})
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="font-medium text-amber-800 text-xs">
+                            输出过大 ({result.sizeFormatted})
+                          </div>
+                          {/* Word文档预览按钮 */}
+                          {isWordFile(result.savedPath) && (
+                            <button
+                              onClick={() => result.savedPath && handleOpenPreview(result.savedPath)}
+                              className="flex items-center gap-1 px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs transition-colors"
+                            >
+                              <Eye size={12} />
+                              预览编辑
+                            </button>
+                          )}
                         </div>
                         <div className="text-amber-700 text-xs break-all">
                           完整输出已保存至: <code className="bg-amber-100 px-1 rounded">{result.savedPath}</code>
@@ -188,7 +214,17 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
         );
       })}
     </motion.div>
-  );
+
+    {/* Word预览对话框 */}
+    {previewFile && (
+      <WordPreviewDialog
+        isOpen={isPreviewOpen}
+        filepath={previewFile}
+        onClose={handleClosePreview}
+      />
+    )}
+  </>
+);
 };
 
 export default ToolCallSimple;

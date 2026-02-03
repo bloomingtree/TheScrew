@@ -18,7 +18,7 @@ const MessageList: React.FC = () => {
   return (
     <div className="h-full overflow-y-auto py-6 px-4">
       {/* 居中布局容器 */}
-      <div className="max-w-[900px] mx-auto space-y-6">
+      <div className="max-w-[1600px] mx-auto space-y-6">
         {messages.length === 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -32,13 +32,18 @@ const MessageList: React.FC = () => {
         )}
 
         {/* 渲染消息线程 */}
-        {threads.map((thread, index) => (
-          <MessageThread
-            key={thread.id}
-            thread={thread}
-            messageIndexStart={index * 10} // 简化处理，实际需要追踪消息索引
-          />
-        ))}
+        {threads.map((thread, index) => {
+          // 获取前一个线程的最后一条消息类型，用于判断是否显示时间戳
+          const prevThread = index > 0 ? threads[index - 1] : null;
+          return (
+            <MessageThread
+              key={thread.id}
+              thread={thread}
+              messageIndexStart={index * 10}
+              prevThread={prevThread}
+            />
+          );
+        })}
 
         {/* 流式响应加载指示器 */}
         {isStreaming && (

@@ -5,7 +5,13 @@
       "Bash(npm run build:*)",
       "Bash(npx tsc:*)",
       "Bash(electron:*)",
-      "Bash(npm run type-check:*)"
+      "Bash(npm run type-check:*)",
+      "Bash(git commit:*)",
+      "Bash(npm install:*)",
+      "Bash(npx electron-rebuild:*)",
+      "Bash(npx node-pre-gyp install:*)",
+      "Bash(npm run install:*)",
+      "Bash(npx --yes prebuild-install:*)"
     ]
   }
 }

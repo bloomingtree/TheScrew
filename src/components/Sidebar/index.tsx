@@ -32,10 +32,10 @@ const Sidebar: React.FC<SidebarProps> = () => {
     selectConversation(id);
   };
 
-  const handleDeleteConversation = (e: React.MouseEvent, id: string) => {
+  const handleDeleteConversation = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (window.confirm('确定要删除这个对话吗？')) {
-      deleteConversation(id);
+      await deleteConversation(id);
     }
   };
 

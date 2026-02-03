@@ -26,3 +26,6 @@ release
 # Build
 build/*.exe
 build/*.dll
+
+.claude
+clawdbot-main

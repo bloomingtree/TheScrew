@@ -8,6 +8,7 @@ interface ElectronAPI {
     select: () => Promise<{ path: string | null; error?: string }>;
     getPath: () => Promise<{ path: string | null }>;
     setPath: (path: string) => Promise<{ success: boolean; path: string }>;
+    listFiles: () => Promise<{ success: boolean; files?: Array<{ name: string; path: string; type: string; size?: number }>; error?: string }>;
   };
   config: {
     get: () => Promise<any>;
@@ -32,6 +33,47 @@ interface ElectronAPI {
     getAssistant: (id: string) => Promise<{ success: boolean; assistant?: any; error?: string }>;
     getByCategory: (category: string) => Promise<{ success: boolean; templates?: any[]; error?: string }>;
     getByType: (type: string) => Promise<{ success: boolean; templates?: any[]; error?: string }>;
+  };
+  word: {
+    preview: (filepath: string) => Promise<{
+      filepath: string;
+      structure: {
+        paragraphs: Array<{ index: number; text: string; length: number }>;
+        tables: Array<{
+          index: number;
+          rows: Array<{
+            index: number;
+            cells: Array<{ text: string }>;
+          }>;
+        }>;
+      };
+      html: string;
+      metadata: {
+        path: string;
+        size?: number;
+        modified?: string;
+      };
+    }>;
+    parseDocument: (filepath: string) => Promise<{ success: boolean; data?: any; error?: string }>;
+    edit: (filepath: string, location: any, newContent: string) => Promise<{ success: boolean }>;
+  };
+  conversation: {
+    getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>;
+    getById: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>;
+    create: (conversation: any) => Promise<{ success: boolean; data?: any; error?: string }>;
+    updateTitle: (id: string, title: string) => Promise<{ success: boolean; error?: string }>;
+    touch: (id: string) => Promise<{ success: boolean; error?: string }>;
+    delete: (id: string) => Promise<{ success: boolean; error?: string }>;
+    search: (query: string) => Promise<{ success: boolean; data?: any[]; error?: string }>;
+    getStats: () => Promise<{ success: boolean; data?: any; error?: string }>;
+    export: () => Promise<{ success: boolean; data?: string; error?: string }>;
+    clear: () => Promise<{ success: boolean; error?: string }>;
+  };
+  message: {
+    getByConversationId: (conversationId: string) => Promise<{ success: boolean; data?: any[]; error?: string }>;
+    add: (message: any) => Promise<{ success: boolean; data?: any; error?: string }>;
+    addBatch: (messages: any[]) => Promise<{ success: boolean; error?: string }>;
+    delete: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
   getAppVersion: () => Promise<string>;
   onChatChunk: (callback: (chunk: string) => void) => () => void;
