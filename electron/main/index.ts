@@ -8,6 +8,7 @@ import { registerWorkspaceHandlers } from './ipc/workspace';
 import { registerTemplateHandlers } from './ipc/template';
 import { registerWordHandlers } from './ipc/word';
 import { registerConversationHandlers } from './ipc/conversation';
+import { registerToolsIpc } from './ipc/tools';
 import { setWorkspacePath } from './tools/FileTools';
 import { initDatabase } from './db';
 
@@ -53,6 +54,7 @@ app.whenReady().then(async () => {
   registerTemplateHandlers();
   registerWordHandlers();
   registerConversationHandlers();
+  registerToolsIpc();
   createWindow();
 
   const savedWorkspacePath = store.get('workspacePath') as string | undefined;

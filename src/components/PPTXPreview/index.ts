@@ -1,0 +1,1 @@
+export { PPTXPreviewDialog } from './PPTXPreviewDialog';

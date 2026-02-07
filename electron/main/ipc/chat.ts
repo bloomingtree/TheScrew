@@ -1,10 +1,16 @@
 import { ipcMain } from 'electron';
 import { OpenAIClient } from '../api/openai';
 import Store from 'electron-store';
-import { toolManager, ToolGroup, ToolManager } from '../tools/ToolManager';
+import { toolManager, ToolGroup, ToolManager, TOOL_SETS_META } from '../tools/ToolManager';
 import { fileTools } from '../tools/FileTools';
+import { baseTools } from '../tools/BaseTools';
 import { wordTools } from '../tools/WordTools';
 import { templateTools } from '../tools/TemplateTools';
+// import ooxmlToolGroup from '../tools/OoxmlTools'; // 已卸载 - 功能已整合到 Office Skills
+import pptxToolGroup from '../tools/PPTXTools';
+import batchToolGroup from '../tools/BatchTools';
+import xlsxToolGroup from '../tools/ExcelTools';
+import pdfToolGroup from '../tools/PDFTools';
 
 let currentClient: OpenAIClient | null = null;
 let currentAbortController: AbortController | null = null;
@@ -54,10 +60,10 @@ let currentAbortController: AbortController | null = null;
   }
 
 export function registerChatHandlers(store: Store) {
-  // 注册基础工具组
+  // 注册基础工具组（包含 activate_toolset 工具）
   const baseToolGroup: ToolGroup = {
     name: 'base',
-    tools: fileTools,
+    tools: [...fileTools, ...baseTools],
     keywords: [],
     triggers: {
       keywords: [],
@@ -67,7 +73,7 @@ export function registerChatHandlers(store: Store) {
   };
   toolManager.registerToolGroup(baseToolGroup);
 
-  // 注册 Word 工具组
+  // 注册 Word 工具组 - 使用 Office Skills 增强
   const wordToolGroup: ToolGroup = {
     name: 'word',
     tools: wordTools,
@@ -92,6 +98,24 @@ export function registerChatHandlers(store: Store) {
     },
   };
   toolManager.registerToolGroup(templateToolGroup);
+
+  // 注册 OOXML 验证工具组 - 已卸载，功能已整合到 Office Skills
+  // toolManager.registerToolGroup(ooxmlToolGroup);
+
+  // 注册 PPTX 工具组
+  toolManager.registerToolGroup(pptxToolGroup);
+
+  // 注册 Excel 工具组
+  toolManager.registerToolGroup(xlsxToolGroup);
+
+  // 注册 PDF 工具组
+  toolManager.registerToolGroup(pdfToolGroup);
+
+  // 注册批量操作工具组
+  toolManager.registerToolGroup(batchToolGroup);
+
+  // 初始化 Office Skills
+  toolManager.initialize().catch(console.error);
 
   ipcMain.handle('chat:generateTitle', async (_event, message: string) => {
     try {
@@ -176,16 +200,33 @@ export function registerChatHandlers(store: Store) {
         toolManager.resetForConversation(conversationId);
       }
 
-      // 预处理：检测用户消息中的关键词，预加载相关工具组
-      const lastUserMessage = messages[messages.length - 1];
-      if (lastUserMessage && lastUserMessage.content) {
-        const detectedGroups = toolManager.detectRequiredGroups(lastUserMessage.content);
-        for (const groupName of detectedGroups) {
-          if (conversationId) {
-            toolManager.activateGroup(groupName, conversationId);
-          }
-        }
-      }
+      // 获取工具集概览（用于系统消息）
+      const toolSetsOverview = conversationId
+        ? toolManager.getToolSetsOverview(conversationId)
+        : TOOL_SETS_META;
+
+      // 获取当前激活的工具组
+      const activeGroups = conversationId
+        ? toolManager.getActiveGroups(conversationId)
+        : ['base'];
+
+      // 构建系统消息，包含工具集概览
+      const toolSystemMessage = {
+        role: 'system' as const,
+        content: `## 可用工具集
+
+当前已激活的工具：${activeGroups.join(', ') || '仅基础工具'}
+
+可用工具集概览：
+${toolSetsOverview.map(ts => `- **${ts.name}**: ${ts.description}`).join('\n')}
+
+使用工具：如需使用未激活的工具集，请调用 activate_toolset 工具。
+注意：激活工具集会增加上下文大小，请仅激活需要的工具集。
+`
+      };
+
+      // 将工具系统消息添加到消息开头
+      messages = [toolSystemMessage, ...messages];
 
       // 获取当前激活的工具定义
       let tools = conversationId
@@ -226,14 +267,50 @@ export function registerChatHandlers(store: Store) {
                   });
                 }
 
-                const results = await toolManager.executeToolCalls(parsed.toolCalls);
+                const results = await toolManager.executeToolCalls(parsed.toolCalls, conversationId);
 
-                // 检测是否需要加载新的工具组
+                // 检测是否需要加载新的工具组（包括 activate_toolset 的处理）
+                let toolsetActivated = false;
                 for (let i = 0; i < results.length; i++) {
                   const result = results[i];
                   const endTime = Date.now();
                   const startTime = startTimes.get(result.toolCallId) || endTime;
                   const duration = endTime - startTime;
+
+                  // 处理 activate_toolset 工具调用
+                  if (result.name === 'activate_toolset' && result.success && conversationId) {
+                    let args: any;
+                    try {
+                      args = JSON.parse(parsed.toolCalls[i].function.arguments);
+                    } catch {
+                      args = {};
+                    }
+
+                    const activateResult = await toolManager.activateToolSet(conversationId, args.toolset);
+                    if (activateResult.success) {
+                      toolsetActivated = true;
+                      // 更新结果以包含激活的工具信息
+                      results[i].result = activateResult;
+
+                      event.sender.send('chat:tools_loaded', {
+                        group: args.toolset,
+                        reason: 'Explicitly activated by model',
+                        toolCount: activateResult.tools?.length || 0,
+                      });
+                    }
+                  }
+
+                  // 动态工具加载：检测是否需要加载 Word 工具
+                  if (conversationId && toolManager.shouldLoadWordTools(result.name, result)) {
+                    toolManager.activateGroup('word', conversationId);
+                    toolsetActivated = true;
+
+                    event.sender.send('chat:tools_loaded', {
+                      group: 'word',
+                      reason: `Detected Word file access via ${result.name}`,
+                      toolCount: 0,  // Will be updated after tools refresh
+                    });
+                  }
 
                   event.sender.send('chat:tool_complete', {
                     toolCallId: result.toolCallId,
@@ -241,19 +318,11 @@ export function registerChatHandlers(store: Store) {
                     success: result.success,
                     timestamp: endTime,
                   });
+                }
 
-                  // 动态工具加载：检测是否需要加载 Word 工具
-                  if (conversationId && toolManager.shouldLoadWordTools(result.name, result)) {
-                    toolManager.activateGroup('word', conversationId);
-                    // 更新工具定义，包含新加载的工具组
-                    tools = toolManager.getActiveToolDefinitions(conversationId);
-
-                    event.sender.send('chat:tools_loaded', {
-                      group: 'word',
-                      reason: `Detected Word file access via ${result.name}`,
-                      toolCount: tools.length,
-                    });
-                  }
+                // 如果有工具集被激活，更新工具定义
+                if (toolsetActivated && conversationId) {
+                  tools = toolManager.getActiveToolDefinitions(conversationId);
                 }
 
                 event.sender.send('chat:tool_results', results);
@@ -330,11 +399,43 @@ export function registerChatHandlers(store: Store) {
       currentAbortController.abort();
       currentAbortController = null;
     }
-    
+
     if (currentClient) {
       currentClient = null;
     }
 
     return { success: true };
+  });
+
+  // ==================== Agent 管理 ====================
+
+  // 设置对话的 Agent
+  ipcMain.handle('chat:setAgent', (_event, conversationId: string, agentName: string) => {
+    toolManager.setAgent(conversationId, agentName);
+    return { success: true, agentName };
+  });
+
+  // 获取对话的当前 Agent
+  ipcMain.handle('chat:getAgent', (_event, conversationId: string) => {
+    const agentName = toolManager.getAgent(conversationId);
+    return { success: true, agentName };
+  });
+
+  // 获取所有可用的 Agents
+  ipcMain.handle('chat:getAllAgents', () => {
+    const agents = toolManager.getAllAgents();
+    return { success: true, agents };
+  });
+
+  // 获取 Agent 的系统提示词
+  ipcMain.handle('chat:getAgentSystemPrompt', (_event, conversationId: string) => {
+    const prompt = toolManager.getAgentSystemPrompt(conversationId);
+    return { success: true, prompt };
+  });
+
+  // 获取 Agent 的模型配置
+  ipcMain.handle('chat:getAgentModel', (_event, conversationId: string) => {
+    const model = toolManager.getAgentModel(conversationId);
+    return { success: true, model };
   });
 }

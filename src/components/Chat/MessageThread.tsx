@@ -56,7 +56,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({ thread, messageIndexStart
       className="py-3"
     >
       {/* 消息卡片容器 */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         {/* 用户消息 */}
         <ThreadCard
           message={thread.userMessage}

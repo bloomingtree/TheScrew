@@ -205,37 +205,17 @@ async function getWordStructure(filepath: string) {
 
 /**
  * 编辑Word文档内容
+ * 注意：此功能已迁移到 Office Skills
+ * 请使用 ToolManager 中的 Office 工具进行编辑
  */
 async function editWordContent(
   filepath: string,
   location: EditLocation,
   newContent: string
 ): Promise<void> {
-  // 这里需要调用WordTools中的编辑功能
-  // 为了简化，我们暂时通过动态导入实现
-  const { wordTools } = await import('../tools/WordTools');
-
-  // 先打开文档
-  const openTool = wordTools.find(t => t.name === 'open_word');
-  if (!openTool) throw new Error('open_word 工具未找到');
-
-  await openTool.handler({ filepath });
-
-  // 根据位置类型调用相应的编辑工具
-  if (location.type === 'paragraph') {
-    const editTool = wordTools.find(t => t.name === 'edit_paragraph');
-    if (!editTool) throw new Error('edit_paragraph 工具未找到');
-    await editTool.handler({ paragraphIndex: location.index, newText: newContent });
-  } else if (location.type === 'table') {
-    const editTool = wordTools.find(t => t.name === 'edit_table');
-    if (!editTool) throw new Error('edit_table 工具未找到');
-    await editTool.handler({
-      tableIndex: location.tableIndex,
-      rowIndex: location.rowIndex,
-      columnIndex: location.columnIndex,
-      newText: newContent
-    });
-  }
+  // WordTools 已卸载，编辑功能由 Office Skills 接管
+  // TODO: 实现基于 Office Skills 的编辑功能
+  throw new Error('Word 编辑功能已迁移到 Office Skills，请使用 ToolManager 中的相关工具');
 }
 
 /**
@@ -310,7 +290,7 @@ export function registerWordHandlers() {
       await editWordContent(filepath, location, newContent);
       return { success: true };
     } catch (error: any) {
-      throw new Error(`编辑失败: ${error.message}`);
+      return { success: false, error: error.message };
     }
   });
 }

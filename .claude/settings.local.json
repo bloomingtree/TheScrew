@@ -11,7 +11,16 @@
       "Bash(npx electron-rebuild:*)",
       "Bash(npx node-pre-gyp install:*)",
       "Bash(npm run install:*)",
-      "Bash(npx --yes prebuild-install:*)"
+      "Bash(npx --yes prebuild-install:*)",
+      "Bash(npm run)",
+      "Bash(pip install:*)",
+      "Bash(where:*)",
+      "Bash(python:*)",
+      "Bash(npm info:*)",
+      "Bash(dir:*)",
+      "Bash(if exist:*)",
+      "Bash(move:*)",
+      "Bash(git push:*)"
     ]
   }
 }

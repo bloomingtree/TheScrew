@@ -5,6 +5,7 @@ import { useChatStore } from '../../store/chatStore';
 import MessageList from './MessageList';
 import InputArea from './InputArea';
 import WorkspaceSelector from '../Workspace/WorkspaceSelector';
+import AgentSelector from './AgentSelector';
 
 const ChatArea: React.FC = () => {
   const { currentConversationId, createConversation, updateConversationMessages } = useConversationStore();
@@ -107,6 +108,12 @@ const ChatArea: React.FC = () => {
               {workspacePath ? workspacePath.split(/[\\/]/).pop() : '选择工作空间'}
             </span>
           </button>
+          <AgentSelector
+            conversationId={currentConversationId}
+            onAgentChange={(agentName) => {
+              console.log('[ChatArea] Agent changed to:', agentName);
+            }}
+          />
           <button
             onClick={handleNewChat}
             className="flex items-center gap-2 px-4 py-2 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151]"

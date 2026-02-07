@@ -3,12 +3,47 @@ interface ElectronAPI {
     stream: (messages: any[], conversationId?: string) => Promise<any>;
     stop: () => Promise<void>;
     generateTitle: (message: string) => Promise<{ success: boolean; title?: string; error?: string }>;
+    // Agent 管理
+    setAgent: (conversationId: string, agentName: string) => Promise<{ success: boolean; agentName?: string }>;
+    getAgent: (conversationId: string) => Promise<{ success: boolean; agentName?: string | null }>;
+    getAllAgents: () => Promise<{ success: boolean; agents?: Array<{ name: string; description: string; model?: string }> }>;
+    getAgentSystemPrompt: (conversationId: string) => Promise<{ success: boolean; prompt?: string }>;
+    getAgentModel: (conversationId: string) => Promise<{ success: boolean; model?: string }>;
   };
   workspace: {
     select: () => Promise<{ path: string | null; error?: string }>;
     getPath: () => Promise<{ path: string | null }>;
     setPath: (path: string) => Promise<{ success: boolean; path: string }>;
     listFiles: () => Promise<{ success: boolean; files?: Array<{ name: string; path: string; type: string; size?: number }>; error?: string }>;
+  };
+  tools: {
+    getToolSetsOverview: (conversationId: string) => Promise<{
+      success: boolean;
+      toolSets?: Array<{
+        name: string;
+        description: string;
+        capabilities: string[];
+        keywords: string[];
+        estimatedTokens: number;
+      }>;
+      error?: string;
+    }>;
+    activateToolSet: (conversationId: string, toolSetName: string) => Promise<{
+      success: boolean;
+      tools?: any[];
+      message?: string;
+      error?: string;
+    }>;
+    estimateActiveTokens: (conversationId: string) => Promise<{
+      success: boolean;
+      tokens?: number;
+      error?: string;
+    }>;
+    getActiveGroups: (conversationId: string) => Promise<{
+      success: boolean;
+      groups?: string[];
+      error?: string;
+    }>;
   };
   config: {
     get: () => Promise<any>;

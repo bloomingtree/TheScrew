@@ -28,4 +28,5 @@ build/*.exe
 build/*.dll
 
 .claude
-clawdbot-main
+
+learn-code

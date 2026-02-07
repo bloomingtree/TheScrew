@@ -302,6 +302,69 @@ export const fileTools: Tool[] = [
       }
     },
   },
+
+  // ==================== 工具集激活 ====================
+
+  {
+    name: 'activate_toolset',
+    description: `
+激活指定的工具集以获取详细的工具定义。
+
+可用工具集：
+- word: Word 文档处理：创建、编辑、修订跟踪、批注、验证
+- pptx: PowerPoint 演示文稿：创建、重排幻灯片、批量替换、缩略图
+- xlsx: Excel 表格处理：读取、编辑、公式计算、样式处理
+- pdf: PDF 操作：合并、拆分、表单填充、表格提取
+- batch: 批量处理：批量替换、批量创建、批量操作
+- template: 模板系统：Word 模板、提示词模板、助手工具模板
+- ooxml: OOXML 验证：验证和修复 Office 文档结构
+
+使用场景：
+- 需要处理 Word 文档时，激活 "word" 工具集
+- 需要编辑 PPT 时，激活 "pptx" 工具集
+- 需要批量操作时，激活 "batch" 工具集
+- 需要处理 Excel 表格时，激活 "xlsx" 工具集
+- 需要操作 PDF 时，激活 "pdf" 工具集
+
+注意：激活工具集会增加上下文大小，请仅激活需要的工具集。
+`.trim(),
+    parameters: {
+      type: 'object',
+      properties: {
+        toolset: {
+          type: 'string',
+          enum: ['word', 'pptx', 'xlsx', 'pdf', 'batch', 'template', 'ooxml'],
+          description: '要激活的工具集名称',
+        },
+      },
+      required: ['toolset'],
+    },
+    handler: async ({ toolset }) => {
+      // 这个工具的 handler 在 chat.ts 中特殊处理
+      // 因为它需要动态更新工具定义列表
+      return {
+        success: true,
+        message: `工具集 "${toolset}" 激活请求已收到，请等待系统确认`,
+      };
+    },
+  },
+
+  {
+    name: 'get_active_toolsets',
+    description: '获取当前已激活的工具集列表',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    handler: async () => {
+      // 这个工具的 handler 在 ToolManager 中处理
+      return {
+        success: true,
+        activeGroups: ['base'],
+        message: '当前仅激活基础工具集，使用 activate_toolset 激活更多工具集',
+      };
+    },
+  },
 ];
 
 async function listFiles(

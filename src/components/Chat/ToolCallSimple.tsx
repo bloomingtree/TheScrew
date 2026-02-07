@@ -63,8 +63,9 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      className="space-y-2"
+      className="flex justify-start items-start"
     >
+      <div className="flex flex-col items-start space-y-2 max-w-[80%]">
       {toolCalls.map((toolCall, index) => {
         const result = toolResults.find(r => r.toolCallId === toolCall.id);
         const isRunning = !result;
@@ -78,7 +79,7 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
-            className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-all"
+            className="bg-white border border-gray-200 rounded-2xl rounded-bl-none shadow-sm overflow-hidden hover:shadow-md transition-all"
           >
             {/* 主信息行 - 始终可见 */}
             <div
@@ -213,6 +214,7 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
           </motion.div>
         );
       })}
+      </div>
     </motion.div>
 
     {/* Word预览对话框 */}
