@@ -9,7 +9,7 @@
  * - Estimate token usage for skills
  */
 
-import { readFile, readdir } from 'fs/promises';
+import { readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { ISkill, ISkillMeta } from './types';
@@ -71,8 +71,18 @@ export class SkillManager {
       for (const category of categories) {
         const categoryPath = join(basePath, category);
 
-        // Skip if not a directory
-        if (!existsSync(categoryPath) || !(await import('fs/promises')).then(fs => fs.stat(categoryPath).then(s => s.isDirectory())).catch(() => false)) {
+        // Skip if not exists
+        if (!existsSync(categoryPath)) {
+          continue;
+        }
+
+        // Check if it's a directory
+        try {
+          const stats = await stat(categoryPath);
+          if (!stats.isDirectory()) {
+            continue;
+          }
+        } catch {
           continue;
         }
 
