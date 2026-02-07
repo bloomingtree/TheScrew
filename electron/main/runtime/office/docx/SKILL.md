@@ -1,6 +1,9 @@
 ---
 name: docx
 description: "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. When Claude needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks"
+mode: on-demand
+estimatedTokens: 2500
+keywords: word,docx,document,.doc,ms word,microsoft word,文档,编辑,修订,批注,页眉,页脚
 ---
 
 # DOCX creation, editing, and analysis

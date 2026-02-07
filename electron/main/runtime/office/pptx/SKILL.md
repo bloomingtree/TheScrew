@@ -1,6 +1,9 @@
 ---
 name: pptx
 description: "Presentation creation, editing, and analysis. When Claude needs to work with presentations (.pptx files) for: (1) Creating new presentations, (2) Modifying or editing content, (3) Working with layouts, (4) Adding comments or speaker notes, or any other presentation tasks"
+mode: on-demand
+estimatedTokens: 2000
+keywords: powerpoint,pptx,ppt,presentation,slides,slide,deck,演示,演示文稿,幻灯片
 ---
 
 # PPTX creation, editing, and analysis

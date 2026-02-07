@@ -37,6 +37,7 @@ export type {
   ILLMConfig,
   ICoreConfig,
   IToolExecutionContext,
+  MemoryEntryType,
 } from './types';
 
 // ============================================================================
@@ -80,6 +81,27 @@ export {
   FallbackTool,
   createFallbackTool,
 } from './adapters';
+
+// ============================================================================
+// Skill Manager
+// ============================================================================
+
+export {
+  SkillManager,
+  getSkillManager,
+  resetSkillManager,
+} from './SkillManager';
+
+// ============================================================================
+// Agent Loop
+// ============================================================================
+
+export {
+  AgentLoop,
+  getAgentLoop,
+  resetAgentLoop,
+} from './AgentLoop';
+export type { AgentLoopConfig } from './AgentLoop';
 
 // ============================================================================
 // Utility Functions
