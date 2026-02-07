@@ -110,6 +110,67 @@ interface ElectronAPI {
     addBatch: (messages: any[]) => Promise<{ success: boolean; error?: string }>;
     delete: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
+  memory: {
+    getLongTerm: () => Promise<{ success: boolean; content?: string; error?: string }>;
+    addLongTerm: (content: string, tags?: string[]) => Promise<{ success: boolean; error?: string }>;
+    getTodayNote: () => Promise<{ success: boolean; content?: string; error?: string }>;
+    addTodayNote: (content: string) => Promise<{ success: boolean; error?: string }>;
+    getDailyNote: (dateString: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+    addDailyNote: (content: string, dateString: string) => Promise<{ success: boolean; error?: string }>;
+    getRecentNotes: (days?: number) => Promise<{ success: boolean; notes?: Record<string, string>; error?: string }>;
+    search: (query: string, options?: {
+      types?: Array<'long_term' | 'daily_note'>;
+      maxDays?: number;
+      maxResults?: number;
+    }) => Promise<{ success: boolean; results?: any[]; error?: string }>;
+    buildContext: () => Promise<{ success: boolean; context?: string; error?: string }>;
+    delete: (type: 'long_term' | 'daily_note', dateString?: string) => Promise<{ success: boolean; error?: string }>;
+    getStats: () => Promise<{ success: boolean; stats?: any; error?: string }>;
+    clearAll: () => Promise<{ success: boolean; error?: string }>;
+  };
+  subagents: {
+    spawn: (
+      task: string,
+      label: string,
+      parentSessionId: string,
+      llmConfig: {
+        baseUrl: string;
+        apiKey: string;
+        model: string;
+        temperature?: number;
+        maxTokens?: number;
+      },
+      options?: {
+        timeout?: number;
+        maxIterations?: number;
+      }
+    ) => Promise<{ success: boolean; taskId?: string; error?: string }>;
+    getStatus: (taskId: string) => Promise<{ success: boolean; task?: any; error?: string }>;
+    getResult: (taskId: string) => Promise<{ success: boolean; result?: any; error?: string }>;
+    getBySession: (parentSessionId: string) => Promise<{ success: boolean; tasks?: any[]; error?: string }>;
+    getRunning: () => Promise<{ success: boolean; tasks?: any[]; error?: string }>;
+    cancel: (taskId: string) => Promise<{ success: boolean; error?: string }>;
+    waitFor: (taskId: string, timeout?: number) => Promise<{ success: boolean; result?: any; error?: string }>;
+    retry: (taskId: string) => Promise<{ success: boolean; newTaskId?: string; error?: string }>;
+    cleanup: (maxAge?: number) => Promise<{ success: boolean; cleaned?: number; error?: string }>;
+    getStats: () => Promise<{ success: boolean; stats?: any; error?: string }>;
+    clearAll: () => Promise<{ success: boolean; error?: string }>;
+  };
+  skills: {
+    initialize: () => Promise<{ success: boolean; error?: string }>;
+    getNames: () => Promise<{ success: boolean; names?: string[]; error?: string }>;
+    getMeta: (name: string) => Promise<{ success: boolean; meta?: any; error?: string }>;
+    getAlways: () => Promise<{ success: boolean; skills?: any[]; error?: string }>;
+    getOnDemand: () => Promise<{ success: boolean; skills?: any[]; error?: string }>;
+    getSummary: () => Promise<{ success: boolean; summary?: string; error?: string }>;
+    load: (name: string) => Promise<{ success: boolean; skill?: any; error?: string }>;
+    detect: (message: string) => Promise<{ success: boolean; required?: string[]; error?: string }>;
+    buildPrompt: () => Promise<{ success: boolean; prompt?: string; error?: string }>;
+    estimateTokens: (additionalSkills?: string[]) => Promise<{ success: boolean; tokens?: number; error?: string }>;
+    has: (name: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>;
+    reload: (name: string) => Promise<{ success: boolean; error?: string }>;
+    getStats: () => Promise<{ success: boolean; stats?: any; error?: string }>;
+  };
   getAppVersion: () => Promise<string>;
   onChatChunk: (callback: (chunk: string) => void) => () => void;
   onToolCalls: (callback: (toolCalls: any[]) => void) => () => void;

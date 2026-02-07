@@ -9,8 +9,14 @@ import { registerTemplateHandlers } from './ipc/template';
 import { registerWordHandlers } from './ipc/word';
 import { registerConversationHandlers } from './ipc/conversation';
 import { registerToolsIpc } from './ipc/tools';
+import { registerMemoryHandlers } from './ipc/memory';
+import { registerSubagentHandlers } from './ipc/subagents';
+import { registerSkillsHandlers } from './ipc/skills';
 import { setWorkspacePath } from './tools/FileTools';
 import { initDatabase } from './db';
+import { getSkillManager, initializeCore } from './core';
+import { getToolRegistry } from './core/ToolRegistry';
+import { getToolManager } from './tools/ToolManager';
 
 const store = new Store();
 
@@ -47,6 +53,29 @@ app.whenReady().then(async () => {
   // 初始化数据库
   await initDatabase();
 
+  // 初始化核心系统
+  await initializeCore();
+
+  // 初始化技能管理器
+  await getSkillManager().initialize();
+
+  // 将现有工具适配到新的 ToolRegistry
+  const toolManager = getToolManager();
+  const existingTools = toolManager.getAllTools();
+  const toolRegistry = getToolRegistry();
+  for (const tool of existingTools) {
+    toolRegistry.register({
+      name: () => tool.name,
+      description: () => tool.description,
+      parameters: () => tool.parameters,
+      execute: async (args) => {
+        const result = await tool.handler(args);
+        return JSON.stringify(result);
+      },
+    });
+  }
+
+  // 注册 IPC 处理器
   registerChatHandlers(store);
   registerConfigHandlers(store);
   registerFileHandlers();
@@ -55,6 +84,10 @@ app.whenReady().then(async () => {
   registerWordHandlers();
   registerConversationHandlers();
   registerToolsIpc();
+  registerMemoryHandlers();
+  registerSubagentHandlers();
+  registerSkillsHandlers();
+
   createWindow();
 
   const savedWorkspacePath = store.get('workspacePath') as string | undefined;
