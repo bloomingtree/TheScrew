@@ -30,3 +30,5 @@ build/*.dll
 .claude
 
 learn-code
+.zero-employee
+public

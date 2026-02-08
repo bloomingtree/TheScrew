@@ -17,11 +17,11 @@ import { ISkill, ISkillMeta } from './types';
 /**
  * Skill file structure
  */
-interface SkillFile {
-  path: string;
-  category: string;
-  source: 'builtin' | 'workspace';
-}
+// interface SkillFile {
+//   path: string;
+//   category: string;
+//   source: 'builtin' | 'workspace';
+// }
 
 /**
  * Skill Manager - progressive skill loading
@@ -36,11 +36,16 @@ export class SkillManager {
   // Skill file locations
   private skillsPaths: string[];
 
+  // Workspace skills path (for hot reload)
+  private workspaceSkillsPath?: string;
+
   // Cache for loaded skill content
   private skillContentCache: Map<string, ISkill> = new Map();
 
   constructor(skillsPaths: string[]) {
     this.skillsPaths = skillsPaths;
+    // Track workspace path separately
+    this.workspaceSkillsPath = skillsPaths.find(p => p.includes('.zero-employee'));
     console.log('[SkillManager] Initialized with paths:', skillsPaths);
   }
 
@@ -118,7 +123,7 @@ export class SkillManager {
   /**
    * Parse SKILL.md file with YAML frontmatter
    */
-  private parseSkillFile(content: string, category: string, path: string, source: 'builtin' | 'workspace'): ISkill {
+  private parseSkillFile(content: string, category: string, path: string, _source: 'builtin' | 'workspace'): ISkill {
     // Default metadata
     const meta: ISkillMeta = {
       name: category,
@@ -159,7 +164,7 @@ export class SkillManager {
   /**
    * Parse YAML frontmatter
    */
-  private parseYamlFrontmatter(yaml: string, category: string, path: string): Partial<ISkillMeta> {
+  private parseYamlFrontmatter(yaml: string, category: string, _path: string): Partial<ISkillMeta> {
     const result: any = {};
     const lines = yaml.split('\n');
 
@@ -386,7 +391,7 @@ export class SkillManager {
 
     // Check all skills (always + on-demand) for keyword matches
     const allSkills = [
-      ...Array.from(this.alwaysSkills.values()),
+      ...Array.from(this.alwaysSkills.values()).map(s => s.meta),
       ...Array.from(this.onDemandSkills.values()),
     ];
 
@@ -445,9 +450,12 @@ export class SkillManager {
     // Additional skills
     if (additionalSkills) {
       for (const name of additionalSkills) {
-        const skill = this.alwaysSkills.get(name) || this.onDemandSkills.get(name);
+        const skill = this.alwaysSkills.get(name);
+        const skillMeta = this.onDemandSkills.get(name);
         if (skill) {
-          total += skill.estimatedTokens;
+          total += skill.meta.estimatedTokens;
+        } else if (skillMeta) {
+          total += skillMeta.estimatedTokens;
         }
       }
     }
@@ -539,6 +547,56 @@ export class SkillManager {
       skillNames: this.getSkillNames(),
     };
   }
+
+  /**
+   * Reload workspace skills - hot reload for development
+   * Clears and reloads all skills from the workspace path
+   */
+  async reloadWorkspaceSkills(): Promise<{
+    success: boolean;
+    alwaysCount: number;
+    onDemandCount: number;
+    error?: string;
+  }> {
+    if (!this.workspaceSkillsPath) {
+      return {
+        success: false,
+        alwaysCount: 0,
+        onDemandCount: 0,
+        error: 'No workspace skills path configured',
+      };
+    }
+
+    try {
+      // Clear existing workspace skills
+      for (const [name, skill] of this.alwaysSkills) {
+        if (skill.meta.path.includes(this.workspaceSkillsPath!)) {
+          this.alwaysSkills.delete(name);
+        }
+      }
+      for (const [name, meta] of this.onDemandSkills) {
+        if (meta.path.includes(this.workspaceSkillsPath!)) {
+          this.onDemandSkills.delete(name);
+        }
+      }
+
+      // Reload from workspace path
+      await this.loadSkillsFromPath(this.workspaceSkillsPath, 'workspace');
+
+      return {
+        success: true,
+        alwaysCount: this.alwaysSkills.size,
+        onDemandCount: this.onDemandSkills.size,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        alwaysCount: 0,
+        onDemandCount: 0,
+        error: error.message,
+      };
+    }
+  }
 }
 
 // ============================================================================
@@ -549,18 +607,16 @@ let skillManagerInstance: SkillManager | null = null;
 
 /**
  * Get the singleton SkillManager instance
+ *
+ * Note: Only loads from workspace skills directory (.zero-employee/skills/)
+ * Built-in office skills have been removed to align with nanobot's simplified specification.
  */
 export function getSkillManager(): SkillManager {
   if (!skillManagerInstance) {
-    // Default skills paths
-    const isDev = process.env.NODE_ENV === 'development' || !__dirname.includes('dist-electron');
-    const runtimePath = isDev
-      ? require('path').resolve(process.cwd(), 'electron', 'main', 'runtime', 'office')
-      : require('path').join(__dirname, '..', 'runtime', 'office');
-
+    // Only load from workspace skills directory
     const workspacePath = require('path').resolve(process.cwd(), '.zero-employee', 'skills');
 
-    skillManagerInstance = new SkillManager([runtimePath, workspacePath]);
+    skillManagerInstance = new SkillManager([workspacePath]);
   }
   return skillManagerInstance;
 }

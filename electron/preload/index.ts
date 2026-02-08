@@ -5,6 +5,11 @@ const electronAPI = {
     stream: (messages: any[], conversationId?: string) => ipcRenderer.invoke('chat:stream', messages, conversationId),
     stop: () => ipcRenderer.invoke('chat:stop'),
     generateTitle: (message: string) => ipcRenderer.invoke('chat:generateTitle', message) as Promise<{ success: boolean; title?: string; error?: string }>,
+    setAgent: (conversationId: string, agentName: string) => ipcRenderer.invoke('chat:setAgent', conversationId, agentName),
+    getAgent: (conversationId: string) => ipcRenderer.invoke('chat:getAgent', conversationId),
+    getAllAgents: () => ipcRenderer.invoke('chat:getAllAgents'),
+    getAgentSystemPrompt: (conversationId: string) => ipcRenderer.invoke('chat:getAgentSystemPrompt', conversationId),
+    getAgentModel: (conversationId: string) => ipcRenderer.invoke('chat:getAgentModel', conversationId),
   },
   workspace: {
     select: () => ipcRenderer.invoke('workspace:select'),
@@ -22,24 +27,37 @@ const electronAPI = {
     selectImage: () => ipcRenderer.invoke('file:select-image') as Promise<{ canceled: boolean; data?: string }>,
     saveFile: (content: string, filename: string) => ipcRenderer.invoke('file:save', content, filename),
   },
-  template: {
-    getTemplates: () => ipcRenderer.invoke('template:getTemplates'),
-    getTemplateDetail: (id: string) => ipcRenderer.invoke('template:getTemplateDetail', id),
-    addTemplate: (template: any) => ipcRenderer.invoke('template:addTemplate', template),
-    updateTemplate: (id: string, updates: any) => ipcRenderer.invoke('template:updateTemplate', id, updates),
-    deleteTemplate: (id: string) => ipcRenderer.invoke('template:deleteTemplate', id),
-    useTemplate: (params: any) => ipcRenderer.invoke('template:useTemplate', params),
-    convertDocument: (params: any) => ipcRenderer.invoke('template:convertDocument', params),
-    useAssistant: (params: any) => ipcRenderer.invoke('template:useAssistant', params),
-    applyPrompt: (id: string, params: any) => ipcRenderer.invoke('template:applyPrompt', id, params),
-    getAssistant: (id: string) => ipcRenderer.invoke('template:getAssistant', id),
-    getByCategory: (category: string) => ipcRenderer.invoke('template:getByCategory', category),
-    getByType: (type: string) => ipcRenderer.invoke('template:getByType', type),
-  },
-  word: {
-    preview: (filepath: string) => ipcRenderer.invoke('word:preview', filepath),
-    parseDocument: (filepath: string) => ipcRenderer.invoke('word:parseDocument', filepath),
-    edit: (filepath: string, location: any, newContent: string) => ipcRenderer.invoke('word:edit', filepath, location, newContent),
+  pyodide: {
+    listFiles: (workspacePath: string) => ipcRenderer.invoke('pyodide:list-files', workspacePath) as Promise<{
+      success: boolean;
+      files?: Array<{
+        name: string;
+        path: string;
+        type: 'file' | 'directory';
+        size?: number;
+        modified?: Date;
+      }>;
+      error?: string;
+    }>,
+    readFile: (workspacePath: string, relativePath: string) =>
+      ipcRenderer.invoke('pyodide:read-file', workspacePath, relativePath) as Promise<{
+        success: boolean;
+        content?: string;
+        path?: string;
+        error?: string;
+      }>,
+    writeFile: (workspacePath: string, relativePath: string, content: string) =>
+      ipcRenderer.invoke('pyodide:write-file', workspacePath, relativePath, content) as Promise<{
+        success: boolean;
+        path?: string;
+        error?: string;
+      }>,
+    deleteFile: (workspacePath: string, relativePath: string) =>
+      ipcRenderer.invoke('pyodide:delete-file', workspacePath, relativePath) as Promise<{
+        success: boolean;
+        path?: string;
+        error?: string;
+      }>,
   },
   conversation: {
     getAll: () => ipcRenderer.invoke('conversation:getAll'),

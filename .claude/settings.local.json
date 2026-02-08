@@ -20,7 +20,19 @@
       "Bash(dir:*)",
       "Bash(if exist:*)",
       "Bash(move:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(find:*)",
+      "Bash(npm run build:electron:*)",
+      "Bash(for:*)",
+      "Bash(do echo \"Downloading $file...\")",
+      "Bash(done)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(node:*)",
+      "Bash(ls:*)",
+      "Bash(netstat:*)",
+      "Bash(cmd:*)",
+      "Bash(powershell:*)"
     ]
   }
 }

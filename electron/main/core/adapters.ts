@@ -298,8 +298,8 @@ export function createToolRegistryAdapter(toolManager: any): ToolRegistryAdapter
  * Useful for creating compound tools
  */
 export class ComposedTool implements ITool {
-  private name: string;
-  private description: string;
+  private _name: string;
+  private _description: string;
   private tools: ITool[];
   private combiner: (results: (string | ToolResult)[]) => string | ToolResult;
 
@@ -309,18 +309,18 @@ export class ComposedTool implements ITool {
     tools: ITool[];
     combiner: (results: (string | ToolResult)[]) => string | ToolResult;
   }) {
-    this.name = config.name;
-    this.description = config.description;
+    this._name = config.name;
+    this._description = config.description;
     this.tools = config.tools;
     this.combiner = config.combiner;
   }
 
   name(): string {
-    return this.name;
+    return this._name;
   }
 
   description(): string {
-    return this.description;
+    return this._description;
   }
 
   parameters(): Record<string, any> {
@@ -371,9 +371,9 @@ export function createComposedTool(config: {
  * Fallback tool - tries multiple tools until one succeeds
  */
 export class FallbackTool implements ITool {
-  private name: string;
-  private description: string;
-  private parameters: Record<string, any>;
+  private _name: string;
+  private _description: string;
+  private _parameters: Record<string, any>;
   private tools: ITool[];
 
   constructor(config: {
@@ -382,9 +382,9 @@ export class FallbackTool implements ITool {
     parameters?: Record<string, any>;
     tools: ITool[];
   }) {
-    this.name = config.name;
-    this.description = config.description;
-    this.parameters = config.parameters || {
+    this._name = config.name;
+    this._description = config.description;
+    this._parameters = config.parameters || {
       type: 'object',
       properties: {},
       additionalProperties: true,
@@ -393,15 +393,15 @@ export class FallbackTool implements ITool {
   }
 
   name(): string {
-    return this.name;
+    return this._name;
   }
 
   description(): string {
-    return this.description;
+    return this._description;
   }
 
   parameters(): Record<string, any> {
-    return this.parameters;
+    return this._parameters;
   }
 
   async execute(args: Record<string, any>): Promise<string | ToolResult> {

@@ -171,7 +171,6 @@ export interface ISessionMemory {
 export interface ISession {
   id: string;
   agentName?: string;
-  activeSkills: Set<string>;
   activeTools: Set<string>;
   memory: ISessionMemory;
   createdAt: number;

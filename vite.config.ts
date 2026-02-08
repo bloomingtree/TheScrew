@@ -43,7 +43,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src')
     }
   },
+  publicDir: 'public',
   server: {
-    port: 5173
+    port: 5173,
+    strictPort: true, // 如果端口被占用，则失败而不是尝试其他端口
   }
 });

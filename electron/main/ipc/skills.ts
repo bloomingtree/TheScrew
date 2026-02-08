@@ -6,12 +6,87 @@
 
 import { ipcMain } from 'electron';
 import { getSkillManager } from '../core/SkillManager';
+import { getSimpleSkillManager, type SkillMeta, type Skill } from '../core/SimpleSkillManager';
 
 /**
  * Register skill-related IPC handlers
  */
 export function registerSkillsHandlers(): void {
   const skillManager = getSkillManager();
+
+  // SimpleSkillManager IPC handlers (nanobot-style)
+  const simpleSkillManager = getSimpleSkillManager();
+
+  // List all skills (nanobot-style: scan SKILL.md files)
+  ipcMain.handle('skills:listSimple', async () => {
+    try {
+      const skills = await simpleSkillManager.listSkills();
+      return {
+        success: true,
+        skills,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Load full skill content
+  ipcMain.handle('skills:loadSimple', async (_event, name: string) => {
+    try {
+      const skill = await simpleSkillManager.loadSkill(name);
+      if (!skill) {
+        return {
+          success: false,
+          error: `Skill ${name} not found`,
+        };
+      }
+      return {
+        success: true,
+        skill,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Build skills summary (for system prompt)
+  ipcMain.handle('skills:buildSummary', async (_event, activeSkills?: string[]) => {
+    try {
+      const summary = await simpleSkillManager.buildSkillsSummary(activeSkills);
+      return {
+        success: true,
+        summary,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Reload workspace skills (hot reload)
+  ipcMain.handle('skills:reloadWorkspace', async () => {
+    try {
+      const result = await simpleSkillManager.reloadWorkspaceSkills();
+      return result;
+    } catch (error: any) {
+      return {
+        success: false,
+        count: 0,
+        error: error.message,
+      };
+    }
+  });
+
+  // Legacy SkillManager IPC handlers (for backward compatibility)
+  const legacySkillManager = getSkillManager();
 
   // Initialize skill manager
   ipcMain.handle('skills:initialize', async () => {
@@ -214,6 +289,8 @@ export function registerSkillsHandlers(): void {
       };
     }
   });
+
+  // Note: skills:reloadWorkspace is handled by SimpleSkillManager (see above)
 
   // Get skill statistics
   ipcMain.handle('skills:getStats', async () => {

@@ -1,18 +1,14 @@
 import { useEffect } from 'react';
 import { useConfigStore } from './store/configStore';
-import { useTemplateStore } from './store/templateStore';
 import { useConversationStore } from './store/conversationStore';
 import ChatArea from './components/Chat/ChatArea';
 import ConfigDialog from './components/Settings/ConfigDialog';
 import Sidebar from './components/Sidebar/index';
 import Toast from './components/Toast';
-import TemplateDialog from './components/Template/TemplateDialog';
-import AssistantPanel from './components/Template/AssistantPanel';
 import { RightPanel } from './components/RightPanel';
 
 function App() {
   const { setConfigOpen, setConfig } = useConfigStore();
-  const { loadTemplates } = useTemplateStore();
   const { loadFromDatabase } = useConversationStore();
 
   useEffect(() => {
@@ -24,15 +20,12 @@ function App() {
         setConfigOpen(true);
       }
 
-      // 加载模板
-      loadTemplates();
-
       // 加载对话历史
       await loadFromDatabase();
     };
 
     initializeApp();
-  }, [setConfigOpen, setConfig, loadTemplates, loadFromDatabase]);
+  }, [setConfigOpen, setConfig, loadFromDatabase]);
 
   return (
     <div className="relative h-screen overflow-hidden bg-workspace-50">
@@ -43,8 +36,6 @@ function App() {
         </div>
         <RightPanel />
         <ConfigDialog />
-        <TemplateDialog />
-        <AssistantPanel />
       </div>
       <Toast />
     </div>

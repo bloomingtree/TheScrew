@@ -93,6 +93,29 @@ export {
 } from './SkillManager';
 
 // ============================================================================
+// SimpleSkill Manager (nanobot-style)
+// ============================================================================
+
+export {
+  SimpleSkillManager,
+  getSimpleSkillManager,
+  setSimpleSkillManager,
+  resetSimpleSkillManager,
+} from './SimpleSkillManager';
+export type { SkillMeta, Skill } from './SimpleSkillManager';
+
+// ============================================================================
+// Context Builder
+// ============================================================================
+
+export {
+  ContextBuilder,
+  getContextBuilder,
+  resetContextBuilder,
+} from './ContextBuilder';
+export type { ContextBuilderOptions } from './ContextBuilder';
+
+// ============================================================================
 // Agent Loop
 // ============================================================================
 

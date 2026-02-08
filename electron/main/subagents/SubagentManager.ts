@@ -8,7 +8,7 @@
  * - Clean up old tasks
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { ISubagentTask, SubagentTaskStatus } from '../core/types';
 
 /**
@@ -54,7 +54,7 @@ export class SubagentManager {
       maxIterations?: number;
     }
   ): Promise<string> {
-    const taskId = uuidv4();
+    const taskId = randomUUID();
 
     const subagentTask: ISubagentTask = {
       id: taskId,
@@ -380,7 +380,7 @@ export class SubagentManager {
     }
 
     // Create new task with same parameters
-    const newTaskId = uuidv4();
+    const newTaskId = randomUUID();
     const newTask: ISubagentTask = {
       id: newTaskId,
       parentSessionId: task.parentSessionId,

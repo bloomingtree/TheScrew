@@ -80,13 +80,7 @@ export class AgentLoop {
       timestamp: message.timestamp,
     });
 
-    // 3. Detect required skills
-    const requiredSkills = this.skillManager.detectRequiredSkills(message.content);
-    for (const skillName of requiredSkills) {
-      session.activeSkills.add(skillName);
-    }
-
-    // 4. Build message list
+    // 3. Build message list
     let messages = await this.buildMessages(session, message);
 
     // 5. Agent loop with max iterations
@@ -279,7 +273,6 @@ export class AgentLoop {
     if (!session) {
       session = {
         id: sessionKey,
-        activeSkills: new Set(),
         activeTools: new Set(),
         memory: {
           messages: [],
@@ -327,38 +320,6 @@ export class AgentLoop {
   }
 
   /**
-   * Activate a skill for a session
-   */
-  activateSkill(sessionKey: string, skillName: string): void {
-    const session = this.sessions.get(sessionKey);
-    if (session) {
-      session.activeSkills.add(skillName);
-      session.updatedAt = Date.now();
-      console.log(`[AgentLoop] Activated skill "${skillName}" for session ${sessionKey}`);
-    }
-  }
-
-  /**
-   * Deactivate a skill for a session
-   */
-  deactivateSkill(sessionKey: string, skillName: string): void {
-    const session = this.sessions.get(sessionKey);
-    if (session) {
-      session.activeSkills.delete(skillName);
-      session.updatedAt = Date.now();
-      console.log(`[AgentLoop] Deactivated skill "${skillName}" for session ${sessionKey}`);
-    }
-  }
-
-  /**
-   * Get active skills for a session
-   */
-  getActiveSkills(sessionKey: string): string[] {
-    const session = this.sessions.get(sessionKey);
-    return session ? Array.from(session.activeSkills) : [];
-  }
-
-  /**
    * Reset session
    */
   resetSession(sessionKey: string): void {
@@ -386,21 +347,17 @@ export class AgentLoop {
   getSessionStats(): {
     totalSessions: number;
     totalMessages: number;
-    activeSkills: number;
   } {
     const sessions = this.getAllSessions();
     let totalMessages = 0;
-    let activeSkills = 0;
 
     for (const session of sessions) {
       totalMessages += session.memory.messages.length;
-      activeSkills += session.activeSkills.size;
     }
 
     return {
       totalSessions: sessions.length,
       totalMessages,
-      activeSkills,
     };
   }
 

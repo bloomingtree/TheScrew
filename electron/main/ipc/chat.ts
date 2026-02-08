@@ -1,16 +1,11 @@
 import { ipcMain } from 'electron';
 import { OpenAIClient } from '../api/openai';
 import Store from 'electron-store';
-import { toolManager, ToolGroup, ToolManager, TOOL_SETS_META } from '../tools/ToolManager';
+import { toolManager, ToolGroup, ToolManager } from '../tools/ToolManager';
 import { fileTools } from '../tools/FileTools';
-import { baseTools } from '../tools/BaseTools';
-import { wordTools } from '../tools/WordTools';
-import { templateTools } from '../tools/TemplateTools';
-// import ooxmlToolGroup from '../tools/OoxmlTools'; // 已卸载 - 功能已整合到 Office Skills
-import pptxToolGroup from '../tools/PPTXTools';
-import batchToolGroup from '../tools/BatchTools';
-import xlsxToolGroup from '../tools/ExcelTools';
-import pdfToolGroup from '../tools/PDFTools';
+// Office tools removed: BaseTools, WordTools, TemplateTools, PPTXTools, BatchTools, ExcelTools, PDFTools, OoxmlTools
+import { getWorkspacePath } from '../tools/FileTools';
+import { getContextBuilder } from '../core/ContextBuilder';
 
 let currentClient: OpenAIClient | null = null;
 let currentAbortController: AbortController | null = null;
@@ -59,11 +54,38 @@ let currentAbortController: AbortController | null = null;
     return [...alwaysKeep, ...trimmedRecent];
   }
 
+  /**
+   * 构建中文系统提示词
+   * 使用 ContextBuilder 生成完整的 nanobot 风格提示词
+   *
+   * 包含：核心身份 + 时间 + Bootstrap 文件 + 内存 + 技能 + Agent + 工具定义
+   */
+  async function buildNanobotStyleSystemPrompt(conversationId?: string): Promise<string> {
+    try {
+      const contextBuilder = getContextBuilder();
+      const workspacePath = getWorkspacePath();
+      const agentName = conversationId ? toolManager.getAgent(conversationId) : undefined;
+
+      // nanobot 风格：不需要 activeSkills 参数，skills 会自动加载
+      const systemPrompt = await contextBuilder.buildSystemPrompt({
+        agentName,
+        workspacePath: workspacePath || undefined,
+        includeMemory: true,
+      });
+
+      return systemPrompt;
+    } catch (error: any) {
+      console.error('[chat] Failed to build system prompt with ContextBuilder:', error.message);
+      // Fallback to simple prompt
+      return `你是一个 AI 助手，可以帮助用户完成各种任务。`;
+    }
+  }
+
 export function registerChatHandlers(store: Store) {
-  // 注册基础工具组（包含 activate_toolset 工具）
+  // 注册基础工具组（仅包含文件操作工具）
   const baseToolGroup: ToolGroup = {
     name: 'base',
-    tools: [...fileTools, ...baseTools],
+    tools: [...fileTools],
     keywords: [],
     triggers: {
       keywords: [],
@@ -73,48 +95,10 @@ export function registerChatHandlers(store: Store) {
   };
   toolManager.registerToolGroup(baseToolGroup);
 
-  // 注册 Word 工具组 - 使用 Office Skills 增强
-  const wordToolGroup: ToolGroup = {
-    name: 'word',
-    tools: wordTools,
-    keywords: ToolManager.getGroupKeywords('word'),
-    triggers: {
-      keywords: ToolManager.getGroupKeywords('word'),
-      fileExtensions: ['.docx', '.doc'],
-      dependentTools: ['read_file', 'search_files', 'search_in_files'],
-    },
-  };
-  toolManager.registerToolGroup(wordToolGroup);
+  // Office 工具组已删除：word, template, pptx, xlsx, pdf, batch
+  // 用户可以在 .zero-employee/skills/ 中定义自定义技能
 
-  // 注册模板工具组
-  const templateToolGroup: ToolGroup = {
-    name: 'template',
-    tools: templateTools,
-    keywords: ['模板', 'template', '格式转换', '生成文档', '报告', '工作汇总', '周报', '值班记录'],
-    triggers: {
-      keywords: ['模板', 'template', '格式转换', '周报', '值班记录', '工作汇总', '助手'],
-      fileExtensions: ['.docx', '.doc'],
-      dependentTools: ['read_file', 'create_word'],
-    },
-  };
-  toolManager.registerToolGroup(templateToolGroup);
-
-  // 注册 OOXML 验证工具组 - 已卸载，功能已整合到 Office Skills
-  // toolManager.registerToolGroup(ooxmlToolGroup);
-
-  // 注册 PPTX 工具组
-  toolManager.registerToolGroup(pptxToolGroup);
-
-  // 注册 Excel 工具组
-  toolManager.registerToolGroup(xlsxToolGroup);
-
-  // 注册 PDF 工具组
-  toolManager.registerToolGroup(pdfToolGroup);
-
-  // 注册批量操作工具组
-  toolManager.registerToolGroup(batchToolGroup);
-
-  // 初始化 Office Skills
+  // 初始化 Office Skills (现在只从 workspace 加载)
   toolManager.initialize().catch(console.error);
 
   ipcMain.handle('chat:generateTitle', async (_event, message: string) => {
@@ -200,40 +184,41 @@ export function registerChatHandlers(store: Store) {
         toolManager.resetForConversation(conversationId);
       }
 
-      // 获取工具集概览（用于系统消息）
-      const toolSetsOverview = conversationId
-        ? toolManager.getToolSetsOverview(conversationId)
-        : TOOL_SETS_META;
+      // 构建 nanobot 风格的系统提示词
+      const systemPromptContent = await buildNanobotStyleSystemPrompt(conversationId);
 
-      // 获取当前激活的工具组
-      const activeGroups = conversationId
-        ? toolManager.getActiveGroups(conversationId)
-        : ['base'];
-
-      // 构建系统消息，包含工具集概览
-      const toolSystemMessage = {
+      // 将系统消息添加到消息开头
+      const systemMessage = {
         role: 'system' as const,
-        content: `## 可用工具集
-
-当前已激活的工具：${activeGroups.join(', ') || '仅基础工具'}
-
-可用工具集概览：
-${toolSetsOverview.map(ts => `- **${ts.name}**: ${ts.description}`).join('\n')}
-
-使用工具：如需使用未激活的工具集，请调用 activate_toolset 工具。
-注意：激活工具集会增加上下文大小，请仅激活需要的工具集。
-`
+        content: systemPromptContent
       };
 
-      // 将工具系统消息添加到消息开头
-      messages = [toolSystemMessage, ...messages];
+      messages = [systemMessage, ...messages];
 
       // 获取当前激活的工具定义
       let tools = conversationId
         ? toolManager.getActiveToolDefinitions(conversationId)
         : toolManager.getOpenAIFunctionDefinitions();
 
+      // 工具调用历史，用于检测重复调用
+      const toolCallHistory: string[] = [];
+      const MAX_TOOL_ITERATIONS = 50;  // 安全上限，防止真正的无限循环
+      const MAX_SAME_TOOL_CALLS = 3;   // 相同工具调用次数限制
+      let iteration = 0;
+
       while (true) {
+        iteration++;
+
+        // 安全上限检查（只在异常情况触发）
+        if (iteration > MAX_TOOL_ITERATIONS) {
+          console.error(`[ERROR] Tool iteration limit reached (${MAX_TOOL_ITERATIONS}), breaking loop`);
+          messages.push({
+            role: 'system',
+            content: `已达到最大工具调用轮次限制。请直接回答用户问题，不要继续调用工具。`,
+          });
+          break;
+        }
+
         let hasToolCalls = false;
 
         messages = trimMessages(messages, 10);
@@ -246,7 +231,31 @@ ${toolSetsOverview.map(ts => `- **${ts.name}**: ${ts.description}`).join('\n')}
             
             if (parsed.type === 'tool_calls') {
               hasToolCalls = true;
-              
+
+              // 检测重复的工具调用
+              const duplicateToolCalls: string[] = [];
+              for (const toolCall of parsed.toolCalls) {
+                const callKey = `${toolCall.function.name}:${JSON.stringify(toolCall.function.arguments)}`;
+                const sameCallCount = toolCallHistory.filter(k => k === callKey).length;
+
+                if (sameCallCount >= MAX_SAME_TOOL_CALLS) {
+                  duplicateToolCalls.push(`${toolCall.function.name} (已调用 ${sameCallCount} 次)`);
+                  console.warn(`[WARN] Duplicate tool call detected: ${callKey}`);
+                }
+
+                toolCallHistory.push(callKey);
+              }
+
+              // 如果有重复调用，跳过执行并提示 AI
+              if (duplicateToolCalls.length > 0) {
+                console.error(`[ERROR] Blocking duplicate tool calls: ${duplicateToolCalls.join(', ')}`);
+                messages.push({
+                  role: 'system',
+                  content: `检测到重复的工具调用: ${duplicateToolCalls.join(', ')}。请停止重复调用，使用已有结果回答用户问题。`,
+                });
+                break;
+              }
+
               event.sender.send('chat:tool_calls', parsed.toolCalls);
 
               const startTimes = new Map<string, number>();
@@ -298,18 +307,6 @@ ${toolSetsOverview.map(ts => `- **${ts.name}**: ${ts.description}`).join('\n')}
                         toolCount: activateResult.tools?.length || 0,
                       });
                     }
-                  }
-
-                  // 动态工具加载：检测是否需要加载 Word 工具
-                  if (conversationId && toolManager.shouldLoadWordTools(result.name, result)) {
-                    toolManager.activateGroup('word', conversationId);
-                    toolsetActivated = true;
-
-                    event.sender.send('chat:tools_loaded', {
-                      group: 'word',
-                      reason: `Detected Word file access via ${result.name}`,
-                      toolCount: 0,  // Will be updated after tools refresh
-                    });
                   }
 
                   event.sender.send('chat:tool_complete', {
@@ -438,4 +435,54 @@ ${toolSetsOverview.map(ts => `- **${ts.name}**: ${ts.description}`).join('\n')}
     const model = toolManager.getAgentModel(conversationId);
     return { success: true, model };
   });
+}
+
+/**
+ * Register context-related IPC handlers
+ */
+export function registerContextHandlers(): void {
+  const contextBuilder = getContextBuilder();
+
+  // Build system prompt with ContextBuilder
+  ipcMain.handle('context:buildSystemPrompt', async (_event, options?: {
+    agentName?: string;
+    workspacePath?: string;
+    includeMemory?: boolean;
+    maxMemoryTokens?: number;
+  }) => {
+    try {
+      const prompt = await contextBuilder.buildSystemPrompt(options || {});
+      return {
+        success: true,
+        prompt,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Estimate system prompt tokens
+  ipcMain.handle('context:estimateTokens', async (_event, options?: {
+    agentName?: string;
+    workspacePath?: string;
+    includeMemory?: boolean;
+  }) => {
+    try {
+      const tokens = await contextBuilder.estimateSystemPromptTokens(options || {});
+      return {
+        success: true,
+        tokens,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  console.log('[IPC] Context handlers registered');
 }

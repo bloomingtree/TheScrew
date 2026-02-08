@@ -1,4 +1,33 @@
 interface ElectronAPI {
+  pyodide: {
+    listFiles: (workspacePath: string) => Promise<{
+      success: boolean;
+      files?: Array<{
+        name: string;
+        path: string;
+        type: 'file' | 'directory';
+        size?: number;
+        modified?: Date;
+      }>;
+      error?: string;
+    }>;
+    readFile: (workspacePath: string, relativePath: string) => Promise<{
+      success: boolean;
+      content?: string;
+      path?: string;
+      error?: string;
+    }>;
+    writeFile: (workspacePath: string, relativePath: string, content: string) => Promise<{
+      success: boolean;
+      path?: string;
+      error?: string;
+    }>;
+    deleteFile: (workspacePath: string, relativePath: string) => Promise<{
+      success: boolean;
+      path?: string;
+      error?: string;
+    }>;
+  };
   chat: {
     stream: (messages: any[], conversationId?: string) => Promise<any>;
     stop: () => Promise<void>;
@@ -54,43 +83,6 @@ interface ElectronAPI {
   file: {
     selectImage: () => Promise<{ canceled: boolean; data?: string }>;
     saveFile: (content: string, filename: string) => Promise<void>;
-  };
-  template: {
-    getTemplates: () => Promise<{ success: boolean; templates?: any[]; error?: string }>;
-    getTemplateDetail: (id: string) => Promise<{ success: boolean; template?: any; error?: string }>;
-    addTemplate: (template: any) => Promise<{ success: boolean; template?: any; error?: string }>;
-    updateTemplate: (id: string, updates: any) => Promise<{ success: boolean; error?: string }>;
-    deleteTemplate: (id: string) => Promise<{ success: boolean; error?: string }>;
-    useTemplate: (params: any) => Promise<{ success: boolean; filePath?: string; error?: string }>;
-    convertDocument: (params: any) => Promise<{ success: boolean; filePath?: string; error?: string }>;
-    useAssistant: (params: any) => Promise<{ success: boolean; result?: any; error?: string }>;
-    applyPrompt: (id: string, params: any) => Promise<{ success: boolean; prompt?: string; error?: string }>;
-    getAssistant: (id: string) => Promise<{ success: boolean; assistant?: any; error?: string }>;
-    getByCategory: (category: string) => Promise<{ success: boolean; templates?: any[]; error?: string }>;
-    getByType: (type: string) => Promise<{ success: boolean; templates?: any[]; error?: string }>;
-  };
-  word: {
-    preview: (filepath: string) => Promise<{
-      filepath: string;
-      structure: {
-        paragraphs: Array<{ index: number; text: string; length: number }>;
-        tables: Array<{
-          index: number;
-          rows: Array<{
-            index: number;
-            cells: Array<{ text: string }>;
-          }>;
-        }>;
-      };
-      html: string;
-      metadata: {
-        path: string;
-        size?: number;
-        modified?: string;
-      };
-    }>;
-    parseDocument: (filepath: string) => Promise<{ success: boolean; data?: any; error?: string }>;
-    edit: (filepath: string, location: any, newContent: string) => Promise<{ success: boolean }>;
   };
   conversation: {
     getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>;
@@ -169,7 +161,76 @@ interface ElectronAPI {
     estimateTokens: (additionalSkills?: string[]) => Promise<{ success: boolean; tokens?: number; error?: string }>;
     has: (name: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>;
     reload: (name: string) => Promise<{ success: boolean; error?: string }>;
+    reloadWorkspace: () => Promise<{ success: boolean; alwaysCount: number; onDemandCount: number; error?: string }>;
     getStats: () => Promise<{ success: boolean; stats?: any; error?: string }>;
+  };
+  context: {
+    buildSystemPrompt: (options?: {
+      agentName?: string;
+      workspacePath?: string;
+      includeMemory?: boolean;
+      activeSkills?: string[];
+      maxMemoryTokens?: number;
+    }) => Promise<{ success: boolean; prompt?: string; error?: string }>;
+    estimateTokens: (options?: {
+      agentName?: string;
+      workspacePath?: string;
+      includeMemory?: boolean;
+      activeSkills?: string[];
+    }) => Promise<{ success: boolean; tokens?: number; error?: string }>;
+  };
+  cron: {
+    start: () => Promise<{ success: boolean; error?: string }>;
+    stop: () => Promise<{ success: boolean; error?: string }>;
+    status: () => Promise<{ success: boolean; status?: { enabled: boolean; jobs: number; next_wake_at_ms: number | null }; error?: string }>;
+    list: (includeDisabled?: boolean) => Promise<{ success: boolean; jobs?: any[]; error?: string }>;
+    get: (jobId: string) => Promise<{ success: boolean; job?: any; error?: string }>;
+    add: (params: {
+      name: string;
+      schedule: any;
+      message: string;
+      tools?: string[];
+      delete_after_run?: boolean;
+    }) => Promise<{ success: boolean; job?: any; error?: string }>;
+    remove: (jobId: string) => Promise<{ success: boolean; error?: string }>;
+    enable: (jobId: string, enabled: boolean) => Promise<{ success: boolean; job?: any; error?: string }>;
+    run: (jobId: string, force?: boolean) => Promise<{ success: boolean; error?: string }>;
+    clear: () => Promise<{ success: boolean; error?: string }>;
+  };
+  heartbeat: {
+    status: () => Promise<{ success: boolean; status?: any; error?: string }>;
+    getTasks: () => Promise<{ success: boolean; tasks?: any[]; error?: string }>;
+    trigger: () => Promise<{ success: boolean; result?: any; error?: string }>;
+    isEmpty: () => Promise<{ success: boolean; isEmpty?: boolean; error?: string }>;
+  };
+  python: {
+    execute: (code: string, options?: { timeout?: number }) => Promise<{
+      success: boolean;
+      output?: string;
+      error?: string;
+      timedOut?: boolean;
+      executionTime?: number;
+    }>;
+    validate: (code: string) => Promise<{
+      success: boolean;
+      validation?: {
+        valid: boolean;
+        errors: string[];
+        warnings: string[];
+      };
+      error?: string;
+    }>;
+    getStatus: () => Promise<{
+      success: boolean;
+      status?: {
+        backend: string;
+        ready: boolean;
+        version: string;
+        description?: string;
+      };
+      error?: string;
+    }>;
+    init: () => Promise<{ success: boolean; error?: string }>;
   };
   getAppVersion: () => Promise<string>;
   onChatChunk: (callback: (chunk: string) => void) => () => void;

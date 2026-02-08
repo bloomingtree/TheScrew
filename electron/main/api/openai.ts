@@ -145,6 +145,9 @@ export class OpenAIClient {
     }
 
     console.log('[DEBUG] Sending request - model:', this.model, 'messages:', messages.length, 'tools:', tools?.length || 0);
+    console.log('========== Request Body ==========');
+    console.log(JSON.stringify(requestBody, null, 2));
+    console.log('==================================');
 
     const response = await this.axiosInstance.post(`${this.baseUrl}/chat/completions`, requestBody, {
       headers: {

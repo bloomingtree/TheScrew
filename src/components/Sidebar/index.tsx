@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { MessageSquare, FileText, Sparkles } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useConversationStore } from '../../store/conversationStore';
 import { useConfigStore } from '../../store/configStore';
-import { useTemplateStore } from '../../store/templateStore';
-import { AssistantTool } from '../../types/template';
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -13,7 +11,6 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
   const {
     conversations,
     currentConversationId,
@@ -22,11 +19,6 @@ const Sidebar: React.FC<SidebarProps> = () => {
   } = useConversationStore();
 
   const { setConfigOpen } = useConfigStore();
-  const { assistantTools, setAssistantPanelOpen, setTemplateDialogOpen } = useTemplateStore();
-
-  const handleOpenAssistant = (assistant: AssistantTool) => {
-    setAssistantPanelOpen(true, assistant);
-  };
 
   const handleSelectConversation = (id: string) => {
     selectConversation(id);
@@ -34,9 +26,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
 
   const handleDeleteConversation = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (window.confirm('确定要删除这个对话吗？')) {
-      await deleteConversation(id);
-    }
+    await deleteConversation(id);
   };
 
   return (
@@ -56,53 +46,11 @@ const Sidebar: React.FC<SidebarProps> = () => {
           className={`w-full flex items-center gap-2 overflow-hidden rounded-md hover:bg-gray-200/60 active:bg-gray-300/60 transition-[width,height,padding] text-gray-600 hover:text-gray-900 text-sm ${isOpen ? 'h-8 py-2 px-1.5 justify-start' : '!size-8 !pl-1.5 !pr-2 justify-start'}`}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15-.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
             <circle cx="12" cy="12" r="3"></circle>
           </svg>
           <span className="text-sm truncate">设置</span>
         </button>
-      </div>
-
-      {/* 模板入口 */}
-      <div className="p-2 border-b border-gray-200/50">
-        <button
-          onClick={() => setTemplatesOpen(!templatesOpen)}
-          className={`w-full flex items-center gap-2 overflow-hidden rounded-md hover:bg-gray-200/60 active:bg-gray-300/60 transition-[width,height,padding] text-gray-600 hover:text-gray-900 text-sm ${isOpen ? 'h-8 py-2 px-1.5 justify-start' : '!size-8 !pl-1.5 !pr-2 justify-start'}`}
-        >
-          <FileText size={16} className="shrink-0" />
-          <span className="text-sm truncate">模板</span>
-        </button>
-
-        <AnimatePresence>
-          {templatesOpen && isOpen && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2 }}
-              className="mt-2 space-y-1"
-            >
-              <button
-                onClick={() => setTemplateDialogOpen(true)}
-                className="w-full flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-gray-200/60 text-xs text-gray-600 hover:text-gray-900"
-              >
-                <FileText size={14} />
-                <span>浏览模板</span>
-              </button>
-
-              {assistantTools.slice(0, 3).map((assistant) => (
-                <button
-                  key={assistant.id}
-                  onClick={() => handleOpenAssistant(assistant)}
-                  className="w-full flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-gray-200/60 text-xs text-gray-600 hover:text-gray-900"
-                >
-                  <Sparkles size={14} />
-                  <span>{assistant.name}</span>
-                </button>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       <AnimatePresence>
