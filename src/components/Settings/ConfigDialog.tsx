@@ -1,8 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X } from 'lucide-react';
+import { X, Terminal, Settings } from 'lucide-react';
 import { useConfigStore } from '../../store/configStore';
 import { toast } from '../../store/toastStore';
+
+// 终端风格色彩常量
+const TERMINAL = {
+  bg: '#1a1b26',
+  bgSecondary: '#24283b',
+  bgTertiary: '#414868',
+  lightBg: '#fff8f0',
+  green: '#9ece6a',
+  orange: '#ff9e64',
+  blue: '#7aa2f7',
+  cyan: '#2ac3de',
+  purple: '#bb9af7',
+  pink: '#f7768e',
+  yellow: '#e0af68',
+  textPrimary: '#c0caf5',
+  textSecondary: '#565f89',
+  textDark: '#1a1b26',
+};
 
 const ConfigDialog: React.FC = () => {
   const { isConfigOpen, setConfigOpen, apiKey, baseUrl, model, temperature, maxTokens, setConfig } = useConfigStore();
@@ -67,93 +85,188 @@ const ConfigDialog: React.FC = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-cream-900/10 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         >
           <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
+            initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
+            exit={{ scale: 0.95, opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="glass rounded-2xl shadow-2xl w-full max-w-md mx-4 border border-gray-200/50"
+            className="w-full max-w-lg font-mono"
+            style={{
+              background: TERMINAL.lightBg,
+              border: `1px solid ${TERMINAL.bgTertiary}`,
+              borderRadius: '12px',
+              overflow: 'hidden',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+            }}
           >
-            <div className="flex items-center justify-between p-5 border-b border-gray-200/50">
-              <h2 className="text-lg font-semibold text-cream-900">配置设置</h2>
-              <button
-                onClick={handleClose}
-                className="text-cream-600 hover:text-cream-900 transition-colors"
-              >
-                <X size={20} />
-              </button>
+            {/* 终端风格标题栏 */}
+            <div
+              className="flex items-center justify-between px-4 py-2.5 border-b"
+              style={{
+                background: `${TERMINAL.bgSecondary}30`,
+                borderColor: `${TERMINAL.bgTertiary}50`,
+              }}
+            >
+              <div className="flex items-center gap-2">
+                {/* macOS 风格窗口控制点 */}
+                <div className="flex gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'rgba(239, 68, 68, 0.6)' }}></div>
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'rgba(234, 179, 8, 0.6)' }}></div>
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'rgba(34, 197, 94, 0.6)' }}></div>
+                </div>
+                <span className="font-mono text-xs" style={{ color: TERMINAL.textSecondary }}>
+                  配置编辑
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs" style={{ color: TERMINAL.green }}>
+                  <Terminal size={12} className="inline" />
+                </span>
+                <button
+                  onClick={handleClose}
+                  className="p-1 rounded transition-all hover:bg-black/5"
+                  style={{ color: TERMINAL.textSecondary }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
 
-            <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+            {/* 配置标题区域 */}
+            <div className="p-5 text-center">
+              <h2 className="text-xl sm:text-2xl font-bold mb-2" style={{ color: TERMINAL.textDark }}>
+                <span style={{ color: TERMINAL.cyan }}>&gt;</span> API 配置设置
+              </h2>
+              <div className="text-sm inline-flex items-center gap-2 flex-wrap justify-center" style={{ color: TERMINAL.textSecondary }}>
+                <span style={{ color: TERMINAL.green }}>$</span>
+                <span>配置您的</span>
+                <span className="font-bold" style={{ color: TERMINAL.blue }}>OpenAI</span>
+                <span>API 连接参数</span>
+              </div>
+            </div>
+
+            {/* 配置表单 */}
+            <div className="px-5 pb-5 space-y-4 max-h-[50vh] overflow-y-auto">
+              {/* API Key */}
               <div>
-                <label className="block text-sm font-medium text-cream-700 mb-2">
-                  API Key <span className="text-red-500">*</span>
+                <label className="text-xs font-medium mb-2 font-mono flex items-center gap-1.5" style={{ color: TERMINAL.textSecondary }}>
+                  <Terminal size={10} />
+                  API密钥 <span style={{ color: TERMINAL.pink }}>*</span>
                 </label>
-                <input
-                  type="password"
-                  value={localConfig.apiKey}
-                  onChange={(e) => setLocalConfig({ ...localConfig, apiKey: e.target.value })}
-                  placeholder="输入你的 API Key"
-                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
-                />
+                <div className="relative">
+                  <span
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono"
+                    style={{ color: TERMINAL.green }}
+                  >
+                    $
+                  </span>
+                  <input
+                    type="password"
+                    value={localConfig.apiKey}
+                    onChange={(e) => setLocalConfig({ ...localConfig, apiKey: e.target.value })}
+                    placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                    className="w-full pl-7 pr-3 py-2.5 rounded-lg text-sm font-mono transition-all border focus:outline-none"
+                    style={{
+                      background: '#fff',
+                      borderColor: `${TERMINAL.bgTertiary}50`,
+                      color: TERMINAL.textDark,
+                    }}
+                  />
+                </div>
               </div>
 
+              {/* Base URL */}
               <div>
-                <label className="block text-sm font-medium text-cream-700 mb-2">
-                  API 地址 <span className="text-red-500">*</span>
+                <label className="text-xs font-medium mb-2 font-mono flex items-center gap-1.5" style={{ color: TERMINAL.textSecondary }}>
+                  <Terminal size={10} />
+                  API地址 <span style={{ color: TERMINAL.pink }}>*</span>
                 </label>
-                <input
-                  type="text"
-                  value={localConfig.baseUrl}
-                  onChange={(e) => setLocalConfig({ ...localConfig, baseUrl: e.target.value })}
-                  placeholder="https://api.openai.com/v1"
-                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
-                />
-                <p className="text-xs text-cream-500 mt-1.5">
+                <div className="relative">
+                  <span
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono"
+                    style={{ color: TERMINAL.green }}
+                  >
+                    $
+                  </span>
+                  <input
+                    type="text"
+                    value={localConfig.baseUrl}
+                    onChange={(e) => setLocalConfig({ ...localConfig, baseUrl: e.target.value })}
+                    placeholder="https://api.openai.com/v1"
+                    className="w-full pl-7 pr-3 py-2.5 rounded-lg text-sm font-mono transition-all border focus:outline-none"
+                    style={{
+                      background: '#fff',
+                      borderColor: `${TERMINAL.bgTertiary}50`,
+                      color: TERMINAL.textDark,
+                    }}
+                  />
+                </div>
+                <p className="text-xs mt-1.5 font-mono" style={{ color: TERMINAL.textSecondary }}>
                   支持 OpenAI、Azure、本地模型等兼容接口
                 </p>
               </div>
 
+              {/* Model */}
               <div>
-                <label className="block text-sm font-medium text-cream-700 mb-2">
-                  模型名称 <span className="text-red-500">*</span>
+                <label className="text-xs font-medium mb-2 font-mono flex items-center gap-1.5" style={{ color: TERMINAL.textSecondary }}>
+                  <Terminal size={10} />
+                  模型名称 <span style={{ color: TERMINAL.pink }}>*</span>
                 </label>
-                <input
-                  type="text"
-                  value={localConfig.model}
-                  onChange={(e) => setLocalConfig({ ...localConfig, model: e.target.value })}
-                  placeholder="gpt-3.5-turbo"
-                  className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
-                />
-                <p className="text-xs text-cream-500 mt-1.5">
+                <div className="relative">
+                  <span
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono"
+                    style={{ color: TERMINAL.green }}
+                  >
+                    $
+                  </span>
+                  <input
+                    type="text"
+                    value={localConfig.model}
+                    onChange={(e) => setLocalConfig({ ...localConfig, model: e.target.value })}
+                    placeholder="gpt-3.5-turbo"
+                    className="w-full pl-7 pr-3 py-2.5 rounded-lg text-sm font-mono transition-all border focus:outline-none"
+                    style={{
+                      background: '#fff',
+                      borderColor: `${TERMINAL.bgTertiary}50`,
+                      color: TERMINAL.textDark,
+                    }}
+                  />
+                </div>
+                <p className="text-xs mt-1.5 font-mono" style={{ color: TERMINAL.textSecondary }}>
                   例如: gpt-3.5-turbo, gpt-4, gpt-4-turbo
                 </p>
               </div>
 
+              {/* Temperature & Max Tokens */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-cream-700 mb-2">
-                    温度 ({localConfig.temperature})
+                  <label className="text-xs font-medium mb-2 font-mono inline-block" style={{ color: TERMINAL.textSecondary }}>
+                    温度
                   </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="2"
-                    step="0.1"
-                    value={localConfig.temperature}
-                    onChange={(e) => setLocalConfig({ ...localConfig, temperature: parseFloat(e.target.value) })}
-                    className="w-full accent-purple-500"
-                  />
-                  <p className="text-xs text-cream-500 mt-1.5">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={localConfig.temperature}
+                      onChange={(e) => setLocalConfig({ ...localConfig, temperature: parseFloat(e.target.value) })}
+                      className="flex-1 accent-purple-500"
+                    />
+                    <span className="text-xs font-mono w-8 text-right" style={{ color: TERMINAL.cyan }}>
+                      {localConfig.temperature}
+                    </span>
+                  </div>
+                  <p className="text-xs mt-1.5 font-mono" style={{ color: TERMINAL.textSecondary }}>
                     值越低越确定性
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-cream-700 mb-2">
-                    最大 Token 数
+                  <label className="text-xs font-medium mb-2 font-mono inline-block" style={{ color: TERMINAL.textSecondary }}>
+                    最大令牌数
                   </label>
                   <input
                     type="number"
@@ -161,29 +274,50 @@ const ConfigDialog: React.FC = () => {
                     max="128000"
                     value={localConfig.maxTokens}
                     onChange={(e) => setLocalConfig({ ...localConfig, maxTokens: parseInt(e.target.value) || 32768 })}
-                    className="w-full px-4 py-3 glass-input rounded-xl focus:outline-none transition-all text-cream-900 placeholder-cream-500"
+                    className="w-full px-3 py-2.5 rounded-lg text-sm font-mono border transition-all focus:outline-none"
+                    style={{
+                      background: '#fff',
+                      borderColor: `${TERMINAL.bgTertiary}50`,
+                      color: TERMINAL.textDark,
+                    }}
                   />
-                  <p className="text-xs text-cream-500 mt-1.5">
-                    默认 32768，可根据模型调整
+                  <p className="text-xs mt-1.5 font-mono" style={{ color: TERMINAL.textSecondary }}>
+                    默认 32768
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="flex gap-3 p-5 border-t border-gray-200/50">
+            {/* 底部按钮区域 */}
+            <div
+              className="flex gap-3 px-5 py-4 border-t"
+              style={{ borderColor: `${TERMINAL.bgTertiary}30` }}
+            >
               <button
                 onClick={handleValidate}
                 disabled={isValidating || !localConfig.apiKey || !localConfig.baseUrl}
-                className="flex-1 px-4 py-3 text-sm text-cream-900 bg-white/60 hover:bg-white/90 rounded-xl border border-gray-200/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="flex-1 px-4 py-2.5 text-sm font-mono rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                style={{
+                  background: '#fff',
+                  borderColor: `${TERMINAL.bgTertiary}50`,
+                  color: TERMINAL.textSecondary,
+                }}
               >
-                {isValidating ? '验证中...' : '验证配置'}
+                <Terminal size={14} />
+                {isValidating ? '验证中...' : '--验证'}
               </button>
               <button
                 onClick={handleSave}
                 disabled={!localConfig.apiKey || !localConfig.baseUrl}
-                className="flex-1 px-4 py-3 bg-gradient-to-br from-primary-blue to-primary-cyan hover:opacity-90 text-white rounded-xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all"
+                className="flex-1 px-4 py-2.5 text-sm font-mono rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2"
+                style={{
+                  background: `${TERMINAL.cyan}20`,
+                  borderColor: TERMINAL.cyan,
+                  color: TERMINAL.cyan,
+                }}
               >
-                保存
+                <Settings size={14} />
+                --保存
               </button>
             </div>
           </motion.div>

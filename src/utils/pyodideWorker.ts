@@ -30,7 +30,7 @@ import {
   type PyodideExecutionResult,
   type ValidationResult,
 } from './PyodideExecutor';
-import type { WorkspaceFile } from './PyodideFileSystemBridge';
+import type { WorkspaceFile, MountPointConfig } from './PyodideFileSystemBridge';
 
 /**
  * 执行 Python 代码
@@ -135,6 +135,8 @@ export async function executePythonInWorkspace(
     maxFileSize?: number;
     timeout?: number;
     autoSync?: boolean;
+    /** 配置文件夹路径（.zero-employee） */
+    configPath?: string;
     /** 额外的 Python 路径，用于加载模块 */
     pythonPath?: string[];
   }
@@ -210,5 +212,145 @@ export function unmountWorkspace(): void {
   pyodideExecutor.unmountWorkspace();
 }
 
+/**
+ * 挂载工作空间和配置目录
+ *
+ * @param workspacePath 工作空间路径
+ * @param configPath 配置目录路径（可选，如 .zero-employee）
+ * @param options 挂载选项
+ * @returns 是否成功挂载
+ *
+ * @example
+ * ```typescript
+ * // 挂载工作空间和配置
+ * await mountWorkspaceAndConfig(
+ *   'D:\\work\\myproject',
+ *   'D:\\work\\myproject\\.zero-employee'
+ * );
+ * ```
+ */
+export async function mountWorkspaceAndConfig(
+  workspacePath: string,
+  configPath?: string,
+  options?: {
+    maxFileSize?: number;
+    pattern?: RegExp;
+    exclude?: RegExp;
+  }
+): Promise<boolean> {
+  return pyodideExecutor.mountWorkspaceAndConfig(workspacePath, configPath, options);
+}
+
+// ============================================================================
+// 多挂载点支持（高级用法）
+// ============================================================================
+
+/**
+ * 注册一个挂载点
+ *
+ * @param name 挂载点名称（如 'workspace', 'config'）
+ * @param localPath 本地文件系统路径
+ * @param type 挂载点类型
+ *
+ * @example
+ * ```typescript
+ * // 注册工作空间和配置文件夹
+ * registerMountPoint('workspace', 'D:\\work\\myproject', 'workspace');
+ * registerMountPoint('config', 'D:\\work\\myproject\\.zero-employee', 'config');
+ *
+ * // 挂载所有
+ * await mountAll();
+ * ```
+ */
+export function registerMountPoint(
+  name: string,
+  localPath: string,
+  type: MountPointConfig['type'] = 'custom'
+): void {
+  pyodideExecutor.registerMountPoint(name, localPath, type);
+}
+
+/**
+ * 挂载单个挂载点
+ *
+ * @param name 挂载点名称
+ * @returns 是否成功挂载
+ */
+export async function mountPoint(name: string): Promise<boolean> {
+  return pyodideExecutor.mountPoint(name);
+}
+
+/**
+ * 挂载所有已注册的挂载点
+ *
+ * @returns 是否全部成功挂载
+ */
+export async function mountAll(): Promise<boolean> {
+  return pyodideExecutor.mountAll();
+}
+
+/**
+ * 从指定挂载点读取文件
+ *
+ * @param mountName 挂载点名称
+ * @param relativePath 相对路径
+ * @returns 文件内容（字符串）
+ *
+ * @example
+ * ```typescript
+ * const content = await readFromMount('config', 'settings.json');
+ * ```
+ */
+export async function readFromMount(mountName: string, relativePath: string): Promise<string> {
+  return pyodideExecutor.readFromMount(mountName, relativePath);
+}
+
+/**
+ * 写入文件到指定挂载点
+ *
+ * @param mountName 挂载点名称
+ * @param relativePath 相对路径
+ * @param content 文件内容
+ * @param encoding 编码（可选）
+ *
+ * @example
+ * ```typescript
+ * await writeToMount('config', 'settings.json', JSON.stringify(newConfig));
+ * ```
+ */
+export async function writeToMount(
+  mountName: string,
+  relativePath: string,
+  content: string,
+  encoding?: 'utf-8' | 'base64'
+): Promise<void> {
+  return pyodideExecutor.writeToMount(mountName, relativePath, content, encoding);
+}
+
+/**
+ * 获取所有挂载点
+ *
+ * @returns 挂载点配置列表
+ */
+export function getMountPoints(): MountPointConfig[] {
+  return pyodideExecutor.getMountPoints();
+}
+
+/**
+ * 卸载指定挂载点
+ *
+ * @param name 挂载点名称，如果为空则卸载 workspace
+ */
+export function unmountPoint(name?: string): void {
+  pyodideExecutor.unmountPoint(name);
+}
+
+/**
+ * 卸载所有挂载点
+ */
+export function unmountAllPoints(): void {
+  pyodideExecutor.unmountAllPoints();
+}
+
 // 重新导出类型
-export type { PyodideExecutionOptions, PyodideExecutionResult, ValidationResult, WorkspaceFile };
+export type { PyodideExecutionOptions, PyodideExecutionResult, ValidationResult, WorkspaceFile, MountPointConfig };

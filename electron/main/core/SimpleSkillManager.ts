@@ -240,9 +240,16 @@ export class SimpleSkillManager {
     return `## 可用技能
 
 以下技能扩展了你的能力。使用技能时：
-1. 使用 \`read_skill\` 工具读取技能的 SKILL.md 文件
-2. 需要时使用 \`list_skill_directory\` 探索技能目录（如 scripts/*.py）
+1. 使用 \`read_file\` 工具读取技能的 SKILL.md 文件，设置 \`namespace: "config"\`
+   - 示例：\`read_file({ filepath: "skills/技能名/SKILL.md", namespace: "config" })\`
+2. 需要时使用 \`list_directory\` 探索技能目录（如 scripts/*.py），同样设置 \`namespace: "config"\`
+   - 示例：\`list_directory({ directory: "skills/技能名/scripts", namespace: "config" })\`
 3. 阅读文档中的示例和说明后再执行操作
+
+**文件路径说明**：
+- 技能文件位于 \`.zero-employee/skills/\` 目录下
+- 使用 \`namespace: "config"\` 参数访问配置目录下的文件
+- \`filepath\` 或 \`directory\` 是相对于配置目录根目录的路径
 
 **Python 脚本执行**：
 当 SKILL.md 文档中包含 \`python scripts/xxx.py\` 命令时：
@@ -266,15 +273,28 @@ ${sections.join('\n\n')}`;
   /**
    * 加载指定 skills 的完整内容（nanobot 风格）
    * 用于系统提示词中 always skills 的完整加载
+   * 限制单个技能内容长度，防止请求体过大
    */
   async load_skills_for_context(skills: SkillMeta[]): Promise<string> {
     const sections: string[] = [];
+    const MAX_SKILL_CONTENT_LENGTH = 5000; // 限制单个技能内容长度
 
     for (const skill of skills) {
       const fullSkill = await this.loadSkill(skill.name);
       if (fullSkill) {
         const emoji = skill.emoji ? `${skill.emoji} ` : '';
-        sections.push(`## ${emoji}${skill.name}\n\n${fullSkill.content}`);
+        let content = fullSkill.content;
+
+        // 截断过长的技能内容
+        if (content.length > MAX_SKILL_CONTENT_LENGTH) {
+          console.warn(`[SimpleSkillManager] Skill "${skill.name}" content too large (${content.length} chars), truncating to ${MAX_SKILL_CONTENT_LENGTH}`);
+          const relativePath = relative(this.workspaceSkillsDir, skill.path);
+          const skillPath = `.zero-employee/skills/${relativePath}`;
+          content = content.slice(0, MAX_SKILL_CONTENT_LENGTH) +
+            `\n\n... (内容过长，已截断。使用 read_file 工具读取完整内容: filepath="${skillPath}", namespace="config")`;
+        }
+
+        sections.push(`## ${emoji}${skill.name}\n\n${content}`);
       }
     }
 

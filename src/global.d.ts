@@ -15,9 +15,10 @@ interface ElectronAPI {
       success: boolean;
       content?: string;
       path?: string;
+      encoding?: 'utf-8' | 'base64';
       error?: string;
     }>;
-    writeFile: (workspacePath: string, relativePath: string, content: string) => Promise<{
+    writeFile: (workspacePath: string, relativePath: string, content: string, encoding?: string) => Promise<{
       success: boolean;
       path?: string;
       error?: string;

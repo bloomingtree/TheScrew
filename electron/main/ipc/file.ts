@@ -1,6 +1,7 @@
 import { ipcMain, dialog } from 'electron';
-import { readFile, stat, readdir, writeFile } from 'fs/promises';
+import { readFile, stat, readdir, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
+import { getFileEncoding } from '../utils/fileTypeDetector';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
@@ -133,7 +134,7 @@ export function registerFileHandlers() {
   });
 
   /**
-   * 读取工作空间文件内容
+   * 读取工作空间文件内容 (支持二进制文件)
    * 用于将文件加载到 Pyodide 的 MEMFS
    */
   ipcMain.handle('pyodide:read-file', async (_event, workspacePath: string, relativePath: string) => {
@@ -144,19 +145,31 @@ export function registerFileHandlers() {
         return { success: false, error: '路径遍历检测：尝试访问工作空间外部的文件' };
       }
 
-      const content = await readFile(resolvedPath, 'utf-8');
+      // 检测文件类型以确定合适的编码
+      const encoding = getFileEncoding(relativePath);
 
-      return { success: true, content, path: relativePath };
+      let content: string;
+
+      if (encoding === 'base64') {
+        // 二进制文件：读取为 Buffer 并转换为 base64
+        const buffer = await readFile(resolvedPath);
+        content = buffer.toString('base64');
+      } else {
+        // 文本文件：读取为 UTF-8 字符串
+        content = await readFile(resolvedPath, 'utf-8');
+      }
+
+      return { success: true, content, path: relativePath, encoding };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
   });
 
   /**
-   * 写入文件到工作空间
+   * 写入文件到工作空间 (支持二进制文件)
    * 用于将 Pyodide MEMFS 中的更改同步到本地文件系统
    */
-  ipcMain.handle('pyodide:write-file', async (_event, workspacePath: string, relativePath: string, content: string) => {
+  ipcMain.handle('pyodide:write-file', async (_event, workspacePath: string, relativePath: string, content: string, encoding?: string) => {
     try {
       // 安全检查：确保路径在工作空间内
       const resolvedPath = path.resolve(workspacePath, relativePath);
@@ -166,10 +179,17 @@ export function registerFileHandlers() {
 
       // 确保目录存在
       const dir = path.dirname(resolvedPath);
-      const { mkdir } = await import('fs/promises');
       await mkdir(dir, { recursive: true });
 
-      await writeFile(resolvedPath, content, 'utf-8');
+      // 根据编码写入文件
+      if (encoding === 'base64') {
+        // 二进制文件：从 base64 解码为 Buffer
+        const buffer = Buffer.from(content, 'base64');
+        await writeFile(resolvedPath, buffer);
+      } else {
+        // 文本文件：直接写入字符串
+        await writeFile(resolvedPath, content, 'utf-8');
+      }
 
       return { success: true, path: relativePath };
     } catch (error: any) {

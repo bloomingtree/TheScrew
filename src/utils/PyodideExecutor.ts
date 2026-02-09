@@ -8,7 +8,7 @@
  */
 
 import { loadPyodide, PyodideInterface } from 'pyodide';
-import { PyodideFileSystemBridge, WorkspaceFile } from './PyodideFileSystemBridge';
+import { PyodideFileSystemBridge, WorkspaceFile, MountPointConfig } from './PyodideFileSystemBridge';
 
 export interface PyodideExecutionOptions {
   /** 超时时间（毫秒），默认 30 秒 */
@@ -225,6 +225,98 @@ class PyodideExecutorManager {
   }
 
   /**
+   * 注册一个挂载点
+   *
+   * @param name 挂载点名称
+   * @param localPath 本地路径
+   * @param type 挂载点类型
+   */
+  registerMountPoint(
+    name: string,
+    localPath: string,
+    type: MountPointConfig['type'] = 'custom'
+  ): void {
+    if (!this.fsBridge) {
+      this.initFileSystemBridge();
+    }
+    this.fsBridge?.registerMountPoint(name, localPath, type);
+  }
+
+  /**
+   * 挂载单个挂载点
+   */
+  async mountPoint(name: string): Promise<boolean> {
+    if (!this.fsBridge) {
+      return false;
+    }
+    return await this.fsBridge.mountPoint(name);
+  }
+
+  /**
+   * 挂载所有已注册的挂载点
+   */
+  async mountAll(): Promise<boolean> {
+    if (!this.fsBridge) {
+      return false;
+    }
+    return await this.fsBridge.mountAll();
+  }
+
+  /**
+   * 从指定挂载点读取文件
+   */
+  async readFromMount(mountName: string, relativePath: string): Promise<string> {
+    if (!this.fsBridge) {
+      throw new Error('File system bridge not initialized');
+    }
+    return await this.fsBridge.readFileFromMount(mountName, relativePath);
+  }
+
+  /**
+   * 写入文件到指定挂载点
+   */
+  async writeToMount(
+    mountName: string,
+    relativePath: string,
+    content: string,
+    encoding?: 'utf-8' | 'base64'
+  ): Promise<void> {
+    if (!this.fsBridge) {
+      throw new Error('File system bridge not initialized');
+    }
+    await this.fsBridge.writeFileToMount(mountName, relativePath, content, encoding);
+  }
+
+  /**
+   * 获取所有挂载点
+   */
+  getMountPoints(): MountPointConfig[] {
+    return this.fsBridge?.getMountPoints() || [];
+  }
+
+  /**
+   * 卸载指定挂载点
+   *
+   * @param name 挂载点名称，如果为空则卸载 workspace
+   */
+  unmountPoint(name?: string): void {
+    if (!this.fsBridge) {
+      return;
+    }
+    this.fsBridge.unmount(name);
+  }
+
+  /**
+   * 卸载所有挂载点
+   */
+  unmountAllPoints(): void {
+    if (!this.fsBridge) {
+      return;
+    }
+    this.fsBridge.unmountAll();
+  }
+
+  /**
    * 挂载工作空间到 Pyodide 文件系统
    *
    * @param workspacePath 工作空间路径
@@ -255,7 +347,39 @@ class PyodideExecutorManager {
   }
 
   /**
-   * 在工作空间中执行 Python 代码
+   * 挂载工作空间和配置目录
+   *
+   * @param workspacePath 工作空间路径
+   * @param configPath 配置目录路径（.zero-employee）
+   * @param options 挂载选项
+   * @returns 是否成功挂载
+   */
+  async mountWorkspaceAndConfig(
+    workspacePath: string,
+    configPath?: string,
+    options?: {
+      maxFileSize?: number;
+      pattern?: RegExp;
+      exclude?: RegExp;
+    }
+  ): Promise<boolean> {
+    if (!this.pyodide) {
+      await this.init();
+    }
+
+    if (!this.fsBridge) {
+      this.initFileSystemBridge();
+    }
+
+    if (!this.fsBridge) {
+      return false;
+    }
+
+    return await this.fsBridge.mountWorkspaceAndConfig(workspacePath, configPath, options);
+  }
+
+  /**
+   * 在工作空间中执行 Python 代码（支持多挂载点）
    *
    * @param code Python 代码
    * @param workspacePath 工作空间路径
@@ -270,15 +394,19 @@ class PyodideExecutorManager {
       maxFileSize?: number;
       timeout?: number;
       autoSync?: boolean;
+      /** 配置文件夹路径（.zero-employee），提供则自动挂载 */
+      configPath?: string;
       /** 额外的 Python 路径，用于加载模块 */
       pythonPath?: string[];
     }
   ): Promise<PyodideExecutionResult> {
-    // 挂载工作空间
+    // 挂载工作空间和配置目录
     if (options?.mount !== false) {
-      const mounted = await this.mountWorkspace(workspacePath, {
-        maxFileSize: options?.maxFileSize
-      });
+      const mounted = await this.mountWorkspaceAndConfig(
+        workspacePath,
+        options?.configPath,
+        { maxFileSize: options?.maxFileSize }
+      );
 
       if (!mounted) {
         return {
@@ -288,11 +416,10 @@ class PyodideExecutorManager {
       }
     }
 
-    // 添加工作空间到 Python 路径并切换目录
-    const mountPoint = this.fsBridge?.getMountPoint() ?? '/workspace';
+    // 构建 Python 代码包装
     const extraPaths = options?.pythonPath || [];
 
-    // 构建 Python 路径添加代码
+    // Python 路径添加代码
     const pathSetupCode = extraPaths.length > 0
       ? `# 添加额外的 Python 路径
 for path in ${JSON.stringify(extraPaths)}:
@@ -301,14 +428,25 @@ for path in ${JSON.stringify(extraPaths)}:
 `
       : '';
 
+    // 配置路径代码（如果提供了 configPath）
+    const configPathSetup = options?.configPath
+      ? `# 添加配置路径到 sys.path
+try:
+    sys.path.insert(0, '/config')
+except:
+    pass
+`
+      : '';
+
     const wrappedCode = `
 import os
 import sys
 
 # 添加工作空间到 Python 路径
-sys.path.insert(0, '${mountPoint}')
+sys.path.insert(0, '/workspace')
 ${pathSetupCode}
-os.chdir('${mountPoint}')
+${configPathSetup}
+os.chdir('/workspace')
 
 ${code}
 `;

@@ -504,8 +504,7 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
 
       {/* 时间戳（气泡外部下方） */}
       {showTimestamp && (
-        <div className="text-[10px] mt-1 whitespace-nowrap font-mono flex items-center gap-1">
-          <Terminal size={9} style={{ color: TERMINAL.textSecondary }} />
+        <div className="text-[10px] mt-1 whitespace-nowrap font-mono">
           <span style={{ color: isDark ? TERMINAL.textSecondary : '#999' }}>
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>

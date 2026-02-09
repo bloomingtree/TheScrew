@@ -127,11 +127,31 @@ export class OpenAIClient {
       return 100000;
     }
 
+    // Qwen 系列（新增）
+    if (modelLower.includes('qwen3-8b') || modelLower.includes('qwen-3-8b')) {
+      return 8192; // qwen3-8b 通常支持 8k 上下文
+    }
+    if (modelLower.includes('qwen')) {
+      return 32768;
+    }
+
     // 默认值
     return 4096;
   }
 
   async *streamChat(messages: any[], signal?: AbortSignal, tools?: any[]): AsyncGenerator<string> {
+    // 粗略估算请求体大小
+    const messagesStr = JSON.stringify(messages);
+    const toolsStr = tools ? JSON.stringify(tools) : '';
+    const estimatedSize = messagesStr.length + toolsStr.length;
+
+    // 警告：请求体过大
+    const SIZE_WARNING_THRESHOLD = 50000; // 50KB
+    if (estimatedSize > SIZE_WARNING_THRESHOLD) {
+      console.warn(`[OpenAIClient] Request body is large: ~${(estimatedSize / 1024).toFixed(2)} KB`);
+      console.warn(`[OpenAIClient] This may exceed the model's context window and cause 400 errors`);
+    }
+
     const requestBody: any = {
       model: this.model,
       messages,

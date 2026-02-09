@@ -44,10 +44,11 @@ const electronAPI = {
         success: boolean;
         content?: string;
         path?: string;
+        encoding?: 'utf-8' | 'base64';
         error?: string;
       }>,
-    writeFile: (workspacePath: string, relativePath: string, content: string) =>
-      ipcRenderer.invoke('pyodide:write-file', workspacePath, relativePath, content) as Promise<{
+    writeFile: (workspacePath: string, relativePath: string, content: string, encoding?: string) =>
+      ipcRenderer.invoke('pyodide:write-file', workspacePath, relativePath, content, encoding) as Promise<{
         success: boolean;
         path?: string;
         error?: string;

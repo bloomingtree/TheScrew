@@ -45,6 +45,9 @@ const SEARCH_CONFIG = {
 
   /** 最大搜索深度（防止无限递归） */
   MAX_DEPTH: 50,
+
+  /** 递归模式下的最大文件数量限制 */
+  MAX_FILES: 5000,
 };
 
 export function setWorkspacePath(path: string | null) {
@@ -87,36 +90,67 @@ export const fileTools: Tool[] = [
 
   {
     name: 'list_directory',
-    description: '列出目录内容（支持递归）',
+    description: `列出目录内容（支持递归）
+
+**警告**：recursive=true 时会递归遍历所有子目录，对于大型目录可能导致性能问题。
+- 有深度限制（${SEARCH_CONFIG.MAX_DEPTH} 层）和文件数量限制（${SEARCH_CONFIG.MAX_FILES} 个文件）
+- 会自动忽略 node_modules、.git、dist、build 等常见目录
+- 对于大型项目，建议先不使用 recursive，然后按需探索子目录
+
+**使用建议**：
+- 探索未知目录：先使用 recursive=false，查看顶层结构
+- 探索特定子目录：再针对需要的子目录使用 recursive=true
+- 读取配置目录：使用 namespace="config" 访问 .zero-employee 目录`,
     parameters: {
       type: 'object',
       properties: {
         directory: {
           type: 'string',
-          description: '要列出的目录路径（相对于工作空间）',
+          description: '要列出的目录路径（相对于指定命名空间的根目录）',
+        },
+        namespace: {
+          type: 'string',
+          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          enum: ['workspace', 'config'],
+          default: 'workspace',
         },
         recursive: {
           type: 'boolean',
-          description: '是否递归列出子目录',
+          description: '是否递归列出子目录（警告：大目录可能很慢）',
           default: false,
         },
       },
       required: ['directory'],
     },
-    handler: async ({ directory, recursive = false }) => {
+    handler: async ({ directory, namespace = 'workspace', recursive = false }) => {
       try {
         if (!workspacePath) {
           return { success: false, error: '工作空间未设置' };
         }
 
-        const fullPath = path.resolve(workspacePath, directory);
-        const files = await listFiles(fullPath, recursive, workspacePath);
+        let rootPath: string;
+        if (namespace === 'config') {
+          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+        } else {
+          rootPath = workspacePath;
+        }
 
-        return {
+        const fullPath = path.resolve(rootPath, directory);
+        const fileCount = { current: 0, max: SEARCH_CONFIG.MAX_FILES };
+        const files = await listFiles(fullPath, recursive, rootPath, 0, fileCount);
+
+        const truncated = fileCount.current >= fileCount.max;
+        const result: any = {
           success: true,
           files,
           count: files.length,
         };
+
+        if (truncated) {
+          result.warning = `结果已截断：文件数量超过限制（${fileCount.max}），仅显示部分结果`;
+        }
+
+        return result;
       } catch (error: any) {
         return { success: false, error: error.message };
       }
@@ -125,24 +159,38 @@ export const fileTools: Tool[] = [
 
   {
     name: 'read_file',
-    description: '读取文件内容',
+    description: '读取文件内容。支持从工作空间或配置目录（.zero-employee）读取文件。',
     parameters: {
       type: 'object',
       properties: {
         filepath: {
           type: 'string',
-          description: '要读取的文件路径（相对于工作空间）',
+          description: '要读取的文件路径（相对于指定命名空间的根目录）',
+        },
+        namespace: {
+          type: 'string',
+          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          enum: ['workspace', 'config'],
+          default: 'workspace',
         },
       },
       required: ['filepath'],
     },
-    handler: async ({ filepath, _toolCallId }) => {
+    handler: async ({ filepath, namespace = 'workspace', _toolCallId }) => {
       try {
         if (!workspacePath) {
           return { success: false, error: '工作空间未设置' };
         }
 
-        const fullPath = path.resolve(workspacePath, filepath);
+        // 根据 namespace 决定根目录
+        let rootPath: string;
+        if (namespace === 'config') {
+          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+        } else {
+          rootPath = workspacePath;
+        }
+
+        const fullPath = path.resolve(rootPath, filepath);
         const content = await readFile(fullPath, 'utf-8');
         const stats = await stat(fullPath);
 
@@ -157,6 +205,8 @@ export const fileTools: Tool[] = [
           success: true,
           content: truncationResult.displayContent,
           path: filepath,
+          namespace,
+          fullPath,
           size: stats.size,
           ...truncationResult.metadata,
         };
@@ -174,23 +224,37 @@ export const fileTools: Tool[] = [
       properties: {
         filepath: {
           type: 'string',
-          description: '文件路径（相对于工作空间）',
+          description: '文件路径（相对于指定命名空间的根目录）',
+        },
+        namespace: {
+          type: 'string',
+          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          enum: ['workspace', 'config'],
+          default: 'workspace',
         },
       },
       required: ['filepath'],
     },
-    handler: async ({ filepath }) => {
+    handler: async ({ filepath, namespace = 'workspace' }) => {
       try {
         if (!workspacePath) {
           return { success: false, error: '工作空间未设置' };
         }
 
-        const fullPath = path.resolve(workspacePath, filepath);
+        let rootPath: string;
+        if (namespace === 'config') {
+          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+        } else {
+          rootPath = workspacePath;
+        }
+
+        const fullPath = path.resolve(rootPath, filepath);
         const stats = await stat(fullPath);
 
         return {
           success: true,
           path: filepath,
+          namespace,
           name: path.basename(filepath),
           extension: path.extname(filepath),
           size: stats.size,
@@ -226,7 +290,13 @@ export const fileTools: Tool[] = [
       properties: {
         filepath: {
           type: 'string',
-          description: '要编辑的文件路径（相对于工作空间）',
+          description: '要编辑的文件路径（相对于指定命名空间的根目录）',
+        },
+        namespace: {
+          type: 'string',
+          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          enum: ['workspace', 'config'],
+          default: 'workspace',
         },
         old_text: {
           type: 'string',
@@ -239,13 +309,20 @@ export const fileTools: Tool[] = [
       },
       required: ['filepath', 'old_text', 'new_text'],
     },
-    handler: async ({ filepath, old_text, new_text }) => {
+    handler: async ({ filepath, namespace = 'workspace', old_text, new_text }) => {
       try {
         if (!workspacePath) {
           return { success: false, error: '工作空间未设置' };
         }
 
-        const fullPath = path.resolve(workspacePath, filepath);
+        let rootPath: string;
+        if (namespace === 'config') {
+          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+        } else {
+          rootPath = workspacePath;
+        }
+
+        const fullPath = path.resolve(rootPath, filepath);
 
         // 读取文件内容
         const content = await readFile(fullPath, 'utf-8');
@@ -272,6 +349,7 @@ export const fileTools: Tool[] = [
           success: true,
           message: `成功编辑文件: ${filepath}`,
           filepath,
+          namespace,
           replaceCount,
           old_text,
           new_text,
@@ -301,7 +379,13 @@ export const fileTools: Tool[] = [
       properties: {
         filepath: {
           type: 'string',
-          description: '要写入的文件路径（相对于工作空间）',
+          description: '要写入的文件路径（相对于指定命名空间的根目录）',
+        },
+        namespace: {
+          type: 'string',
+          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          enum: ['workspace', 'config'],
+          default: 'workspace',
         },
         content: {
           type: 'string',
@@ -310,13 +394,20 @@ export const fileTools: Tool[] = [
       },
       required: ['filepath', 'content'],
     },
-    handler: async ({ filepath, content }) => {
+    handler: async ({ filepath, namespace = 'workspace', content }) => {
       try {
         if (!workspacePath) {
           return { success: false, error: '工作空间未设置' };
         }
 
-        const fullPath = path.resolve(workspacePath, filepath);
+        let rootPath: string;
+        if (namespace === 'config') {
+          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+        } else {
+          rootPath = workspacePath;
+        }
+
+        const fullPath = path.resolve(rootPath, filepath);
 
         // 确保父目录存在
         const dir = path.dirname(fullPath);
@@ -329,6 +420,7 @@ export const fileTools: Tool[] = [
           success: true,
           message: `成功写入文件: ${filepath}`,
           filepath,
+          namespace,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -348,11 +440,18 @@ async function listFiles(
   dirPath: string,
   recursive: boolean,
   basePath: string,
-  currentDepth: number = 0
+  currentDepth: number = 0,
+  fileCount: { current: number; max: number } = { current: 0, max: SEARCH_CONFIG.MAX_FILES }
 ): Promise<any[]> {
   // 深度限制检查
   if (recursive && currentDepth >= SEARCH_CONFIG.MAX_DEPTH) {
     console.warn(`[listFiles] Reached max depth ${SEARCH_CONFIG.MAX_DEPTH} at ${dirPath}`);
+    return [];
+  }
+
+  // 文件数量限制检查
+  if (recursive && fileCount.current >= fileCount.max) {
+    console.warn(`[listFiles] Reached max files ${fileCount.max}, stopping recursion`);
     return [];
   }
 
@@ -395,8 +494,14 @@ async function listFiles(
           name: entry.name,
           path: relativePath,
         });
-        const subFiles = await listFiles(fullPath, recursive, basePath, currentDepth + 1);
+        const subFiles = await listFiles(fullPath, recursive, basePath, currentDepth + 1, fileCount);
         files.push(...subFiles);
+
+        // 检查是否在子目录遍历中达到了限制
+        if (fileCount.current >= fileCount.max) {
+          console.warn(`[listFiles] Reached max files ${fileCount.max} in subdirectory`);
+          break;
+        }
       } else {
         files.push({
           type: 'directory',
@@ -412,107 +517,10 @@ async function listFiles(
         extension: path.extname(entry.name),
         size: stats.size,
       });
+      fileCount.current++;
     }
   }
 
   return files;
 }
-
-// ==================== Skills 读取工具 ====================
-
-/**
- * 获取应用根路径
- */
-function getAppRootPath(): string {
-  if (process.env.NODE_ENV === 'development') {
-    return path.resolve(__dirname, '../../');
-  }
-  return process.resourcesPath || app.getPath('userData');
-}
-
-export const skillTools: Tool[] = [
-  {
-    name: 'list_skill_directory',
-    description: '列出技能目录的内容（位于 .zero-employee/skills/）。用于探索技能目录下的文件结构，如发现 scripts/*.py 等辅助脚本。',
-    parameters: {
-      type: 'object',
-      properties: {
-        skillName: {
-          type: 'string',
-          description: '技能名称，如 "docx" 等',
-        },
-        subPath: {
-          type: 'string',
-          description: '技能目录下的子路径（可选），如 "scripts" 或 "templates"',
-        },
-        recursive: {
-          type: 'boolean',
-          description: '是否递归列出子目录',
-          default: false,
-        },
-      },
-      required: ['skillName'],
-    },
-    handler: async ({ skillName, subPath = '', recursive = false }) => {
-      try {
-        const appRoot = getAppRootPath();
-        const skillBasePath = path.join(appRoot, '.zero-employee', 'skills', skillName);
-        const targetPath = subPath ? path.join(skillBasePath, subPath) : skillBasePath;
-
-        const files = await listFiles(targetPath, recursive, skillBasePath);
-
-        return {
-          success: true,
-          skillName,
-          path: path.join('.zero-employee', 'skills', skillName, subPath),
-          files,
-          count: files.length,
-        };
-      } catch (error: any) {
-        return { success: false, error: error.message };
-      }
-    },
-  },
-  {
-    name: 'read_skill',
-    description: '读取应用内技能目录中的文件（位于 .zero-employee/skills/ 目录）。默认读取 SKILL.md，也可指定读取技能目录下的其他文件（如 scripts/*.py）。',
-    parameters: {
-      type: 'object',
-      properties: {
-        skillName: {
-          type: 'string',
-          description: '技能名称，如 "office", "docx" 等',
-        },
-        filePath: {
-          type: 'string',
-          description: '技能目录下的文件路径（相对于技能目录）。不提供则读取 SKILL.md，如 "scripts/comment.py"',
-        },
-      },
-      required: ['skillName'],
-    },
-    handler: async ({ skillName, filePath }) => {
-      try {
-        const appRoot = getAppRootPath();
-        // 如果提供了 filePath，读取指定文件；否则读取 SKILL.md
-        const relativePath = filePath
-          ? path.join('.zero-employee', 'skills', skillName, filePath)
-          : path.join('.zero-employee', 'skills', skillName, 'SKILL.md');
-
-        const skillPath = path.join(appRoot, relativePath);
-        const content = await readFile(skillPath, 'utf-8');
-        const stats = await stat(skillPath);
-
-        return {
-          success: true,
-          content,
-          skillName,
-          path: relativePath,
-          size: stats.size,
-        };
-      } catch (error: any) {
-        return { success: false, error: error.message };
-      }
-    },
-  },
-];
 
