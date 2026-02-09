@@ -2,7 +2,8 @@ import { ipcMain } from 'electron';
 import { OpenAIClient } from '../api/openai';
 import Store from 'electron-store';
 import { toolManager, ToolGroup, ToolManager } from '../tools/ToolManager';
-import { fileTools } from '../tools/FileTools';
+import { fileTools, skillTools } from '../tools/FileTools';
+import { pythonTools } from '../tools/PythonTools';
 // Office tools removed: BaseTools, WordTools, TemplateTools, PPTXTools, BatchTools, ExcelTools, PDFTools, OoxmlTools
 import { getWorkspacePath } from '../tools/FileTools';
 import { getContextBuilder } from '../core/ContextBuilder';
@@ -25,11 +26,6 @@ let currentAbortController: AbortController | null = null;
       },
       indent
     );
-
-    const maxStringLength = 5000;
-    if (result.length > maxStringLength) {
-      result = result.substring(0, maxStringLength) + `\n...[内容已截断，总长度${result.length}字符，仅显示前${maxStringLength}字符]`;
-    }
 
     return result;
   }
@@ -82,10 +78,10 @@ let currentAbortController: AbortController | null = null;
   }
 
 export function registerChatHandlers(store: Store) {
-  // 注册基础工具组（仅包含文件操作工具）
+  // 注册基础工具组（包含文件操作工具、技能工具和 Python 工具）
   const baseToolGroup: ToolGroup = {
     name: 'base',
-    tools: [...fileTools],
+    tools: [...fileTools, ...skillTools, ...pythonTools],
     keywords: [],
     triggers: {
       keywords: [],

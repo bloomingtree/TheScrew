@@ -226,9 +226,10 @@ export class SimpleSkillManager {
       // 计算相对于 .zero-employee/skills 的路径
       const relativePath = relative(this.workspaceSkillsDir, skill.path);
       const skillPath = `.zero-employee/skills/${relativePath}`;
+      const skillDir = `.zero-employee/skills/${skill.category}`;
 
       sections.push(
-        `### ${emoji}${skill.name}\n\n${skill.description}\n\n**文件**: ${skillPath}`
+        `### ${emoji}${skill.name}\n\n${skill.description}\n\n**SKILL.md**: \`${skillPath}\`\n**技能目录**: \`${skillDir}/\``
       );
     }
 
@@ -236,7 +237,22 @@ export class SimpleSkillManager {
       return '';
     }
 
-    return `## 可用技能\n\n你有以下技能可用。要使用某个技能，请使用 read_file 工具读取对应的 SKILL.md 文件。\n\n${sections.join('\n\n')}`;
+    return `## 可用技能
+
+以下技能扩展了你的能力。使用技能时：
+1. 使用 \`read_skill\` 工具读取技能的 SKILL.md 文件
+2. 需要时使用 \`list_skill_directory\` 探索技能目录（如 scripts/*.py）
+3. 阅读文档中的示例和说明后再执行操作
+
+**Python 脚本执行**：
+当 SKILL.md 文档中包含 \`python scripts/xxx.py\` 命令时：
+- 使用 \`exec_python_script\` 工具执行脚本
+- 参数：\`{ skillName: "技能名", scriptPath: "scripts/xxx.py", args: ["参数1", "参数2"] }\`
+- 示例：\`exec_python_script({ skillName: "docx", scriptPath: "scripts/accept_changes.py", args: ["input.docx", "output.docx"] })\`
+
+你有以下技能可用：
+
+${sections.join('\n\n')}`;
   }
 
   /**

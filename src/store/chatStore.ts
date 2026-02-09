@@ -59,7 +59,7 @@ export const useChatStore = create<ChatState>((set) => ({
     return { messages: updated };
   }),
 
-  updateLastMessageToolCalls: (toolCalls) => set((state) => {
+  updateLastMessageToolCalls: (newToolCalls) => set((state) => {
     if (state.messages.length === 0) return state;
 
     const updated = [...state.messages];
@@ -67,9 +67,14 @@ export const useChatStore = create<ChatState>((set) => ({
 
     // 确保最后一条消息是 assistant 角色
     if (updated[lastIndex].role === 'assistant') {
+      const existingToolCalls = updated[lastIndex].toolCalls || [];
+      // 追加新的工具调用，避免重复
+      const existingIds = new Set(existingToolCalls.map(tc => tc.id));
+      const uniqueNewCalls = newToolCalls.filter(tc => !existingIds.has(tc.id));
+
       updated[lastIndex] = {
         ...updated[lastIndex],
-        toolCalls,
+        toolCalls: [...existingToolCalls, ...uniqueNewCalls],
       };
     }
 
@@ -90,7 +95,12 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setToolCalls: (toolCalls) => set({ toolCalls }),
 
-  setToolResults: (toolResults) => set({ toolResults }),
+  setToolResults: (newResults) => set((state) => {
+    // 追加新的工具结果，避免重复
+    const existingIds = new Set(state.toolResults.map(r => r.toolCallId));
+    const uniqueNewResults = newResults.filter(r => !existingIds.has(r.toolCallId));
+    return { toolResults: [...state.toolResults, ...uniqueNewResults] };
+  }),
 
   startToolExecution: (execution) => set((state) => {
     const newExecutions = new Map(state.toolExecutions);

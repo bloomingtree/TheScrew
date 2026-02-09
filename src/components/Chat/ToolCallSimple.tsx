@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle, Clock, Eye } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle, Clock, Eye, Terminal } from 'lucide-react';
 import { ToolCall, ToolResult } from '../../types';
 import { getToolNameCN } from '../../types/thread';
 import { WordPreviewDialog } from '../WordPreview';
@@ -10,6 +10,24 @@ interface ToolCallSimpleProps {
   toolResults?: ToolResult[];
   status: 'running' | 'completed' | 'error';
 }
+
+// 终端风格色彩常量
+const TERMINAL = {
+  bg: '#1a1b26',
+  bgSecondary: '#24283b',
+  bgTertiary: '#414868',
+  lightBg: '#fff8f0',
+  green: '#9ece6a',
+  orange: '#ff9e64',
+  blue: '#7aa2f7',
+  cyan: '#2ac3de',
+  purple: '#bb9af7',
+  pink: '#f7768e',
+  yellow: '#e0af68',
+  textPrimary: '#c0caf5',
+  textSecondary: '#565f89',
+  textDark: '#1a1b26',
+};
 
 const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
   toolCalls,
@@ -63,9 +81,9 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      className="flex justify-start items-start"
+      className="flex justify-start items-start w-full"
     >
-      <div className="flex flex-col items-start space-y-2 max-w-[80%]">
+      <div className="flex flex-col items-start space-y-2 w-full">
       {toolCalls.map((toolCall, index) => {
         const result = toolResults.find(r => r.toolCallId === toolCall.id);
         const isRunning = !result;
@@ -79,48 +97,81 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
-            className="bg-white border border-gray-200 rounded-2xl rounded-bl-none shadow-sm overflow-hidden hover:shadow-md transition-all"
+            className="rounded-xl overflow-hidden border w-full"
+            style={{
+              background: TERMINAL.bg,
+              borderColor: TERMINAL.bgTertiary,
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
+            }}
+            whileHover={{ y: -1 }}
           >
             {/* 主信息行 - 始终可见 */}
             <div
-              className={`flex items-center gap-3 p-3 ${(isSuccess || isError) ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+              className={`flex items-center gap-3 px-3 py-2.5 border-b ${
+                (isSuccess || isError) ? 'cursor-pointer hover:bg-[#24283b]/50' : ''
+              }`}
+              style={{
+                borderColor: 'rgba(65, 72, 104, 0.3)',
+              }}
               onClick={() => (isSuccess || isError) && toggleExpand(toolCall.id)}
             >
               {/* 状态图标 */}
               <div className="flex-shrink-0">
                 {isRunning && (
-                  <Loader2 size={16} className="text-[#10B981] animate-spin" />
+                  <Loader2 size={14} className="animate-spin" style={{ color: TERMINAL.green }} />
                 )}
                 {isSuccess && (
-                  <CheckCircle size={16} className="text-[#10B981]" />
+                  <CheckCircle size={14} style={{ color: TERMINAL.green }} />
                 )}
                 {isError && (
-                  <XCircle size={16} className="text-red-500" />
+                  <XCircle size={14} style={{ color: TERMINAL.pink }} />
                 )}
               </div>
 
-              {/* 工具名称和状态 */}
+              {/* 工具名称和状态 - 终端命令风格 */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-[#374151] truncate">
-                    {isRunning ? '正在' : ''}{getToolNameCN(toolCall.function.name)}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span style={{ color: TERMINAL.green }} className="text-xs font-mono">$</span>
+                  <span
+                    className="text-xs font-medium font-mono"
+                    style={{ color: TERMINAL.cyan }}
+                  >
+                    {getToolNameCN(toolCall.function.name)}
                   </span>
                   {isRunning && (
-                    <span className="text-xs text-[#9CA3AF]">执行中...</span>
+                    <span
+                      className="text-xs font-mono animate-pulse"
+                      style={{ color: TERMINAL.orange }}
+                    >
+                      ⏳ 执行中...
+                    </span>
                   )}
                   {isSuccess && (
-                    <span className="text-xs text-[#10B981]">完成</span>
+                    <span
+                      className="text-xs font-mono"
+                      style={{ color: TERMINAL.green }}
+                    >
+                      ✓ 完成
+                    </span>
                   )}
                   {isError && (
-                    <span className="text-xs text-red-500">失败</span>
+                    <span
+                      className="text-xs font-mono"
+                      style={{ color: TERMINAL.pink }}
+                    >
+                      ✗ 失败
+                    </span>
                   )}
                 </div>
               </div>
 
               {/* 时间信息 */}
               {result && (
-                <div className="flex items-center gap-1 text-xs text-[#9CA3AF] flex-shrink-0">
-                  <Clock size={12} />
+                <div
+                  className="flex items-center gap-1 text-xs flex-shrink-0 font-mono"
+                  style={{ color: TERMINAL.textSecondary }}
+                >
+                  <Clock size={10} />
                   <span>{formatTime(Date.now())}</span>
                 </div>
               )}
@@ -132,9 +183,10 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                     e.stopPropagation();
                     toggleExpand(toolCall.id);
                   }}
-                  className="flex-shrink-0 text-[#9CA3AF] hover:text-[#1E40AF] transition-colors p-1"
+                  className="flex-shrink-0 p-1 rounded transition-all hover:bg-[#24283b]"
+                  style={{ color: TERMINAL.textSecondary }}
                 >
-                  {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                 </button>
               )}
             </div>
@@ -147,40 +199,71 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="border-t border-gray-100 overflow-hidden"
+                  className="overflow-hidden"
+                  style={{ background: '#16161e' }}
                 >
-                  <div className="p-3 space-y-3 bg-gray-50/50">
+                  <div className="p-3 space-y-3">
                     {/* 截断信息提示 */}
                     {result.truncated && (
-                      <div className="p-2 bg-amber-50 border border-amber-200 rounded text-sm">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="font-medium text-amber-800 text-xs">
-                            输出过大 ({result.sizeFormatted})
+                      <div
+                        className="p-2.5 rounded text-xs border font-mono"
+                        style={{
+                          background: 'rgba(255, 158, 100, 0.1)',
+                          borderColor: 'rgba(255, 158, 100, 0.3)',
+                          color: TERMINAL.orange,
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="font-medium text-[10px] uppercase tracking-wide">
+                            ⚠️ 输出过大 ({result.sizeFormatted})
                           </div>
                           {/* Word文档预览按钮 */}
                           {isWordFile(result.savedPath) && (
                             <button
                               onClick={() => result.savedPath && handleOpenPreview(result.savedPath)}
-                              className="flex items-center gap-1 px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs transition-colors"
+                              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono transition-all border"
+                              style={{
+                                background: TERMINAL.bgSecondary,
+                                color: TERMINAL.cyan,
+                                borderColor: TERMINAL.bgTertiary,
+                              }}
+                              whileHover={{ y: -1 }}
+                              whileTap={{ scale: 0.98 }}
                             >
-                              <Eye size={12} />
+                              <Eye size={10} />
                               预览编辑
                             </button>
                           )}
                         </div>
-                        <div className="text-amber-700 text-xs break-all">
-                          完整输出已保存至: <code className="bg-amber-100 px-1 rounded">{result.savedPath}</code>
+                        <div className="text-[10px] break-all font-mono" style={{ color: TERMINAL.textSecondary }}>
+                          完整输出已保存至: <span className="px-1 rounded" style={{
+                            background: TERMINAL.bgSecondary,
+                            color: TERMINAL.cyan
+                          }}>{result.savedPath}</span>
                         </div>
-                        <div className="text-xs text-amber-600 mt-1">
-                          预览 (前 {result.displaySize} 字符):
+                        <div className="text-[10px] mt-1 font-mono" style={{ color: TERMINAL.textSecondary }}>
+                          📄 预览 (前 {result.displaySize} 字符):
                         </div>
                       </div>
                     )}
 
                     {/* 参数 */}
                     <div>
-                      <div className="text-xs font-medium text-[#374151] mb-1.5">调用参数</div>
-                      <pre className="text-xs bg-white rounded border border-gray-200 p-2.5 overflow-x-auto max-h-[120px] text-[#374151]">
+                      <div
+                        className="text-[10px] font-medium mb-1.5 font-mono uppercase tracking-wide flex items-center gap-1"
+                        style={{ color: TERMINAL.textSecondary }}
+                      >
+                        <Terminal size={10} />
+                        调用参数
+                      </div>
+                      <pre
+                        className="text-xs rounded border p-2.5 overflow-x-auto max-h-[120px] font-mono"
+                        style={{
+                          background: TERMINAL.bgSecondary,
+                          borderColor: TERMINAL.bgTertiary,
+                          color: TERMINAL.textPrimary,
+                        }}
+                      >
                         {toolCall.function.arguments}
                       </pre>
                     </div>
@@ -188,11 +271,22 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                     {/* 执行结果 */}
                     {result.result && (
                       <div>
-                        <div className="text-xs font-medium text-[#374151] mb-1.5">
+                        <div
+                          className="text-[10px] font-medium mb-1.5 font-mono uppercase tracking-wide flex items-center gap-1"
+                          style={{ color: TERMINAL.textSecondary }}
+                        >
+                          <Terminal size={10} />
                           执行结果
                           {result.truncated && ' (预览)'}
                         </div>
-                        <pre className="text-xs bg-white rounded border border-gray-200 p-2.5 overflow-x-auto max-h-[200px] text-[#374151]">
+                        <pre
+                          className="text-xs rounded border p-2.5 overflow-x-auto max-h-[200px] font-mono"
+                          style={{
+                            background: TERMINAL.bgSecondary,
+                            borderColor: TERMINAL.bgTertiary,
+                            color: TERMINAL.textPrimary,
+                          }}
+                        >
                           {typeof result.result === 'string'
                             ? result.result
                             : JSON.stringify(result.result, null, 2)}
@@ -202,9 +296,16 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
 
                     {/* 错误信息 */}
                     {result.error && (
-                      <div className="p-2 bg-red-50 border border-red-200 rounded">
-                        <div className="text-xs font-medium text-red-800 mb-1">执行错误</div>
-                        <div className="text-xs text-red-600">{result.error}</div>
+                      <div
+                        className="p-2.5 rounded border font-mono"
+                        style={{
+                          background: 'rgba(247, 118, 142, 0.1)',
+                          borderColor: 'rgba(247, 118, 142, 0.3)',
+                          color: TERMINAL.pink,
+                        }}
+                      >
+                        <div className="text-[10px] font-medium mb-1 uppercase tracking-wide">✗ 执行错误</div>
+                        <div className="text-[10px]">{result.error}</div>
                       </div>
                     )}
                   </div>

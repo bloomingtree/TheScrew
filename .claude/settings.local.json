@@ -32,7 +32,8 @@
       "Bash(ls:*)",
       "Bash(netstat:*)",
       "Bash(cmd:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(tar:*)"
     ]
   }
 }

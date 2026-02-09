@@ -135,6 +135,8 @@ export async function executePythonInWorkspace(
     maxFileSize?: number;
     timeout?: number;
     autoSync?: boolean;
+    /** 额外的 Python 路径，用于加载模块 */
+    pythonPath?: string[];
   }
 ): Promise<PyodideExecutionResult> {
   return pyodideExecutor.executeInWorkspace(code, workspacePath, options);

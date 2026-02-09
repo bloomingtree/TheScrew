@@ -26,22 +26,43 @@ export type ThreadStatus = 'pending' | 'thinking' | 'using_tool' | 'completed';
 export type MessageKind = 'user' | 'thinking' | 'executing' | 'result';
 
 /**
- * 消息类型标签配置
+ * 消息类型标签配置 - 终端风格
  */
 export interface MessageKindConfig {
   label: string;
   bgColor: string;
   textColor: string;
+  accentColor: string;
 }
 
 /**
- * 消息类型标签配置表
+ * 消息类型标签配置表 - 终端风格色彩体系
  */
 export const KIND_CONFIGS: Record<MessageKind, MessageKindConfig> = {
-  user: { label: '用户提问', bgColor: '#1E40AF', textColor: '#FFFFFF' },
-  thinking: { label: '思考中', bgColor: '#F59E0B', textColor: '#FFFFFF' },
-  executing: { label: '任务执行', bgColor: '#10B981', textColor: '#FFFFFF' },
-  result: { label: '结果返回', bgColor: '#8B5CF6', textColor: '#FFFFFF' },
+  user: {
+    label: 'user',
+    bgColor: '#fff8f0',
+    textColor: '#1a1b26',
+    accentColor: '#9ece6a'
+  },
+  thinking: {
+    label: 'thinking',
+    bgColor: '#1a1b26',
+    textColor: '#ff9e64',
+    accentColor: '#ff9e64'
+  },
+  executing: {
+    label: 'executing',
+    bgColor: '#1a1b26',
+    textColor: '#2ac3de',
+    accentColor: '#2ac3de'
+  },
+  result: {
+    label: 'assistant',
+    bgColor: '#fff8f0',
+    textColor: '#1a1b26',
+    accentColor: '#7aa2f7'
+  },
 };
 
 /**

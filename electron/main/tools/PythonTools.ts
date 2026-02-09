@@ -241,6 +241,172 @@ Returns information about the Python runtime:
       }
     },
   },
+
+  {
+    name: 'exec_python_script',
+    description: `Execute a Python script from the skills directory using Pyodide.
+
+This tool reads and executes Python scripts located in .zero-employee/skills/{skillName}/ directory.
+It automatically:
+- Mounts the workspace to Pyodide's file system
+- Adds the skill directory to Python path (for module imports)
+- Converts file paths to /workspace format
+- Executes the script with provided arguments
+
+Usage examples:
+- Execute accept_changes.py: exec_python_script(skillName="docx", scriptPath="scripts/accept_changes.py", args=["input.docx", "output.docx"])
+- Execute with file in workspace: exec_python_script(skillName="docx", scriptPath="scripts/office/validate.py", args=["output.docx"])
+
+Notes:
+- File paths in args are automatically converted to /workspace/ format
+- The skill directory is added to Python path for importing modules
+- Use this when SKILL.md documentation shows 'python scripts/xxx.py' commands
+- The script runs in Pyodide sandbox with workspace files mounted`,
+    parameters: {
+      type: 'object',
+      properties: {
+        skillName: {
+          type: 'string',
+          description: 'The skill name (e.g., "docx", "pdf")',
+        },
+        scriptPath: {
+          type: 'string',
+          description: 'Path to the script file relative to the skill directory (e.g., "scripts/accept_changes.py", "scripts/office/validate.py")',
+        },
+        args: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Command-line arguments to pass to the script (as sys.argv). File paths are automatically converted to /workspace/ format.',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Execution timeout in seconds (default: 30, max: 300)',
+          default: 30,
+        },
+      },
+      required: ['skillName', 'scriptPath'],
+    },
+    handler: async (args) => {
+      const { skillName, scriptPath, args: scriptArgs = [], timeout } = args;
+      const { readFile } = await import('fs/promises');
+      const { join, dirname } = await import('path');
+      const { app } = await import('electron');
+      const { getWorkspacePath } = await import('./FileTools');
+
+      // 获取应用根路径
+      const getAppRootPath = () => {
+        if (process.env.NODE_ENV === 'development') {
+          return join(__dirname, '../../');
+        }
+        return process.resourcesPath || app.getPath('userData');
+      };
+
+      try {
+        // 获取工作空间路径
+        const workspacePath = getWorkspacePath();
+        if (!workspacePath) {
+          return {
+            success: false,
+            error: 'Workspace not set. Please set a workspace first.',
+          };
+        }
+
+        // 读取脚本文件
+        const scriptFilePath = join(getAppRootPath(), '.zero-employee', 'skills', skillName, scriptPath);
+        const scriptCode = await readFile(scriptFilePath, 'utf-8');
+
+        // 获取 skill 目录的绝对路径（用于添加到 Python 路径）
+        const skillDir = join(getAppRootPath(), '.zero-employee', 'skills', skillName);
+
+        // 获取脚本所在目录（如 scripts/office）
+        const scriptDir = dirname(join(skillDir, scriptPath));
+
+        // 构建额外的 Python 路径
+        // 1. skill 根目录（用于导入 skill 中的模块）
+        // 2. 脚本所在目录（用于导入同级模块）
+        const pythonPaths = [
+          skillDir,
+          scriptDir,
+        ];
+
+        // 构建执行代码：设置 sys.argv 并执行脚本
+        // 注意：脚本中的文件路径需要转换为 /workspace 格式
+        // 由于脚本可能使用相对路径，我们需要在脚本执行前转换参数
+        const argvCode = JSON.stringify([scriptPath, ...scriptArgs]);
+        const wrappedCode = `
+import sys
+import os
+
+# 设置命令行参数
+sys.argv = ${argvCode}
+
+# 转换文件路径参数为 /workspace 格式
+# 如果参数看起来像文件路径（不是以 / 开头且包含文件扩展名），则添加 /workspace 前缀
+converted_argv = [sys.argv[0]]  # 脚本名保持不变
+for arg in sys.argv[1:]:
+    # 如果是相对路径且看起来像文件（包含扩展名或目录分隔符）
+    if not arg.startswith('/') and ('.' in arg or '/' in arg or '\\\\' in arg):
+        # 转换 Windows 路径分隔符
+        normalized_arg = arg.replace('\\\\\\\\', '/')
+        if not normalized_arg.startswith('/workspace'):
+            converted_argv.append('/workspace/' + normalized_arg)
+        else:
+            converted_argv.append(normalized_arg)
+    else:
+        converted_argv.append(arg)
+
+sys.argv = converted_argv
+
+# === Script Content ===
+${scriptCode}
+`;
+
+        // 获取活跃窗口并执行
+        const window = getFocusedWindow();
+        if (!window) {
+          return {
+            success: false,
+            error: 'No active renderer window available for Python execution',
+          };
+        }
+
+        const result = await window.webContents.executeJavaScript(`
+          (async () => {
+            try {
+              const { executePythonInWorkspace } = await import('/src/utils/pyodideWorker.ts');
+              return await executePythonInWorkspace(
+                ${JSON.stringify(wrappedCode)},
+                ${JSON.stringify(workspacePath)},
+                {
+                  mount: true,
+                  timeout: ${((timeout || 30) * 1000)},
+                  pythonPath: ${JSON.stringify(pythonPaths)},
+                  autoSync: true
+                }
+              );
+            } catch (error) {
+              return {
+                success: false,
+                error: error.toString(),
+                executionTime: 0,
+              };
+            }
+          })()
+        `);
+
+        return {
+          ...result,
+          script: scriptPath,
+          args: scriptArgs,
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: `Failed to execute Python script: ${error.message}`,
+        };
+      }
+    },
+  },
 ];
 
 /**

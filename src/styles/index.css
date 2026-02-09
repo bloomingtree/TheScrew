@@ -2,6 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ====================================
+   终端风格 + 现代 UI 设计系统
+   ==================================== */
+
+:root {
+  /* 终端深色主题 */
+  --terminal-bg: #1a1b26;
+  --terminal-bg-secondary: #24283b;
+  --terminal-bg-tertiary: #414868;
+
+  /* 终端浅色主题（米白/浅灰） */
+  --terminal-light-bg: #fff8f0;
+  --terminal-light-secondary: #f5f0e8;
+  --terminal-light-border: #e8e0d8;
+
+  /* 功能性点缀色 */
+  --terminal-green: #9ece6a;      /* $符号/命令行提示 */
+  --terminal-orange: #ff9e64;     /* 状态提示 */
+  --terminal-blue: #7aa2f7;       /* import 关键字 */
+  --terminal-cyan: #2ac3de;       /* 字符串 */
+  --terminal-purple: #bb9af7;     /* 特殊标记 */
+  --terminal-pink: #f7768e;       /* 错误/警告 */
+  --terminal-yellow: #e0af68;     /* 强调 */
+
+  /* 文本颜色 */
+  --terminal-text-primary: #c0caf5;
+  --terminal-text-secondary: #565f89;
+  --terminal-text-muted: #565f89;
+  --terminal-text-dark: #1a1b26;
+
+  /* 拟物化阴影 */
+  --terminal-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --terminal-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.08);
+  --terminal-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.15), 0 8px 24px rgba(0, 0, 0, 0.1);
+
+  /* 边框半径 */
+  --terminal-radius-sm: 6px;
+  --terminal-radius: 10px;
+  --terminal-radius-lg: 14px;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -15,12 +56,14 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
-  background: #fff1e8;
+  background: var(--terminal-light-bg);
+  color: var(--terminal-text-dark);
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Monaco', 'Consolas',
+    'Liberation Mono', 'Courier New', monospace;
+  font-variant-ligatures: none;
 }
 
 #root {
@@ -169,4 +212,219 @@ code {
 
 .transition-opacity {
   transition: opacity 0.2s ease-in-out;
+}
+
+/* ====================================
+   终端风格实用类
+   ==================================== */
+
+/* 终端卡片样式 - 深色主题 */
+.terminal-card-dark {
+  background: var(--terminal-bg);
+  border: 1px solid var(--terminal-bg-tertiary);
+  border-radius: var(--terminal-radius-lg);
+  box-shadow: var(--terminal-shadow);
+  color: var(--terminal-text-primary);
+}
+
+/* 终端卡片样式 - 浅色主题 */
+.terminal-card-light {
+  background: var(--terminal-light-bg);
+  border: 1px solid var(--terminal-light-border);
+  border-radius: var(--terminal-radius-lg);
+  box-shadow: var(--terminal-shadow);
+  color: var(--terminal-text-dark);
+}
+
+/* 代码块容器 */
+.terminal-code-block {
+  background: var(--terminal-bg);
+  border-radius: var(--terminal-radius);
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* 内联代码样式 */
+.terminal-code-inline {
+  background: var(--terminal-bg-secondary);
+  color: var(--terminal-cyan);
+  padding: 2px 6px;
+  border-radius: var(--terminal-radius-sm);
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-size: 0.9em;
+  border: 1px solid var(--terminal-bg-tertiary);
+}
+
+/* 命令行提示符样式 */
+.terminal-prompt {
+  color: var(--terminal-green);
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-weight: 500;
+}
+
+/* 状态标签 */
+.terminal-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--terminal-radius);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.terminal-tag-success {
+  background: rgba(158, 206, 106, 0.15);
+  color: var(--terminal-green);
+  border: 1px solid rgba(158, 206, 106, 0.3);
+}
+
+.terminal-tag-warning {
+  background: rgba(255, 158, 100, 0.15);
+  color: var(--terminal-orange);
+  border: 1px solid rgba(255, 158, 100, 0.3);
+}
+
+.terminal-tag-info {
+  background: rgba(122, 162, 247, 0.15);
+  color: var(--terminal-blue);
+  border: 1px solid rgba(122, 162, 247, 0.3);
+}
+
+.terminal-tag-error {
+  background: rgba(247, 118, 142, 0.15);
+  color: var(--terminal-pink);
+  border: 1px solid rgba(247, 118, 142, 0.3);
+}
+
+/* 气泡头像 */
+.terminal-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid var(--terminal-bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--terminal-bg-secondary);
+  color: var(--terminal-text-primary);
+  flex-shrink: 0;
+}
+
+/* 评分星星 */
+.terminal-stars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--terminal-yellow);
+}
+
+/* 拟物化按钮 */
+.terminal-button {
+  background: var(--terminal-bg-secondary);
+  border: 1px solid var(--terminal-bg-tertiary);
+  border-radius: var(--terminal-radius);
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--terminal-text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+}
+
+.terminal-button:hover {
+  background: var(--terminal-bg-tertiary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transform: translateY(-1px);
+}
+
+.terminal-button:active {
+  transform: translateY(0);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* 终端输入框 */
+.terminal-input {
+  background: var(--terminal-bg);
+  border: 1px solid var(--terminal-bg-tertiary);
+  border-radius: var(--terminal-radius);
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--terminal-text-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+}
+
+.terminal-input:focus {
+  outline: none;
+  border-color: var(--terminal-blue);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 3px rgba(122, 162, 247, 0.1);
+}
+
+/* 终端滚动条 */
+.terminal-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.terminal-scrollbar::-webkit-scrollbar-track {
+  background: var(--terminal-bg);
+  border-radius: var(--terminal-radius);
+}
+
+.terminal-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--terminal-bg-tertiary);
+  border-radius: var(--terminal-radius);
+  border: 2px solid var(--terminal-bg);
+}
+
+.terminal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--terminal-text-secondary);
+}
+
+/* 语法高亮颜色 */
+.syn-keyword { color: var(--terminal-blue); }
+.syn-string { color: var(--terminal-cyan); }
+.syn-comment { color: var(--terminal-text-secondary); font-style: italic; }
+.syn-function { color: var(--terminal-purple); }
+.syn-number { color: var(--terminal-orange); }
+.syn-operator { color: var(--terminal-pink); }
+.syn-type { color: var(--terminal-yellow); }
+
+/* 消息气泡动画 */
+@keyframes terminal-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.terminal-fade-in {
+  animation: terminal-fade-in 0.3s ease-out;
+}
+
+/* 悬浮效果 */
+.terminal-hover-lift {
+  transition: all 0.2s ease;
+}
+
+.terminal-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--terminal-shadow-lg);
 }

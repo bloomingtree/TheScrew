@@ -33,7 +33,11 @@ export function groupMessages(messages: Message[]): MessageThread[] {
     else if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0 && !message.content) {
       if (currentThread) {
         currentThread.assistantMessage = message;
-        currentThread.toolCalls = message.toolCalls;
+        // 追加工具调用而不是替换
+        if (!currentThread.toolCalls) {
+          currentThread.toolCalls = [];
+        }
+        currentThread.toolCalls.push(...message.toolCalls);
         currentThread.status = 'thinking';
       }
     }
@@ -47,9 +51,12 @@ export function groupMessages(messages: Message[]): MessageThread[] {
     // 注意：工具调用完成后，流式输出会给原消息添加 content，此时应作为最终回答
     else if (message.role === 'assistant' && message.content) {
       if (currentThread) {
-        // 如果当前线程没有工具调用记录，但这条消息有 toolCalls，先记录
-        if (!currentThread.toolCalls && message.toolCalls && message.toolCalls.length > 0) {
-          currentThread.toolCalls = message.toolCalls;
+        // 如果这条消息有 toolCalls，追加到现有列表
+        if (message.toolCalls && message.toolCalls.length > 0) {
+          if (!currentThread.toolCalls) {
+            currentThread.toolCalls = [];
+          }
+          currentThread.toolCalls.push(...message.toolCalls);
         }
         currentThread.finalMessage = message;
         currentThread.status = 'completed';

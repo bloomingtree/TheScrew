@@ -270,6 +270,8 @@ class PyodideExecutorManager {
       maxFileSize?: number;
       timeout?: number;
       autoSync?: boolean;
+      /** 额外的 Python 路径，用于加载模块 */
+      pythonPath?: string[];
     }
   ): Promise<PyodideExecutionResult> {
     // 挂载工作空间
@@ -288,12 +290,24 @@ class PyodideExecutorManager {
 
     // 添加工作空间到 Python 路径并切换目录
     const mountPoint = this.fsBridge?.getMountPoint() ?? '/workspace';
+    const extraPaths = options?.pythonPath || [];
+
+    // 构建 Python 路径添加代码
+    const pathSetupCode = extraPaths.length > 0
+      ? `# 添加额外的 Python 路径
+for path in ${JSON.stringify(extraPaths)}:
+    if path not in sys.path:
+        sys.path.insert(0, path)
+`
+      : '';
+
     const wrappedCode = `
 import os
 import sys
 
 # 添加工作空间到 Python 路径
 sys.path.insert(0, '${mountPoint}')
+${pathSetupCode}
 os.chdir('${mountPoint}')
 
 ${code}

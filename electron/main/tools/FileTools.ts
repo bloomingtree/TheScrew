@@ -1,6 +1,7 @@
 import { readdir, readFile, stat, writeFile } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { app } from 'electron';
 import { Tool } from './ToolManager';
 import { outputTruncator } from '../utils/OutputTruncator';
 
@@ -416,4 +417,102 @@ async function listFiles(
 
   return files;
 }
+
+// ==================== Skills 读取工具 ====================
+
+/**
+ * 获取应用根路径
+ */
+function getAppRootPath(): string {
+  if (process.env.NODE_ENV === 'development') {
+    return path.resolve(__dirname, '../../');
+  }
+  return process.resourcesPath || app.getPath('userData');
+}
+
+export const skillTools: Tool[] = [
+  {
+    name: 'list_skill_directory',
+    description: '列出技能目录的内容（位于 .zero-employee/skills/）。用于探索技能目录下的文件结构，如发现 scripts/*.py 等辅助脚本。',
+    parameters: {
+      type: 'object',
+      properties: {
+        skillName: {
+          type: 'string',
+          description: '技能名称，如 "docx" 等',
+        },
+        subPath: {
+          type: 'string',
+          description: '技能目录下的子路径（可选），如 "scripts" 或 "templates"',
+        },
+        recursive: {
+          type: 'boolean',
+          description: '是否递归列出子目录',
+          default: false,
+        },
+      },
+      required: ['skillName'],
+    },
+    handler: async ({ skillName, subPath = '', recursive = false }) => {
+      try {
+        const appRoot = getAppRootPath();
+        const skillBasePath = path.join(appRoot, '.zero-employee', 'skills', skillName);
+        const targetPath = subPath ? path.join(skillBasePath, subPath) : skillBasePath;
+
+        const files = await listFiles(targetPath, recursive, skillBasePath);
+
+        return {
+          success: true,
+          skillName,
+          path: path.join('.zero-employee', 'skills', skillName, subPath),
+          files,
+          count: files.length,
+        };
+      } catch (error: any) {
+        return { success: false, error: error.message };
+      }
+    },
+  },
+  {
+    name: 'read_skill',
+    description: '读取应用内技能目录中的文件（位于 .zero-employee/skills/ 目录）。默认读取 SKILL.md，也可指定读取技能目录下的其他文件（如 scripts/*.py）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        skillName: {
+          type: 'string',
+          description: '技能名称，如 "office", "docx" 等',
+        },
+        filePath: {
+          type: 'string',
+          description: '技能目录下的文件路径（相对于技能目录）。不提供则读取 SKILL.md，如 "scripts/comment.py"',
+        },
+      },
+      required: ['skillName'],
+    },
+    handler: async ({ skillName, filePath }) => {
+      try {
+        const appRoot = getAppRootPath();
+        // 如果提供了 filePath，读取指定文件；否则读取 SKILL.md
+        const relativePath = filePath
+          ? path.join('.zero-employee', 'skills', skillName, filePath)
+          : path.join('.zero-employee', 'skills', skillName, 'SKILL.md');
+
+        const skillPath = path.join(appRoot, relativePath);
+        const content = await readFile(skillPath, 'utf-8');
+        const stats = await stat(skillPath);
+
+        return {
+          success: true,
+          content,
+          skillName,
+          path: relativePath,
+          size: stats.size,
+        };
+      } catch (error: any) {
+        return { success: false, error: error.message };
+      }
+    },
+  },
+];
 
