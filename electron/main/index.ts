@@ -20,7 +20,9 @@ import { getToolManager } from './tools/ToolManager';
 import { getCronService, HeartbeatService, CronJob, setCronService, setHeartbeatService } from './scheduler';
 import { cronTools, heartbeatTools } from './tools/SchedulerTools';
 import { pythonTools, PYTHON_TOOL_SET_META } from './tools/PythonTools';
+import { bashTools, bashToolSet } from './tools/BashTools';
 import { setWorkspacePath } from './tools/FileTools';
+import { registerToolSetMeta } from './tools/ToolManager';
 
 const store = new Store();
 
@@ -135,6 +137,15 @@ app.whenReady().then(async () => {
   for (const tool of pythonTools) {
     toolManager.registerTool(tool);
   }
+
+  // 注册 Bash 工具到 ToolManager
+  for (const tool of bashTools) {
+    toolManager.registerTool(tool);
+  }
+
+  // 注册工具集元数据
+  registerToolSetMeta(PYTHON_TOOL_SET_META);
+  registerToolSetMeta(bashToolSet);
 
   // 注册 IPC 处理器
   registerChatHandlers(store);

@@ -32,3 +32,6 @@ build/*.dll
 learn-code
 .zero-employee
 public
+
+# Python runtime (third-party)
+electron/main/python/

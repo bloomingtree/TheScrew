@@ -33,6 +33,32 @@ export const TOOL_SETS_META: ToolSetMeta[] = [
   // Office tool sets removed - only core tools remain
 ];
 
+/**
+ * 动态导入的工具集元数据（在 index.ts 中添加）
+ */
+export interface DynamicToolSetMeta {
+  name: string;
+  description: string;
+  capabilities: string[];
+  keywords: string[];
+  estimatedTokens: number;
+}
+
+/**
+ * 注册动态工具集元数据
+ * 用于在运行时添加工具集元数据（避免循环导入）
+ */
+const dynamicToolSets: DynamicToolSetMeta[] = [];
+
+export function registerToolSetMeta(meta: DynamicToolSetMeta): void {
+  // 检查是否已存在
+  const existingIndex = TOOL_SETS_META.findIndex(ts => ts.name === meta.name);
+  if (existingIndex === -1) {
+    TOOL_SETS_META.push(meta as ToolSetMeta);
+    console.log(`[ToolManager] Registered tool set meta: ${meta.name}`);
+  }
+}
+
 export interface ToolCall {
   id: string;
   type: 'function';
