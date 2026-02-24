@@ -3,7 +3,7 @@ import { OpenAIClient } from '../api/openai';
 import Store from 'electron-store';
 import { toolManager, ToolGroup, ToolManager } from '../tools/ToolManager';
 import { fileTools } from '../tools/FileTools';
-import { pythonTools } from '../tools/PythonTools';
+import { bashTools } from '../tools/BashTools';
 // Office tools removed: BaseTools, WordTools, TemplateTools, PPTXTools, BatchTools, ExcelTools, PDFTools, OoxmlTools
 import { getWorkspacePath } from '../tools/FileTools';
 import { getContextBuilder } from '../core/ContextBuilder';
@@ -78,10 +78,10 @@ let currentAbortController: AbortController | null = null;
   }
 
 export function registerChatHandlers(store: Store) {
-  // 注册基础工具组（包含文件操作工具和 Python 工具）
+  // 注册基础工具组（包含文件操作工具和 Bash 工具）
   const baseToolGroup: ToolGroup = {
     name: 'base',
-    tools: [...fileTools, ...pythonTools],
+    tools: [...fileTools, ...bashTools],
     keywords: [],
     triggers: {
       keywords: [],

@@ -5,18 +5,36 @@ import { Tool } from './ToolManager';
 import { getWorkspacePath } from './FileTools';
 
 /**
- * 获取项目 Python 路径
+ * 获取应用根路径
+ * 开发环境: 项目根目录
+ * 生产环境: resources 目录
+ */
+function getAppRootPath(): string {
+  if (process.env.NODE_ENV === 'development') {
+    return path.resolve(__dirname, '../../..');
+  }
+  return process.resourcesPath || app.getPath('userData');
+}
+
+/**
+ * 获取项目 Python 目录路径
+ */
+function getPythonDir(): string {
+  return path.join(getAppRootPath(), 'electron', 'main', 'python', 'python-3.8.10-embed-amd64');
+}
+
+/**
+ * 获取项目 Python 可执行文件路径
  */
 function getPythonPath(): string {
-  const pythonDir = path.join(__dirname, '../../main/python/python-3.8.10-embed-amd64');
-  return path.join(pythonDir, 'python.exe');
+  return path.join(getPythonDir(), 'python.exe');
 }
 
 /**
  * 获取增强的 PATH 环境变量（包含项目 Python）
  */
 function getEnhancedPath(): string {
-  const pythonDir = path.join(__dirname, '../../main/python/python-3.8.10-embed-amd64');
+  const pythonDir = getPythonDir();
   const currentPath = process.env.PATH || '';
   // 将项目 Python 目录放在最前面，确保优先使用
   return `${pythonDir}${path.delimiter}${currentPath}`;
@@ -34,6 +52,7 @@ async function executeCommand(
   } = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   const { cwd, timeout = 120000, env = {} } = options;
+  const pythonDir = getPythonDir();
 
   return new Promise((resolve) => {
     // 在 Windows 上使用 cmd.exe
@@ -44,7 +63,8 @@ async function executeCommand(
     const enhancedEnv = {
       ...process.env,
       PATH: getEnhancedPath(),
-      PYTHONHOME: path.join(__dirname, '../../main/python/python-3.8.10-embed-amd64'),
+      PYTHONHOME: pythonDir,
+      PYTHONPATH: path.join(pythonDir, 'Lib'),
       ...env,
     };
 
@@ -98,20 +118,25 @@ export const bashTools: Tool[] = [
     name: 'bash',
     description: `Execute bash/shell commands in the workspace directory.
 
+**Python Support**:
+- Built-in Python 3.8.10 is pre-configured and ready to use
+- Use \`python\` or \`python.exe\` directly to run Python code and scripts
+- No additional setup required - Python is integrated into the shell environment
+
 **Features**:
 - Executes commands in the workspace root directory
-- Python commands (\`python\` or \`python.exe\`) automatically use the project's built-in Python 3.8.10
-- Environment variables are preserved and enhanced with project Python path
+- Python commands (\`python\` or \`python.exe\`) automatically use the built-in Python 3.8.10
+- Environment variables are preserved and enhanced with Python path
 - Default timeout: 120 seconds
 
 **Usage**:
 - Simple commands: bash(command="ls -la")
-- Python scripts: bash(command="python script.py")
+- Python code: bash(command="python -c \\"print('Hello')\\"")
+- Python scripts: bash(command="python script.py arg1 arg2")
 - Multiple commands: bash(command="cd src && python test.py")
 
 **Notes**:
 - On Windows, commands run via cmd.exe
-- Use full paths for executables not in PATH
 - For complex operations, consider writing a script first`,
     parameters: {
       type: 'object',
