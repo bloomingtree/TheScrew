@@ -8,10 +8,14 @@ import { getWorkspacePath } from './FileTools';
  * 获取应用根路径
  * 开发环境: 项目根目录
  * 生产环境: resources 目录
+ *
+ * 注意: 编译后代码在 dist-electron/main/，
+ * 所以需要向上两级 (../..) 到达项目根目录
  */
 function getAppRootPath(): string {
   if (process.env.NODE_ENV === 'development') {
-    return path.resolve(__dirname, '../../..');
+    // 编译后: dist-electron/main -> ../.. -> 项目根目录
+    return path.resolve(__dirname, '../..');
   }
   return process.resourcesPath || app.getPath('userData');
 }
@@ -21,23 +25,6 @@ function getAppRootPath(): string {
  */
 function getPythonDir(): string {
   return path.join(getAppRootPath(), 'electron', 'main', 'python', 'python-3.8.10-embed-amd64');
-}
-
-/**
- * 获取项目 Python 可执行文件路径
- */
-function getPythonPath(): string {
-  return path.join(getPythonDir(), 'python.exe');
-}
-
-/**
- * 获取增强的 PATH 环境变量（包含项目 Python）
- */
-function getEnhancedPath(): string {
-  const pythonDir = getPythonDir();
-  const currentPath = process.env.PATH || '';
-  // 将项目 Python 目录放在最前面，确保优先使用
-  return `${pythonDir}${path.delimiter}${currentPath}`;
 }
 
 /**
@@ -59,19 +46,27 @@ async function executeCommand(
     const shell = process.platform === 'win32' ? 'cmd.exe' : 'bash';
     const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
 
-    // 合并环境变量
-    const enhancedEnv = {
+    // 构建 PATH：项目 Python 目录必须在最前面
+    const pathSeparator = process.platform === 'win32' ? ';' : ':';
+    const newPATH = `${pythonDir}${pathSeparator}${process.env.PATH || ''}`;
+
+    // 合并环境变量，确保项目 Python 优先
+    // 注意：Windows 嵌入式 Python 使用 python38._pth 文件控制模块搜索路径
+    // 不需要设置 PYTHONHOME/PYTHONPATH，这可能会与 _pth 文件冲突
+    const enhancedEnv: Record<string, string> = {
       ...process.env,
-      PATH: getEnhancedPath(),
-      PYTHONHOME: pythonDir,
-      PYTHONPATH: path.join(pythonDir, 'Lib'),
+      PATH: newPATH,
       ...env,
     };
+
+    // 移除可能干扰嵌入式 Python 的环境变量
+    delete enhancedEnv.PYTHONHOME;
+    delete enhancedEnv.PYTHONPATH;
 
     const child = spawn(shell, shellArgs, {
       cwd: cwd || getWorkspacePath() || undefined,
       env: enhancedEnv,
-      shell: true,
+      shell: false,
       windowsHide: true,
     });
 
@@ -191,38 +186,6 @@ export const bashTools: Tool[] = [
       }
     },
   },
-
-  {
-    name: 'python_version',
-    description: '获取 Python 环境信息，包括项目内置 Python 和系统 Python',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-    handler: async () => {
-      try {
-        const pythonPath = getPythonPath();
-        const enhancedPath = getEnhancedPath();
-
-        // 测试项目 Python
-        const projectPythonResult = await executeCommand('python --version', {
-          timeout: 5000,
-        });
-
-        return {
-          success: true,
-          projectPythonPath: pythonPath,
-          enhancedPath: enhancedPath.split(path.delimiter).slice(0, 3).join(path.delimiter) + '...',
-          versionOutput: projectPythonResult.stdout || projectPythonResult.stderr,
-        };
-      } catch (error: any) {
-        return {
-          success: false,
-          error: error.message,
-        };
-      }
-    },
-  },
 ];
 
 export const bashToolSet = {
@@ -230,7 +193,6 @@ export const bashToolSet = {
   description: 'Bash 命令执行工具',
   capabilities: [
     'bash - 执行 shell 命令',
-    'python_version - 获取 Python 环境信息',
   ],
   keywords: ['bash', 'shell', 'command', 'terminal', 'python', '命令执行'],
   estimatedTokens: 350,
