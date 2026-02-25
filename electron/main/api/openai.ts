@@ -31,7 +31,21 @@ export class OpenAIClient {
       },
       (error: any) => {
         const status = error.response?.status;
-        console.error('[Axios Response Error] Status:', status || 'No status');
+        console.error('\n========== Axios Response Error ==========');
+        console.error('Status:', status || 'No status');
+        console.error('Message:', error.message);
+
+        if (error.response?.data) {
+          console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+        }
+        if (error.config?.url) {
+          console.error('Request URL:', error.config.url);
+        }
+        if (error.code) {
+          console.error('Error Code:', error.code);
+        }
+
+        console.error('==========================================\n');
         return Promise.reject(error);
       }
     );

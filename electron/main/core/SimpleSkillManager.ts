@@ -25,8 +25,21 @@
  */
 
 import { readdir, readFile, stat } from 'fs/promises';
-import { join, relative } from 'path';
+import { join, relative, resolve } from 'path';
 import { existsSync } from 'fs';
+import { app } from 'electron';
+
+/**
+ * 获取应用根路径
+ * - 开发环境: 项目根目录
+ * - 生产环境: resources 目录或用户数据目录
+ */
+function getAppRootPath(): string {
+  if (process.env.NODE_ENV === 'development') {
+    return resolve(__dirname, '../..');
+  }
+  return process.resourcesPath || app.getPath('userData');
+}
 
 /**
  * 技能元数据
@@ -213,6 +226,33 @@ export class SimpleSkillManager {
   }
 
   /**
+   * 获取 config 目录结构（仅顶层，非递归）
+   */
+  private async get_config_structure(): Promise<string> {
+    try {
+      const configRoot = join(getAppRootPath(), '.zero-employee');
+      if (!existsSync(configRoot)) {
+        return '  (config 目录不存在)';
+      }
+
+      const entries = await readdir(configRoot, { withFileTypes: true });
+      const items: string[] = [];
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          items.push(`  📁 ${entry.name}/`);
+        } else if (entry.isFile()) {
+          items.push(`  📄 ${entry.name}`);
+        }
+      }
+
+      return items.length > 0 ? items.join('\n') : '  (空目录)';
+    } catch (error) {
+      return `  (无法读取: ${error})`;
+    }
+  }
+
+  /**
    * 构建技能摘要（用于系统提示词）
    * nanobot 风格：不接受参数，始终返回所有 skills 的摘要
    * 包含文件路径，让 agent 可以通过 read_file 工具读取完整内容
@@ -237,25 +277,33 @@ export class SimpleSkillManager {
       return '';
     }
 
+    // 获取 config 目录的实际结构
+    const configStructure = await this.get_config_structure();
+
     return `## 可用技能
 
 以下技能扩展了你的能力。使用技能时：
 1. 使用 \`read_file\` 工具读取技能的 SKILL.md 文件，设置 \`namespace: "config"\`
    - 示例：\`read_file({ filepath: "skills/技能名/SKILL.md", namespace: "config" })\`
+   - **注意**：返回结果包含 \`fullPath\`（绝对路径），可直接用于脚本执行
 2. 需要时使用 \`list_directory\` 探索技能目录（如 scripts/*.py），同样设置 \`namespace: "config"\`
    - 示例：\`list_directory({ directory: "skills/技能名/scripts", namespace: "config" })\`
+   - **注意**：返回结果包含 \`fullPath\`（绝对路径），可直接用于脚本执行
 3. 阅读文档中的示例和说明后再执行操作
 
 **文件路径说明**：
 - 技能文件位于 \`.zero-employee/skills/\` 目录下
 - 使用 \`namespace: "config"\` 参数访问配置目录下的文件
-- \`filepath\` 或 \`directory\` 是相对于配置目录根目录的路径
+- \`filepath\` 或 \`directory\` 是相对于 \`.zero-employee/\` 根目录的路径
+- **所有文件操作工具都返回 \`fullPath\`（绝对路径）**
 
-**Python 脚本执行**：
-当 SKILL.md 文档中包含 \`python scripts/xxx.py\` 命令时：
-- 使用 \`exec_python_script\` 工具执行脚本
-- 参数：\`{ skillName: "技能名", scriptPath: "scripts/xxx.py", args: ["参数1", "参数2"] }\`
-- 示例：\`exec_python_script({ skillName: "docx", scriptPath: "scripts/accept_changes.py", args: ["input.docx", "output.docx"] })\`
+**当前 config 目录结构**（.zero-employee/）：
+${configStructure}
+
+**脚本执行说明**：
+- bash 工具的默认工作目录是用户的 **workspace**
+- 执行技能脚本时使用 \`fullPath\`（绝对路径），不依赖当前工作目录
+- 示例：\`bash({ command: "python E:/path/to/.zero-employee/skills/docx/scripts/accept_changes.py input.docx output.docx" })\`
 
 你有以下技能可用：
 
@@ -330,8 +378,8 @@ let simpleSkillManagerInstance: SimpleSkillManager | null = null;
  */
 export function getSimpleSkillManager(): SimpleSkillManager {
   if (!simpleSkillManagerInstance) {
-    // Default to current working directory
-    simpleSkillManagerInstance = new SimpleSkillManager(process.cwd());
+    // Default to app root directory (where .zero-employee is located)
+    simpleSkillManagerInstance = new SimpleSkillManager(getAppRootPath());
   }
   return simpleSkillManagerInstance;
 }

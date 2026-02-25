@@ -10,7 +10,7 @@ const InputArea: React.FC = () => {
   const [images, setImages] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution } = useChatStore();
+const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, toolCalls } = useChatStore();
   const { apiKey } = useConfigStore();
   const { currentConversationId, generateTitle } = useConversationStore();
 
@@ -61,12 +61,40 @@ addMessage(userMessage);
     }
 
     try {
-      const chatMessages = messages
-        .filter(m => m.role !== 'assistant' || m.content.trim())
-        .map(m => ({
+      // 准备发送给后端的消息
+      // 现在工具结果已经作为 role='tool' 的消息存储在 messages 数组中
+      const chatMessages: any[] = [];
+
+      for (const m of messages) {
+        // 跳过空的 assistant 消息（但在有 tool_calls 时保留）
+        if (m.role === 'assistant' && !m.content.trim() && (!m.toolCalls || m.toolCalls.length === 0)) {
+          continue;
+        }
+
+        const baseMessage: any = {
           role: m.role,
-          content: m.content,
-        }));
+          content: m.content || '',
+        };
+
+        // 如果是 assistant 消息且有 toolCalls，添加 tool_calls
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          baseMessage.tool_calls = m.toolCalls.map(tc => ({
+            id: tc.id,
+            type: tc.type,
+            function: {
+              name: tc.function.name,
+              arguments: tc.function.arguments,
+            },
+          }));
+        }
+
+        // 如果是 tool 消息，添加 tool_call_id
+        if (m.role === 'tool' && m.toolCallId) {
+          baseMessage.tool_call_id = m.toolCallId;
+        }
+
+        chatMessages.push(baseMessage);
+      }
 
       chatMessages.push({
         role: 'user',

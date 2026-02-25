@@ -370,6 +370,27 @@ export function registerChatHandlers(store: Store) {
       console.error('Status:', status || 'Unknown');
       console.error('Message:', error.message);
 
+      // 打印更详细的错误信息
+      if (error.response?.data) {
+        console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+      }
+      if (error.config?.url) {
+        console.error('Request URL:', error.config.url);
+      }
+      if (error.config?.method) {
+        console.error('Request Method:', error.config.method);
+      }
+      if (error.code) {
+        console.error('Error Code:', error.code);
+      }
+
+      // 打印请求体大小（用于调试过大请求问题）
+      if (error.config?.data) {
+        const requestData = error.config.data;
+        const dataSize = typeof requestData === 'string' ? requestData.length : JSON.stringify(requestData).length;
+        console.error('Request Body Size:', `${(dataSize / 1024).toFixed(2)} KB (${dataSize} chars)`);
+      }
+
       if (isRateLimit) {
         console.error('Type: Rate Limit Exceeded (429)');
         console.error('Tip: Please wait a moment before retrying');
@@ -380,9 +401,23 @@ export function registerChatHandlers(store: Store) {
       currentClient = null;
       currentAbortController = null;
 
+      // 构建详细的错误消息
+      let errorMessage = error.message;
+
+      if (error.response?.data?.error?.message) {
+        errorMessage = error.response.data.error.message;
+      } else if (error.response?.data?.error) {
+        errorMessage = JSON.stringify(error.response.data.error);
+      }
+
+      // 添加状态码信息
+      if (status) {
+        errorMessage = `[${status}] ${errorMessage}`;
+      }
+
       return {
         success: false,
-        error: isRateLimit ? '请求过于频繁，请稍后再试' : error.message
+        error: isRateLimit ? '请求过于频繁，请稍后再试' : errorMessage
       };
     }
   });

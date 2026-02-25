@@ -99,7 +99,34 @@ export const useChatStore = create<ChatState>((set) => ({
     // 追加新的工具结果，避免重复
     const existingIds = new Set(state.toolResults.map(r => r.toolCallId));
     const uniqueNewResults = newResults.filter(r => !existingIds.has(r.toolCallId));
-    return { toolResults: [...state.toolResults, ...uniqueNewResults] };
+
+    // 将工具结果转换为 role='tool' 的消息并添加到 messages 数组
+    const newToolResultMessages: Message[] = uniqueNewResults.map(result => ({
+      id: `tool-${result.toolCallId}`,
+      role: 'tool' as const,
+      content: JSON.stringify({
+        success: result.success,
+        result: result.result,
+        error: result.error,
+      }),
+      timestamp: Date.now(),
+      toolCallId: result.toolCallId,
+    }));
+
+    // 检查 messages 中是否已存在相同 toolCallId 的消息
+    const existingToolResultIds = new Set(
+      state.messages
+        .filter(m => m.role === 'tool')
+        .map(m => m.toolCallId)
+    );
+    const uniqueNewMessages = newToolResultMessages.filter(
+      m => m.toolCallId && !existingToolResultIds.has(m.toolCallId)
+    );
+
+    return {
+      toolResults: [...state.toolResults, ...uniqueNewResults],
+      messages: [...state.messages, ...uniqueNewMessages],
+    };
   }),
 
   startToolExecution: (execution) => set((state) => {

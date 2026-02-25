@@ -8,6 +8,22 @@ import { outputTruncator } from '../utils/OutputTruncator';
 let workspacePath: string | null = null;
 
 /**
+ * 获取应用根路径
+ * 开发环境: 项目根目录
+ * 生产环境: resources 目录
+ *
+ * 注意: 编译后代码在 dist-electron/main/，
+ * 所以需要向上两级 (../..) 到达项目根目录
+ */
+function getAppRootPath(): string {
+  if (process.env.NODE_ENV === 'development') {
+    // 编译后: dist-electron/main -> ../.. -> 项目根目录
+    return path.resolve(__dirname, '../..');
+  }
+  return process.resourcesPath || app.getPath('userData');
+}
+
+/**
  * 搜索配置常量
  */
 const SEARCH_CONFIG = {
@@ -92,15 +108,25 @@ export const fileTools: Tool[] = [
     name: 'list_directory',
     description: `列出目录内容（支持递归）
 
+**必需参数**：
+- directory: 目录路径（如 "." 表示当前目录，"src" 表示 src 目录）
+
+**可选参数**：
+- recursive: 是否递归列出子目录（默认 false）
+- namespace: 命名空间，workspace（工作空间）或 config（.zero-employee 配置目录，默认 workspace）
+
 **警告**：recursive=true 时会递归遍历所有子目录，对于大型目录可能导致性能问题。
 - 有深度限制（${SEARCH_CONFIG.MAX_DEPTH} 层）和文件数量限制（${SEARCH_CONFIG.MAX_FILES} 个文件）
 - 会自动忽略 node_modules、.git、dist、build 等常见目录
-- 对于大型项目，建议先不使用 recursive，然后按需探索子目录
 
-**使用建议**：
-- 探索未知目录：先使用 recursive=false，查看顶层结构
-- 探索特定子目录：再针对需要的子目录使用 recursive=true
-- 读取配置目录：使用 namespace="config" 访问 .zero-employee 目录`,
+使用示例：
+- 列出工作空间根目录：directory=".", namespace="workspace"
+- 列出配置目录：directory="skills", namespace="config"
+- 递归列出：directory="src", recursive=true
+
+**返回值说明**：
+- 返回结果包含 \`path\`（相对路径）和 \`fullPath\`（绝对路径）
+- \`fullPath\` 可直接用于 bash 命令执行脚本，不依赖当前工作目录`,
     parameters: {
       type: 'object',
       properties: {
@@ -130,7 +156,7 @@ export const fileTools: Tool[] = [
 
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+          rootPath = path.join(getAppRootPath(), '.zero-employee');
         } else {
           rootPath = workspacePath;
         }
@@ -159,7 +185,21 @@ export const fileTools: Tool[] = [
 
   {
     name: 'read_file',
-    description: '读取文件内容。支持从工作空间或配置目录（.zero-employee）读取文件。',
+    description: `读取文件内容。支持从工作空间或配置目录（.zero-employee）读取文件。
+
+**必需参数**：
+- filepath: 文件路径（如 "README.md" 或 "skills/docx/SKILL.md"）
+
+**可选参数**：
+- namespace: 命名空间，workspace（工作空间）或 config（.zero-employee 配置目录，默认 workspace）
+
+使用示例：
+- 读取工作空间文件：filepath="README.md"
+- 读取技能文件：filepath="skills/docx/SKILL.md", namespace="config"
+
+**返回值说明**：
+- 返回结果包含 \`path\`（相对路径）、\`namespace\` 和 \`fullPath\`（绝对路径）
+- \`fullPath\` 可直接用于 bash 命令执行脚本，不依赖当前工作目录`,
     parameters: {
       type: 'object',
       properties: {
@@ -185,7 +225,7 @@ export const fileTools: Tool[] = [
         // 根据 namespace 决定根目录
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+          rootPath = path.join(getAppRootPath(), '.zero-employee');
         } else {
           rootPath = workspacePath;
         }
@@ -243,7 +283,7 @@ export const fileTools: Tool[] = [
 
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+          rootPath = path.join(getAppRootPath(), '.zero-employee');
         } else {
           rootPath = workspacePath;
         }
@@ -317,7 +357,7 @@ export const fileTools: Tool[] = [
 
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+          rootPath = path.join(getAppRootPath(), '.zero-employee');
         } else {
           rootPath = workspacePath;
         }
@@ -364,11 +404,19 @@ export const fileTools: Tool[] = [
     name: 'write_file',
     description: `创建新文件或覆盖现有文件的内容。
 
+**必需参数**：
+- filepath: 文件路径（如 "test.txt" 或 "docs/README.md"）
+- content: 文件内容
+
 使用场景：
 - 创建新的配置文件
 - 生成代码文件
 - 保存文档内容
 - 写入数据文件
+
+使用示例：
+- 写入工作空间文件：filepath="output.txt", content="内容"
+- 写入配置目录文件：filepath="config.json", namespace="config", content='{"key": "value"}'
 
 注意：
 - 如果文件已存在，会被完全覆盖
@@ -402,7 +450,7 @@ export const fileTools: Tool[] = [
 
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(path.dirname(workspacePath), '.zero-employee');
+          rootPath = path.join(getAppRootPath(), '.zero-employee');
         } else {
           rootPath = workspacePath;
         }
@@ -493,6 +541,7 @@ async function listFiles(
           type: 'directory',
           name: entry.name,
           path: relativePath,
+          fullPath: fullPath,
         });
         const subFiles = await listFiles(fullPath, recursive, basePath, currentDepth + 1, fileCount);
         files.push(...subFiles);
@@ -507,6 +556,7 @@ async function listFiles(
           type: 'directory',
           name: entry.name,
           path: relativePath,
+          fullPath: fullPath,
         });
       }
     } else {
@@ -514,6 +564,7 @@ async function listFiles(
         type: 'file',
         name: entry.name,
         path: relativePath,
+        fullPath: fullPath,
         extension: path.extname(entry.name),
         size: stats.size,
       });

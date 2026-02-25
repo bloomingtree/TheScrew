@@ -67,7 +67,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, index }) => {
             </div>
           )}
 
-          <div className={isUser ? 'text-cream-900' : 'text-cream-900'}>
+          <div className={isUser ? 'text-cream-900 text-base' : 'text-cream-900 text-base'}>
             <ReactMarkdown
               components={{
                 code({ node, inline, className, children, ...props }: any) {
@@ -85,7 +85,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, index }) => {
                     <code
                       className={cn(
                         className,
-                        "px-2 py-1 rounded-lg text-sm font-mono",
+                        "px-2 py-1 rounded-lg text-base font-mono",
                         isUser ? "bg-purple-500/20 text-cream-900" : "bg-gray-200/50 text-cream-900"
                       )}
                       {...props}
