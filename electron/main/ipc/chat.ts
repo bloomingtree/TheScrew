@@ -7,6 +7,7 @@ import { bashTools } from '../tools/BashTools';
 // Office tools removed: BaseTools, WordTools, TemplateTools, PPTXTools, BatchTools, ExcelTools, PDFTools, OoxmlTools
 import { getWorkspacePath } from '../tools/FileTools';
 import { getContextBuilder } from '../core/ContextBuilder';
+import { countContextTokens, compressContext, CompressionConfig } from '../utils/tokenCounter';
 
 let currentClient: OpenAIClient | null = null;
 let currentAbortController: AbortController | null = null;
@@ -36,18 +37,34 @@ let currentAbortController: AbortController | null = null;
     }
 
     const alwaysKeep: any[] = [];
-    const recentMessages: any[] = [];
+    const userMessages: any[] = [];
+    const otherMessages: any[] = [];
 
+    // 分类消息：system 和 user 消息总是保留
     for (const msg of messages) {
       if (msg.role === 'system') {
         alwaysKeep.push(msg);
+      } else if (msg.role === 'user') {
+        userMessages.push(msg);
       } else {
-        recentMessages.push(msg);
+        otherMessages.push(msg);
       }
     }
 
-    const trimmedRecent = recentMessages.slice(-maxMessages);
-    return [...alwaysKeep, ...trimmedRecent];
+    // 计算 remaining slots
+    const remainingSlots = maxMessages - alwaysKeep.length - userMessages.length;
+
+    // 如果 remainingSlots >= 0，保留所有消息
+    if (remainingSlots >= 0) {
+      return messages;
+    }
+
+    // 否则，从 otherMessages 中只保留最近的 remainingSlots + userMessages.length 条
+    // 这样确保至少保留所有 user 消息
+    const slotsForOthers = Math.max(0, remainingSlots);
+    const trimmedOthers = otherMessages.slice(-slotsForOthers);
+
+    return [...alwaysKeep, ...userMessages, ...trimmedOthers];
   }
 
   /**
@@ -173,7 +190,13 @@ export function registerChatHandlers(store: Store) {
 
       currentClient = client;
 
-      const chunks: string[] = [];
+      // 调试：打印接收到的消息（只打印最后几条）
+      console.log('[chat:stream] Received from frontend:');
+      const printCount = Math.min(3, messages.length);
+      for (let i = Math.max(0, messages.length - printCount); i < messages.length; i++) {
+        const m = messages[i];
+        console.log(`  [${i}] ${m.role}: ${m.content?.substring(0, 40)}${m.content?.length > 40 ? '...' : ''} ${m.tool_calls ? '(tool_calls)' : ''}`);
+      }
 
       // 重置对话的工具组状态（每次新对话都从基础工具开始）
       if (conversationId) {
@@ -190,6 +213,7 @@ export function registerChatHandlers(store: Store) {
       };
 
       messages = [systemMessage, ...messages];
+      console.log('[chat:stream] After adding system message, total:', messages.length);
 
       // 获取当前激活的工具定义
       let tools = conversationId
@@ -201,6 +225,31 @@ export function registerChatHandlers(store: Store) {
       const MAX_TOOL_ITERATIONS = 50;  // 安全上限，防止真正的无限循环
       const MAX_SAME_TOOL_CALLS = 3;   // 相同工具调用次数限制
       let iteration = 0;
+
+      // 上下文压缩配置
+      const compressionConfig: CompressionConfig = {
+        maxTokens: config.maxTokens || 128000,
+        threshold: 0.50,  // 50% 时触发压缩（更早触发，避免请求体过大）
+        keepRecentMessages: 20,  // 保留最近 20 条消息
+      };
+      let totalCompressedCount = 0;
+      let roundChunks: string[] = [];  // 每轮的文本内容（循环外声明）
+
+      // 预先检查消息数量，如果太多就直接压缩（避免计算 token）
+      const MAX_MESSAGES_BEFORE_COMPRESSION = 15;
+      if (messages.length > MAX_MESSAGES_BEFORE_COMPRESSION) {
+        console.log(`[chat:stream] Message count (${messages.length}) exceeds limit, compressing...`);
+        const compressionResult = compressContext(messages, {
+          maxTokens: compressionConfig.maxTokens,
+          threshold: 0,  // 强制压缩
+          keepRecentMessages: compressionConfig.keepRecentMessages,
+        });
+        if (compressionResult.compressionOccurred) {
+          messages = compressionResult.compressedMessages;
+          totalCompressedCount += compressionResult.compressedCount;
+          console.log(`[chat:stream] Compressed ${compressionResult.compressedCount} messages to ${messages.length}`);
+        }
+      }
 
       while (true) {
         iteration++;
@@ -215,18 +264,64 @@ export function registerChatHandlers(store: Store) {
           break;
         }
 
-        let hasToolCalls = false;
+        // 计算 token 使用量
+        const currentTokens = countContextTokens(messages, systemPromptContent, tools);
+        const tokenPercentage = (currentTokens / compressionConfig.maxTokens) * 100;
 
-        messages = trimMessages(messages, 10);
+        // 发送 token 使用情况给前端
+        event.sender.send('chat:token_usage', {
+          current: currentTokens,
+          max: compressionConfig.maxTokens,
+          percentage: tokenPercentage,
+          compressedCount: totalCompressedCount,
+        });
+
+        // 自动上下文压缩
+        if (tokenPercentage > compressionConfig.threshold * 100) {
+          console.log(`[Context Compression] Token usage at ${tokenPercentage.toFixed(1)}%, triggering compression...`);
+          const compressionResult = compressContext(messages, compressionConfig);
+
+          if (compressionResult.compressionOccurred) {
+            messages = compressionResult.compressedMessages;
+            totalCompressedCount += compressionResult.compressedCount;
+
+            // 重新计算 token 使用量
+            const newTokens = countContextTokens(messages, systemPromptContent, tools);
+            console.log(`[Context Compression] Compressed ${compressionResult.compressedCount} messages, tokens reduced from ${currentTokens} to ${newTokens}`);
+
+            // 发送更新后的 token 使用情况
+            event.sender.send('chat:token_usage', {
+              current: newTokens,
+              max: compressionConfig.maxTokens,
+              percentage: (newTokens / compressionConfig.maxTokens) * 100,
+              compressedCount: totalCompressedCount,
+            });
+          }
+        }
+
+        let hasToolCalls = false;
+        roundChunks = [];  // 清空，准备新的一轮
 
         console.log('[DEBUG] Starting streamChat request, messages count:', messages.length);
 
         for await (const chunk of client.streamChat(messages, currentAbortController.signal, tools)) {
           try {
             const parsed = JSON.parse(chunk);
-            
+
+            // 检查是否是工具调用类型的消息
             if (parsed.type === 'tool_calls') {
               hasToolCalls = true;
+
+              // 如果这一轮有文本内容，先添加到 messages
+              if (roundChunks.length > 0) {
+                const content = roundChunks.join('');
+                console.log('[chat:stream] Adding assistant message with content:', content.substring(0, 50) + '...');
+                messages.push({
+                  role: 'assistant',
+                  content: content,
+                });
+                roundChunks = [];  // 清空，准备下一轮
+              }
 
               // 检测重复的工具调用
               const duplicateToolCalls: string[] = [];
@@ -255,7 +350,7 @@ export function registerChatHandlers(store: Store) {
               event.sender.send('chat:tool_calls', parsed.toolCalls);
 
               const startTimes = new Map<string, number>();
-              
+
               try {
                 for (const toolCall of parsed.toolCalls) {
                   const startTime = Date.now();
@@ -325,6 +420,7 @@ export function registerChatHandlers(store: Store) {
                   content: '',
                   tool_calls: parsed.toolCalls,
                 });
+                console.log('[chat:stream] Added assistant with tool_calls, count:', parsed.toolCalls.length);
 
                 for (const result of results) {
                   messages.push({
@@ -333,6 +429,7 @@ export function registerChatHandlers(store: Store) {
                     content: safeStringify(result),
                   });
                 }
+                console.log('[chat:stream] Added', results.length, 'tool results, messages now:', messages.length);
                 
                 break;
               } catch (toolError: any) {
@@ -342,7 +439,7 @@ export function registerChatHandlers(store: Store) {
               }
             }
           } catch (e) {
-            chunks.push(chunk);
+            roundChunks.push(chunk);
             event.sender.send('chat:chunk', chunk);
           }
         }
@@ -358,10 +455,43 @@ export function registerChatHandlers(store: Store) {
         }
       }
 
+      // 将最后一轮的文本内容作为 assistant 消息添加到 messages 数组
+      if (roundChunks.length > 0) {
+        const finalContent = roundChunks.join('');
+        console.log('[chat:stream] Adding final assistant message:', finalContent.substring(0, 50) + '...');
+        messages.push({
+          role: 'assistant',
+          content: finalContent,
+        });
+      } else {
+        console.log('[chat:stream] No final content in roundChunks');
+      }
+
       currentClient = null;
       currentAbortController = null;
 
-      return { success: true, content: chunks.join('') };
+      // 返回完整消息序列供前端下次使用（不包含 system 消息）
+      const apiMessages = messages.filter(m => m.role !== 'system');
+
+      // 调试：打印返回给前端的消息（只打印最后几条和关键信息）
+      console.log('[chat:stream] Returning to frontend, total:', apiMessages.length);
+      const userCount = apiMessages.filter(m => m.role === 'user').length;
+      const assistantCount = apiMessages.filter(m => m.role === 'assistant').length;
+      const toolCount = apiMessages.filter(m => m.role === 'tool').length;
+      console.log(`  user: ${userCount}, assistant: ${assistantCount}, tool: ${toolCount}`);
+
+      // 打印最后 3 条消息
+      const lastFew = Math.min(3, apiMessages.length);
+      for (let i = Math.max(0, apiMessages.length - lastFew); i < apiMessages.length; i++) {
+        const m = apiMessages[i];
+        console.log(`  [${i}] ${m.role}: ${m.content?.substring(0, 40)}${m.content?.length > 40 ? '...' : ''} ${m.tool_calls ? '(tool_calls)' : ''}`);
+      }
+
+      return {
+        success: true,
+        content: roundChunks.join(''),
+        messages: apiMessages  // 返回完整的消息序列
+      };
     } catch (error: any) {
       const status = error.response?.status;
       const isRateLimit = status === 429;

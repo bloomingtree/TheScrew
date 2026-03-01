@@ -239,6 +239,7 @@ interface ElectronAPI {
   onToolResults: (callback: (results: any[]) => void) => () => void;
   onToolStart: (callback: (data: any) => void) => () => void;
   onToolComplete: (callback: (data: any) => void) => () => void;
+  onTokenUsage: (callback: (usage: any) => void) => () => void;
   removeChatChunkListener: () => void;
 }
 

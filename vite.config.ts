@@ -9,9 +9,10 @@ export default defineConfig({
     electron([
       {
         entry: 'electron/main/index.ts',
-        onstart(options) {
-          options.reload();
-          console.log('Starting Electron...xxx');
+        onstart({ startup }) {
+          console.log('[Electron Main] 编译完成，正在启动...');
+          // 使用 startup() 而不是 reload()
+          startup();
         },
         vite: {
           build: {
@@ -24,8 +25,9 @@ export default defineConfig({
       },
       {
         entry: 'electron/preload/index.ts',
-        onstart(options) {
-          options.reload();
+        onstart({ reload }) {
+          console.log('[Electron Preload] 编译完成');
+          reload();
         },
         vite: {
           build: {

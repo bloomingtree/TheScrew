@@ -1,16 +1,15 @@
 import { Message } from '../types';
-import { MessageThread, MessageKind } from '../types/thread';
+import { MessageThread } from '../types/thread';
 
 /**
- * 将消息列表分组为消息线程
+ * 将消息列表分组为消息线程（简化版）
  *
- * 分组规则：
- * 1. user 消息 → 新建线程，status='pending'
- * 2. assistant 消息（带 toolCalls）→ 添加到当前线程，status='thinking'
- * 3. tool 消息 → 添加到当前线程，status='using_tool'
- * 4. assistant 消息（无 toolCalls）→ 最终回答，status='completed'
+ * 处理后端返回的消息格式：
+ * - user: 用户消息
+ * - assistant: AI 消息（可能包含 tool_calls）
+ * - tool: 工具结果消息（包含 tool_call_id）
  */
-export function groupMessages(messages: Message[]): MessageThread[] {
+export function groupMessages(messages: any[]): MessageThread[] {
   const threads: MessageThread[] = [];
   let currentThread: MessageThread | null = null;
 
@@ -23,45 +22,36 @@ export function groupMessages(messages: Message[]): MessageThread[] {
       }
 
       currentThread = {
-        id: `thread-${message.id}`,
+        id: `thread-${message.id || Date.now()}`,
         userMessage: message,
         status: 'pending',
-        timestamp: message.timestamp,
+        timestamp: message.timestamp || Date.now(),
       };
     }
-    // 助手消息（带工具调用但内容为空）- 思考阶段
-    else if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0 && !message.content) {
-      if (currentThread) {
-        currentThread.assistantMessage = message;
-        // 追加工具调用而不是替换
-        if (!currentThread.toolCalls) {
-          currentThread.toolCalls = [];
-        }
-        currentThread.toolCalls.push(...message.toolCalls);
-        currentThread.status = 'thinking';
-      }
-    }
-    // 工具消息 - 执行阶段
+    // tool 消息 - 跳过（不单独处理，只用于状态标记）
     else if (message.role === 'tool') {
       if (currentThread) {
         currentThread.status = 'using_tool';
       }
     }
-    // 助手消息（有内容）- 最终回答
-    // 注意：工具调用完成后，流式输出会给原消息添加 content，此时应作为最终回答
-    else if (message.role === 'assistant' && message.content) {
+    // assistant 消息 - 添加到当前线程
+    else if (message.role === 'assistant') {
       if (currentThread) {
-        // 如果这条消息有 toolCalls，追加到现有列表
-        if (message.toolCalls && message.toolCalls.length > 0) {
-          if (!currentThread.toolCalls) {
-            currentThread.toolCalls = [];
-          }
-          currentThread.toolCalls.push(...message.toolCalls);
+        // 如果有 tool_calls，添加到线程
+        if (message.tool_calls && message.tool_calls.length > 0) {
+          const existingIds = new Set(currentThread.toolCalls?.map((tc: any) => tc.id) || []);
+          const newCalls = message.tool_calls.filter((tc: any) => !existingIds.has(tc.id));
+          currentThread.toolCalls = [...(currentThread.toolCalls || []), ...newCalls];
         }
-        currentThread.finalMessage = message;
-        currentThread.status = 'completed';
-        threads.push(currentThread);
-        currentThread = null;
+
+        // 如果有内容，标记为最终回答
+        if (message.content) {
+          currentThread.finalMessage = message;
+          currentThread.status = 'completed';
+        } else if (message.tool_calls && message.tool_calls.length > 0) {
+          // 有工具调用但没内容，设置为思考中
+          currentThread.assistantMessage = message;
+        }
       }
     }
   }
@@ -77,7 +67,7 @@ export function groupMessages(messages: Message[]): MessageThread[] {
 /**
  * 获取消息在线程中的类型
  */
-export function getMessageKind(message: Message, thread: MessageThread): MessageKind {
+export function getMessageKind(message: Message, thread: MessageThread): any {
   if (message.role === 'user') {
     return 'user';
   }
@@ -90,13 +80,13 @@ export function getMessageKind(message: Message, thread: MessageThread): Message
     return 'result';
   }
 
-  return 'thinking'; // 默认
+  return 'thinking';
 }
 
 /**
  * 获取线程的显示状态
  */
-export function getThreadDisplayStatus(thread: MessageThread): MessageKind {
+export function getThreadDisplayStatus(thread: MessageThread): any {
   switch (thread.status) {
     case 'pending':
       return 'user';

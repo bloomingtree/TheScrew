@@ -33,7 +33,17 @@
       "Bash(netstat:*)",
       "Bash(cmd:*)",
       "Bash(powershell:*)",
-      "Bash(tar:*)"
+      "Bash(tar:*)",
+      "Bash(\"e:/Agents/offline-agent/zero-employee/electron/main/python/python-3.8.10-embed-amd64/python.exe\" --version)",
+      "Bash(\"e:/Agents/offline-agent/zero-employee/electron/main/python/python-3.8.10-embed-amd64/python.exe\" -c \"print\\(''Hello from Python!''\\); import sys; print\\(f''Python version: {sys.version}''\\)\")",
+      "Bash(ssh root@shiyin \"ls -la /apps/ && docker ps --format ''table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}'' | grep -i supa\")",
+      "Bash(ssh root@shiyin \"cat /apps/supabase/.env 2>/dev/null || cat /apps/supabase/docker-compose.yml 2>/dev/null | head -100\")",
+      "Bash(ssh root@shiyin \"ls -la /apps/supabase/ && find /apps/supabase -name ''.env*'' -o -name ''docker-compose.yml'' 2>/dev/null\")",
+      "Bash(ssh root@shiyin \"cat /apps/supabase/docker/.env\")",
+      "Bash(ssh root@shiyin \"cat /apps/supabase/docker/docker-compose.yml | grep -A 20 ''db:''\")",
+      "Bash(ssh root@shiyin \"docker exec -i supabase-db psql -U postgres -c \"\"CREATE DATABASE umami;\"\" && docker exec -i supabase-db psql -U postgres -c \"\"CREATE USER umami_user WITH PASSWORD ''umami_secure_password_2025'';\"\" && docker exec -i supabase-db psql -U postgres -c \"\"GRANT ALL PRIVILEGES ON DATABASE umami TO umami_user;\"\"\")",
+      "Bash(ssh root@shiyin \"docker network ls | grep supa\")",
+      "Bash(ssh root@shiyin:*)"
     ]
   }
 }

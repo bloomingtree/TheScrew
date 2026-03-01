@@ -6,14 +6,16 @@ import MessageList from './MessageList';
 import InputArea from './InputArea';
 import WorkspaceSelector from '../Workspace/WorkspaceSelector';
 import AgentSelector from './AgentSelector';
+import TokenProgressBar from './TokenProgressBar';
 
 const ChatArea: React.FC = () => {
   const { currentConversationId, createConversation, updateConversationMessages } = useConversationStore();
-  const { setMessages, clearMessages, messages } = useChatStore();
+  const { messages, setMessages, clearMessages, isStreaming } = useChatStore();
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const hasInitialized = useRef(false);
+  const lastSyncedMessagesRef = useRef<any[]>([]);
 
   useEffect(() => {
     console.log('workspacePath 状态变化:', workspacePath);
@@ -45,23 +47,42 @@ const ChatArea: React.FC = () => {
     if (!currentConversationId) return;
 
     setIsLoadingConversation(true);
+    // 重置同步 ref，防止新对话被错误跳过同步
+    lastSyncedMessagesRef.current = [];
+
     // 从 conversationStore 中获取当前对话
     const state = useConversationStore.getState();
     const conversation = state.conversations.find(c => c.id === currentConversationId);
     if (conversation && conversation.messages.length > 0) {
       setMessages(conversation.messages);
+      // 加载后立即更新 ref，避免立即触发同步
+      lastSyncedMessagesRef.current = conversation.messages;
     } else {
       clearMessages();
     }
     setIsLoadingConversation(false);
   }, [currentConversationId, setMessages, clearMessages]); // 只依赖 currentConversationId
 
-  // 同步消息到 conversationStore（当不是正在加载时）
+  // 同步消息到 conversationStore（只在流式处理完成后、且消息真正变化时）
   useEffect(() => {
-    if (!isLoadingConversation && currentConversationId && messages.length > 0) {
-      updateConversationMessages(currentConversationId, messages);
+    // 只在非加载、非流式处理、有对话ID、有消息时同步
+    if (isLoadingConversation || isStreaming || !currentConversationId) {
+      return;
     }
-  }, [messages, currentConversationId, isLoadingConversation, updateConversationMessages]);
+
+    // 如果消息没有真正变化（只是重新渲染），跳过同步
+    if (messages.length === lastSyncedMessagesRef.current.length &&
+        JSON.stringify(messages) === JSON.stringify(lastSyncedMessagesRef.current)) {
+      return;
+    }
+
+    // 只有当 messages 有内容时才同步
+    if (messages.length > 0) {
+      console.log('[ChatArea] Syncing messages to conversationStore:', messages.length);
+      updateConversationMessages(currentConversationId, messages);
+      lastSyncedMessagesRef.current = messages;
+    }
+  }, [messages, currentConversationId, isLoadingConversation, isStreaming, updateConversationMessages]);
 
   const loadWorkspacePath = async () => {
     try {
@@ -142,6 +163,7 @@ const ChatArea: React.FC = () => {
         onClose={() => setShowWorkspaceSelector(false)}
         onWorkspaceSelect={handleWorkspaceSelect}
       />
+      <TokenProgressBar />
     </div>
   );
 };

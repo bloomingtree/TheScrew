@@ -1,24 +1,48 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useChatStore } from '../../store/chatStore';
-import MessageThread from './MessageThread';
-import { groupMessages } from '../../utils/messageGrouping';
+import UserMessage from './messages/UserMessage';
+import AssistantMessage from './messages/AssistantMessage';
+import ToolCallSimple from './ToolCallSimple';
 
 const MessageList: React.FC = () => {
   const { messages, isStreaming } = useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 使用 useMemo 缓存分组结果
-  const threads = useMemo(() => groupMessages(messages), [messages]);
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 
+  // 简单的顺序渲染：每条消息独立渲染
+  const renderMessage = (message: any, index: number) => {
+    // user 消息
+    if (message.role === 'user') {
+      return (
+        <UserMessage
+          key={`msg-${index}`}
+          message={message}
+        />
+      );
+    }
+
+    // assistant 消息
+    if (message.role === 'assistant') {
+      return (
+        <AssistantMessage
+          key={`msg-${index}`}
+          message={message}
+        />
+      );
+    }
+
+    // tool 消息（不直接渲染，工具调用通过 AssistantMessage 的 tool_calls 显示）
+    return null;
+  };
+
   return (
     <div className="h-full overflow-y-auto py-6 px-4">
       {/* 居中布局容器 */}
-      <div className="max-w-[1600px] mx-auto space-y-6">
+      <div className="max-w-[1600px] mx-auto">
         {messages.length === 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -31,19 +55,8 @@ const MessageList: React.FC = () => {
           </motion.div>
         )}
 
-        {/* 渲染消息线程 */}
-        {threads.map((thread, index) => {
-          // 获取前一个线程的最后一条消息类型，用于判断是否显示时间戳
-          const prevThread = index > 0 ? threads[index - 1] : null;
-          return (
-            <MessageThread
-              key={thread.id}
-              thread={thread}
-              messageIndexStart={index * 10}
-              prevThread={prevThread}
-            />
-          );
-        })}
+        {/* 顺序渲染每条消息 */}
+        {messages.map((message, index) => renderMessage(message, index))}
 
         {/* 流式响应加载指示器 */}
         {isStreaming && (

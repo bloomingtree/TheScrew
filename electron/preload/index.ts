@@ -104,6 +104,11 @@ const electronAPI = {
     ipcRenderer.on('chat:tool_complete', listener);
     return () => ipcRenderer.removeListener('chat:tool_complete', listener);
   },
+  onTokenUsage: (callback: (usage: any) => void) => {
+    const listener = (_event: any, usage: any) => callback(usage);
+    ipcRenderer.on('chat:token_usage', listener);
+    return () => ipcRenderer.removeListener('chat:token_usage', listener);
+  },
   removeChatChunkListener: () => {
     ipcRenderer.removeAllListeners('chat:chunk');
   },

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Message, ToolCall, ToolResult, ToolExecution } from '../types';
+import { ToolCall, ToolResult, ToolExecution } from '../types';
 
 interface Task {
   id: string;
@@ -8,22 +8,31 @@ interface Task {
   createdAt: number;
 }
 
+interface TokenUsage {
+  current: number;
+  max: number;
+  percentage: number;
+  compressedCount: number;
+}
+
 interface ChatState {
-  messages: Message[];
+  messages: any[];            // 按顺序存储的消息（user/assistant/tool）
   isStreaming: boolean;
   currentConversationId: string | null;
   toolCalls: ToolCall[];
   toolResults: ToolResult[];
   toolExecutions: Map<string, ToolExecution>;
   tasks: Task[];
+  tokenUsage: TokenUsage;
 
-  addMessage: (message: Message) => void;
+  // 消息操作（保持顺序）
+  addMessage: (message: any) => void;
   updateLastMessage: (content: string) => void;
   updateLastMessageToolCalls: (toolCalls: ToolCall[]) => void;
-  deleteMessage: (index: number) => void;
-  setMessages: (messages: Message[]) => void;
-  setStreaming: (isStreaming: boolean) => void;
+  setMessages: (messages: any[]) => void;
   clearMessages: () => void;
+
+  setStreaming: (isStreaming: boolean) => void;
   setConversationId: (id: string) => void;
   setToolCalls: (toolCalls: ToolCall[]) => void;
   setToolResults: (toolResults: ToolResult[]) => void;
@@ -32,6 +41,7 @@ interface ChatState {
   addTask: (content: string) => void;
   toggleTask: (id: string) => void;
   removeTask: (id: string) => void;
+  setTokenUsage: (usage: Partial<TokenUsage>) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -42,6 +52,12 @@ export const useChatStore = create<ChatState>((set) => ({
   toolResults: [],
   toolExecutions: new Map(),
   tasks: [],
+  tokenUsage: {
+    current: 0,
+    max: 128000,
+    percentage: 0,
+    compressedCount: 0,
+  },
 
   addMessage: (message) => set((state) => ({
     messages: [...state.messages, message],
@@ -51,10 +67,15 @@ export const useChatStore = create<ChatState>((set) => ({
     if (state.messages.length === 0) return state;
 
     const updated = [...state.messages];
-    updated[updated.length - 1] = {
-      ...updated[updated.length - 1],
-      content,
-    };
+    const lastIdx = updated.length - 1;
+
+    // 只更新最后一条 assistant 消息的内容
+    if (updated[lastIdx].role === 'assistant') {
+      updated[lastIdx] = {
+        ...updated[lastIdx],
+        content,
+      };
+    }
 
     return { messages: updated };
   }),
@@ -63,69 +84,48 @@ export const useChatStore = create<ChatState>((set) => ({
     if (state.messages.length === 0) return state;
 
     const updated = [...state.messages];
-    const lastIndex = updated.length - 1;
+    // 从后往前找最后一条 assistant 消息
+    let lastAssistantIndex = updated.length - 1;
+    while (lastAssistantIndex >= 0 && updated[lastAssistantIndex].role !== 'assistant') {
+      lastAssistantIndex--;
+    }
 
-    // 确保最后一条消息是 assistant 角色
-    if (updated[lastIndex].role === 'assistant') {
-      const existingToolCalls = updated[lastIndex].toolCalls || [];
-      // 追加新的工具调用，避免重复
-      const existingIds = new Set(existingToolCalls.map(tc => tc.id));
+    if (lastAssistantIndex >= 0) {
+      const existingToolCalls = updated[lastAssistantIndex].tool_calls || [];
+      const existingIds = new Set(existingToolCalls.map((tc: any) => tc.id));
       const uniqueNewCalls = newToolCalls.filter(tc => !existingIds.has(tc.id));
 
-      updated[lastIndex] = {
-        ...updated[lastIndex],
-        toolCalls: [...existingToolCalls, ...uniqueNewCalls],
+      const normalizedNewCalls = uniqueNewCalls.map(tc => ({
+        id: tc.id,
+        type: tc.type,
+        function: tc.function,
+      }));
+
+      updated[lastAssistantIndex] = {
+        ...updated[lastAssistantIndex],
+        tool_calls: [...existingToolCalls, ...normalizedNewCalls],
       };
     }
 
     return { messages: updated };
   }),
 
-  deleteMessage: (index) => set((state) => ({
-    messages: state.messages.filter((_, i) => i !== index),
-  })),
-
   setMessages: (messages) => set({ messages }),
 
-  setStreaming: (isStreaming) => set({ isStreaming }),
-
   clearMessages: () => set({ messages: [] }),
+
+  setStreaming: (isStreaming) => set({ isStreaming }),
 
   setConversationId: (id) => set({ currentConversationId: id }),
 
   setToolCalls: (toolCalls) => set({ toolCalls }),
 
   setToolResults: (newResults) => set((state) => {
-    // 追加新的工具结果，避免重复
     const existingIds = new Set(state.toolResults.map(r => r.toolCallId));
     const uniqueNewResults = newResults.filter(r => !existingIds.has(r.toolCallId));
 
-    // 将工具结果转换为 role='tool' 的消息并添加到 messages 数组
-    const newToolResultMessages: Message[] = uniqueNewResults.map(result => ({
-      id: `tool-${result.toolCallId}`,
-      role: 'tool' as const,
-      content: JSON.stringify({
-        success: result.success,
-        result: result.result,
-        error: result.error,
-      }),
-      timestamp: Date.now(),
-      toolCallId: result.toolCallId,
-    }));
-
-    // 检查 messages 中是否已存在相同 toolCallId 的消息
-    const existingToolResultIds = new Set(
-      state.messages
-        .filter(m => m.role === 'tool')
-        .map(m => m.toolCallId)
-    );
-    const uniqueNewMessages = newToolResultMessages.filter(
-      m => m.toolCallId && !existingToolResultIds.has(m.toolCallId)
-    );
-
     return {
       toolResults: [...state.toolResults, ...uniqueNewResults],
-      messages: [...state.messages, ...uniqueNewMessages],
     };
   }),
 
@@ -169,5 +169,9 @@ export const useChatStore = create<ChatState>((set) => ({
 
   removeTask: (id) => set((state) => ({
     tasks: state.tasks.filter((task) => task.id === id),
+  })),
+
+  setTokenUsage: (usage) => set((state) => ({
+    tokenUsage: { ...state.tokenUsage, ...usage },
   })),
 }));

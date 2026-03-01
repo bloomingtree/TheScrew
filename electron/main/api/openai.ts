@@ -178,18 +178,20 @@ export class OpenAIClient {
       requestBody.tools = tools;
     }
 
-    console.log('[DEBUG] Sending request - model:', this.model, 'messages:', messages.length, 'tools:', tools?.length || 0);
-    console.log('========== Request Body ==========');
-    console.log(JSON.stringify(requestBody, null, 2));
-    console.log('==================================');
+    console.log('[OpenAIClient] Sending request - model:', this.model, 'messages:', messages.length, 'tools:', tools?.length || 0);
 
     const response = await this.axiosInstance.post(`${this.baseUrl}/chat/completions`, requestBody, {
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
+        // 禁止压缩，避免某些 API 的兼容性问题
+        'Accept-Encoding': 'gzip, deflate, identity',
       },
       responseType: 'stream',
       signal,
+      // 禁用 axios 的自动解压，避免某些情况下的问题
+      decompress: true,
+      maxRedirects: 0,
     });
 
     const stream = response.data;
@@ -260,10 +262,6 @@ export class OpenAIClient {
     if (currentToolCall && currentToolCall.function && currentToolCall.function.arguments) {
       toolCalls.push(currentToolCall);
     }
-
-    console.log('========== AI Response ==========');
-    console.log(contentChunks.join(''));
-    console.log('==================================');
 
     if (toolCalls.length > 0) {
       yield JSON.stringify({ type: 'tool_calls', toolCalls });

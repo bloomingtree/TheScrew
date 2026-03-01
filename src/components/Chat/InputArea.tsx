@@ -10,7 +10,7 @@ const InputArea: React.FC = () => {
   const [images, setImages] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, toolCalls } = useChatStore();
+const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, setTokenUsage } = useChatStore();
   const { apiKey } = useConfigStore();
   const { currentConversationId, generateTitle } = useConversationStore();
 
@@ -33,82 +33,52 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
     const userImages = images.length > 0 ? images : undefined;
 
     const userMessage = {
-      id: Date.now().toString(),
-      role: 'user' as const,
+      role: 'user',
       content: userInput,
       timestamp: Date.now(),
-      images: userImages,
     };
 
     setInput('');
     setImages([]);
 
-    const assistantMessage = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant' as const,
-      content: '',
-      timestamp: Date.now(),
-    };
-
-addMessage(userMessage);
-    addMessage(assistantMessage);
+    // 添加用户消息
+    addMessage(userMessage);
     setStreaming(true);
 
-    if (currentConversationId && messages.length === 0) {
-      // await generateTitle(currentConversationId, userInput);
-      // 不阻塞发送，异步生成标题
+    // 标记是否已创建 assistant 消息
+    let assistantMessageCreated = false;
+
+    const ensureAssistantMessage = () => {
+      if (!assistantMessageCreated) {
+        const assistantMessage = {
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+        };
+        addMessage(assistantMessage);
+        assistantMessageCreated = true;
+      }
+    };
+
+    if (currentConversationId && messages.length === 1) {
       generateTitle(currentConversationId, userInput);
     }
 
     try {
-      // 准备发送给后端的消息
-      // 现在工具结果已经作为 role='tool' 的消息存储在 messages 数组中
-      const chatMessages: any[] = [];
-
-      for (const m of messages) {
-        // 跳过空的 assistant 消息（但在有 tool_calls 时保留）
-        if (m.role === 'assistant' && !m.content.trim() && (!m.toolCalls || m.toolCalls.length === 0)) {
-          continue;
-        }
-
-        const baseMessage: any = {
-          role: m.role,
-          content: m.content || '',
-        };
-
-        // 如果是 assistant 消息且有 toolCalls，添加 tool_calls
-        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-          baseMessage.tool_calls = m.toolCalls.map(tc => ({
-            id: tc.id,
-            type: tc.type,
-            function: {
-              name: tc.function.name,
-              arguments: tc.function.arguments,
-            },
-          }));
-        }
-
-        // 如果是 tool 消息，添加 tool_call_id
-        if (m.role === 'tool' && m.toolCallId) {
-          baseMessage.tool_call_id = m.toolCallId;
-        }
-
-        chatMessages.push(baseMessage);
-      }
-
-      chatMessages.push({
-        role: 'user',
-        content: userInput,
-      });
+      // 获取最新的 messages 状态（确保包含刚添加的用户消息）
+      const latestMessages = useChatStore.getState().messages;
+      console.log('[InputArea] Sending', latestMessages.length, 'messages to backend');
 
       let accumulatedContent = '';
 
       const handleChunk = (chunk: string) => {
+        ensureAssistantMessage();
         accumulatedContent += chunk;
         updateLastMessage(accumulatedContent);
       };
 
       const handleToolCalls = (toolCalls: any[]) => {
+        ensureAssistantMessage();
         updateLastMessageToolCalls(toolCalls);
         setToolCalls(toolCalls);
       };
@@ -131,22 +101,38 @@ addMessage(userMessage);
         completeToolExecution(data.toolCallId, data.success, data.duration);
       };
 
+      const handleTokenUsage = (usage: any) => {
+        setTokenUsage(usage);
+      };
+
       const removeChunkListener = window.electronAPI.onChatChunk(handleChunk);
       const removeToolCallsListener = window.electronAPI.onToolCalls(handleToolCalls);
       const removeToolResultsListener = window.electronAPI.onToolResults(handleToolResults);
       const removeToolStartListener = window.electronAPI.onToolStart(handleToolStart);
       const removeToolCompleteListener = window.electronAPI.onToolComplete(handleToolComplete);
+      const removeTokenUsageListener = window.electronAPI.onTokenUsage(handleTokenUsage);
 
-      const result = await window.electronAPI.chat.stream(chatMessages, currentConversationId || undefined);
+      const result = await window.electronAPI.chat.stream(latestMessages, currentConversationId || undefined);
 
       removeChunkListener();
       removeToolCallsListener();
       removeToolResultsListener();
       removeToolStartListener();
       removeToolCompleteListener();
+      removeTokenUsageListener();
 
       if (result.success) {
-        updateLastMessage(accumulatedContent);
+        // 用后端返回的完整消息序列替换当前 messages
+        if (result.messages) {
+          const userCount = result.messages.filter((m: any) => m.role === 'user').length;
+          const assistantCount = result.messages.filter((m: any) => m.role === 'assistant').length;
+          const toolCount = result.messages.filter((m: any) => m.role === 'tool').length;
+          console.log('[InputArea] Received', result.messages.length, `messages (user:${userCount}, assistant:${assistantCount}, tool:${toolCount})`);
+          setMessages(result.messages);
+        } else {
+          console.log('[InputArea] No messages in response, updating last message');
+          updateLastMessage(accumulatedContent);
+        }
       } else {
         updateLastMessage(`❌ 错误: ${result.error}`);
       }
