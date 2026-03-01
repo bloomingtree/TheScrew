@@ -1,5 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import ToolCallSimple from '../ToolCallSimple';
 import { useChatStore } from '../../../store/chatStore';
 
@@ -64,12 +68,66 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
         >
           <div className="flex flex-col items-start max-w-[85%]">
             {/* 消息气泡 */}
-            <div className="rounded-xl overflow-hidden border bg-[#1a1b26] border-[#414868] shadow-lg">
+            <div className="rounded-xl overflow-hidden border bg-white border-gray-200 shadow-lg">
               <div className="px-3 py-2">
-                <div className="prose prose-sm max-w-none prose-p:max-w-none prose-headings:max-w-none prose-invert">
-                  <div className="text-[#c0caf5] text-sm leading-relaxed whitespace-pre-wrap">
+                <div className="prose prose-sm max-w-none prose-p:max-w-none prose-headings:max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      code({ node, inline, className, children, ...props }) {
+                        const match = /language-(\w+)/.exec(className || '');
+                        return !inline && match ? (
+                          <SyntaxHighlighter
+                            style={vscDarkPlus}
+                            language={match[1]}
+                            PreTag="div"
+                            customStyle={{ borderRadius: '6px', fontSize: '13px' }}
+                            {...props}
+                          >
+                            {String(children).replace(/\n$/, '')}
+                          </SyntaxHighlighter>
+                        ) : (
+                          <code
+                            className="px-1.5 py-0.5 rounded text-xs font-mono"
+                            style={{ backgroundColor: '#f3f4f6', color: '#e11d48' }}
+                            {...props}
+                          >
+                            {children}
+                          </code>
+                        );
+                      },
+                      p({ children }) {
+                        return <p className="my-1 text-[#374151] text-sm leading-relaxed">{children}</p>;
+                      },
+                      ul({ children }) {
+                        return <ul className="my-1 ml-4 list-disc text-sm text-[#374151]">{children}</ul>;
+                      },
+                      ol({ children }) {
+                        return <ol className="my-1 ml-4 list-decimal text-sm text-[#374151]">{children}</ol>;
+                      },
+                      li({ children }) {
+                        return <li className="my-0.5">{children}</li>;
+                      },
+                      table({ children }) {
+                        return (
+                          <div className="overflow-x-auto my-2">
+                            <table className="min-w-full border-collapse text-sm text-[#374151]">{children}</table>
+                          </div>
+                        );
+                      },
+                      thead({ children }) {
+                        return <thead className="bg-gray-100">{children}</thead>;
+                      },
+                      th({ children }) {
+                        return <th className="border border-gray-300 px-3 py-1.5 text-left font-semibold">{children}</th>;
+                      },
+                      td({ children }) {
+                        return <td className="border border-gray-300 px-3 py-1.5">{children}</td>;
+                      },
+                    }}
+                  >
                     {message.content}
-                  </div>
+                  </ReactMarkdown>
                 </div>
               </div>
             </div>

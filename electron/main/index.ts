@@ -22,6 +22,12 @@ import { cronTools, heartbeatTools } from './tools/SchedulerTools';
 import { bashTools, bashToolSet } from './tools/BashTools';
 import { setWorkspacePath } from './tools/FileTools';
 import { registerToolSetMeta } from './tools/ToolManager';
+import { reportTools, reportToolGroup } from './reports/ReportTools';
+import { getTemplateEngine } from './reports';
+import { registerReportsHandlers } from './ipc/reports';
+import { registerWorkflowsHandlers } from './ipc/workflows';
+import { registerAnalyticsHandlers } from './ipc/analytics';
+import { registerCredentialHandlers } from './ipc/credentials';
 
 const store = new Store();
 
@@ -65,6 +71,9 @@ app.whenReady().then(async () => {
 
   // 初始化技能管理器
   await getSkillManager().initialize();
+
+  // 初始化报告模板引擎
+  await getTemplateEngine().initialize();
 
   // 将现有工具适配到新的 ToolRegistry
   const toolManager = getToolManager();
@@ -137,8 +146,20 @@ app.whenReady().then(async () => {
     toolManager.registerTool(tool);
   }
 
+  // 注册报告工具到 ToolManager
+  for (const tool of reportTools) {
+    toolManager.registerTool(tool);
+  }
+
   // 注册工具集元数据
   registerToolSetMeta(bashToolSet);
+  registerToolSetMeta({
+    name: reportToolGroup.name,
+    description: reportToolGroup.description || '',
+    capabilities: ['生成工作报告', '周报', '日报', '月报'],
+    keywords: reportToolGroup.keywords,
+    estimatedTokens: 500,
+  });
 
   // 注册 IPC 处理器
   registerChatHandlers(store);
@@ -153,6 +174,10 @@ app.whenReady().then(async () => {
   registerSkillsHandlers();
   registerSchedulerHandlers();
   registerPythonHandlers();
+  registerReportsHandlers();
+  registerWorkflowsHandlers();
+  registerAnalyticsHandlers();
+  registerCredentialHandlers();
 
   createWindow();
 });

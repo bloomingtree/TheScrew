@@ -5,6 +5,9 @@ import { useRightPanelStore, RightPanelTab } from '../../store/rightPanelStore';
 import PreviewTab from './tabs/PreviewTab';
 import FilesTab from './tabs/FilesTab';
 import HistoryTab from './tabs/HistoryTab';
+import ReportsTab from './tabs/ReportsTab';
+import WorkflowsTab from './tabs/WorkflowsTab';
+import AnalyticsTab from './tabs/AnalyticsTab';
 
 const RightPanel: React.FC = () => {
   const {
@@ -56,12 +59,19 @@ const RightPanel: React.FC = () => {
     };
   }, [isResizing, setWidth, setResizing]);
 
-  // 标签页配置
+  // 标签页配置（只保留文件相关功能）
   const tabs: Array<{ key: RightPanelTab; label: string; icon: React.ElementType }> = [
     { key: 'preview', label: '文件预览', icon: FileText },
     { key: 'files', label: '工作空间', icon: HardDrive },
     { key: 'history', label: '工具历史', icon: History },
+    // 以下标签通过左侧面板打开，不在顶部显示
+    { key: 'reports', label: '工作报告', icon: FileText },
+    { key: 'workflows', label: '工作流', icon: FileText },
+    { key: 'analytics', label: '数据分析', icon: FileText },
   ];
+
+  // 只显示文件相关的标签按钮
+  const visibleTabs = tabs.filter(t => ['preview', 'files', 'history'].includes(t.key));
 
   // 渲染当前标签页内容
   const renderTabContent = () => {
@@ -72,10 +82,19 @@ const RightPanel: React.FC = () => {
         return <FilesTab />;
       case 'history':
         return <HistoryTab />;
+      case 'reports':
+        return <ReportsTab />;
+      case 'workflows':
+        return <WorkflowsTab />;
+      case 'analytics':
+        return <AnalyticsTab />;
       default:
         return null;
     }
   };
+
+  // 当前标签是否在可见列表中
+  const isTabVisible = ['preview', 'files', 'history'].includes(activeTab);
 
   return (
     <AnimatePresence>
@@ -102,7 +121,7 @@ const RightPanel: React.FC = () => {
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
             {/* 标签页切换 */}
             <div className="flex items-center gap-1">
-              {tabs.map((tab) => {
+              {visibleTabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.key;
                 return (
@@ -142,7 +161,9 @@ const RightPanel: React.FC = () => {
             <span>
               {activeTab === 'preview' && currentPreviewFile
                 ? `当前: ${currentPreviewFile.split(/[\\/]/).pop()}`
-                : tabs.find((t) => t.key === activeTab)?.label}
+                : isTabVisible
+                ? tabs.find((t) => t.key === activeTab)?.label
+                : `功能: ${tabs.find((t) => t.key === activeTab)?.label}`}
             </span>
             <span>{width}px</span>
           </div>

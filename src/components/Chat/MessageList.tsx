@@ -74,7 +74,7 @@ const MessageList: React.FC = () => {
               <motion.span
                 animate={{ y: [0, -10, 0] }}
                 transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.1 }}
-                className="w-2 h-2 bg-[#1E40AF] rounded-full"
+                className="w-2 h-2 bg-[#abc88b] rounded-full"
               />
               <motion.span
                 animate={{ y: [0, -10, 0] }}

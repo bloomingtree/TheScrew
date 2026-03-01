@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Send, Paperclip, X, StopCircle } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { useConfigStore } from '../../store/configStore';
 import { useConversationStore } from '../../store/conversationStore';
+import TokenIndicator from './TokenIndicator';
 
 const InputArea: React.FC = () => {
   const [input, setInput] = useState('');
@@ -47,6 +49,8 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
 
     // 标记是否已创建 assistant 消息
     let assistantMessageCreated = false;
+    // 声明累积内容变量（在函数定义之前）
+    let accumulatedContent = '';
 
     const ensureAssistantMessage = () => {
       if (!assistantMessageCreated) {
@@ -57,6 +61,7 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
         };
         addMessage(assistantMessage);
         assistantMessageCreated = true;
+        accumulatedContent = '';  // 新消息创建时重置累积内容
       }
     };
 
@@ -69,18 +74,24 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
       const latestMessages = useChatStore.getState().messages;
       console.log('[InputArea] Sending', latestMessages.length, 'messages to backend');
 
-      let accumulatedContent = '';
-
       const handleChunk = (chunk: string) => {
         ensureAssistantMessage();
         accumulatedContent += chunk;
-        updateLastMessage(accumulatedContent);
+        // 使用 flushSync 强制立即渲染，确保文本在工具调用之前显示
+        flushSync(() => {
+          updateLastMessage(accumulatedContent);
+        });
       };
 
       const handleToolCalls = (toolCalls: any[]) => {
         ensureAssistantMessage();
-        updateLastMessageToolCalls(toolCalls);
-        setToolCalls(toolCalls);
+        // 使用 flushSync 强制立即渲染
+        flushSync(() => {
+          updateLastMessageToolCalls(toolCalls);
+          setToolCalls(toolCalls);
+        });
+        // 标记新一轮开始，让后续的 handleChunk 创建新消息
+        assistantMessageCreated = false;
       };
 
       const handleToolResults = (results: any[]) => {
@@ -212,13 +223,16 @@ return (
           />
 
           <div className="flex justify-between items-center">
-            <button
-              onClick={handleImageUpload}
-              className="p-1.5 rounded-lg transition-all hover:bg-gray-200/50 text-cream-500 hover:text-cream-700"
-              title="上传图片"
-            >
-              <Paperclip size={16} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleImageUpload}
+                className="p-1.5 rounded-lg transition-all hover:bg-gray-200/50 text-cream-500 hover:text-cream-700"
+                title="上传图片"
+              >
+                <Paperclip size={16} />
+              </button>
+              <TokenIndicator />
+            </div>
 
             {isStreaming ? (
               <button

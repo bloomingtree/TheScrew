@@ -266,5 +266,8 @@ export class OpenAIClient {
     if (toolCalls.length > 0) {
       yield JSON.stringify({ type: 'tool_calls', toolCalls });
     }
+
+    // 调试：记录流结束时的状态
+    console.log('[OpenAIClient] Stream ended - content chunks:', contentChunks.length, 'tool calls:', toolCalls.length);
   }
 }

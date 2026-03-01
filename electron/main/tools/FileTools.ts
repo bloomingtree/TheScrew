@@ -1,9 +1,7 @@
 import { readdir, readFile, stat, writeFile } from 'fs/promises';
 import path from 'path';
-import { randomUUID } from 'crypto';
 import { app } from 'electron';
 import { Tool } from './ToolManager';
-import { outputTruncator } from '../utils/OutputTruncator';
 
 let workspacePath: string | null = null;
 
@@ -234,21 +232,13 @@ export const fileTools: Tool[] = [
         const content = await readFile(fullPath, 'utf-8');
         const stats = await stat(fullPath);
 
-        // 使用统一截断器
-        const truncationResult = await outputTruncator.truncate(
-          content,
-          _toolCallId || randomUUID(),
-          'read_file'
-        );
-
         return {
           success: true,
-          content: truncationResult.displayContent,
+          content: content,
           path: filepath,
           namespace,
           fullPath,
           size: stats.size,
-          ...truncationResult.metadata,
         };
       } catch (error: any) {
         return { success: false, error: error.message };

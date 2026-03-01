@@ -28,7 +28,7 @@ const UserMessage: React.FC<UserMessageProps> = ({ message }) => {
     >
       <div className="flex flex-col items-end max-w-[85%]">
         {/* 消息气泡 */}
-        <div className="rounded-xl overflow-hidden border bg-[#fff8f0] border-[#1a1b26] shadow-md">
+        <div className="rounded-xl overflow-hidden bg-[#fff8f0] shadow-md">
           <div className="px-3 py-2">
             {/* 图片 */}
             {message.images && message.images.length > 0 && (
@@ -45,7 +45,7 @@ const UserMessage: React.FC<UserMessageProps> = ({ message }) => {
             )}
             {/* 文本内容 */}
             <div className="prose prose-sm max-w-none prose-p:max-w-none prose-headings:max-w-none">
-              <p className="my-1 leading-relaxed text-xs w-full" style={{ color: 'rgb(26, 27, 38)' }}>
+              <p className="my-1 leading-relaxed text-sm w-full">
                 {message.content}
               </p>
             </div>

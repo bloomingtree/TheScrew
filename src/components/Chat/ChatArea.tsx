@@ -6,7 +6,6 @@ import MessageList from './MessageList';
 import InputArea from './InputArea';
 import WorkspaceSelector from '../Workspace/WorkspaceSelector';
 import AgentSelector from './AgentSelector';
-import TokenProgressBar from './TokenProgressBar';
 
 const ChatArea: React.FC = () => {
   const { currentConversationId, createConversation, updateConversationMessages } = useConversationStore();
@@ -163,7 +162,6 @@ const ChatArea: React.FC = () => {
         onClose={() => setShowWorkspaceSelector(false)}
         onWorkspaceSelect={handleWorkspaceSelect}
       />
-      <TokenProgressBar />
     </div>
   );
 };

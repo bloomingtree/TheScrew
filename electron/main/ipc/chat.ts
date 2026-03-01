@@ -7,7 +7,7 @@ import { bashTools } from '../tools/BashTools';
 // Office tools removed: BaseTools, WordTools, TemplateTools, PPTXTools, BatchTools, ExcelTools, PDFTools, OoxmlTools
 import { getWorkspacePath } from '../tools/FileTools';
 import { getContextBuilder } from '../core/ContextBuilder';
-import { countContextTokens, compressContext, CompressionConfig } from '../utils/tokenCounter';
+import { countContextTokens } from '../utils/tokenCounter';
 
 let currentClient: OpenAIClient | null = null;
 let currentAbortController: AbortController | null = null;
@@ -29,42 +29,6 @@ let currentAbortController: AbortController | null = null;
     );
 
     return result;
-  }
-
-  function trimMessages(messages: any[], maxMessages: number = 10): any[] {
-    if (messages.length <= maxMessages) {
-      return messages;
-    }
-
-    const alwaysKeep: any[] = [];
-    const userMessages: any[] = [];
-    const otherMessages: any[] = [];
-
-    // 分类消息：system 和 user 消息总是保留
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        alwaysKeep.push(msg);
-      } else if (msg.role === 'user') {
-        userMessages.push(msg);
-      } else {
-        otherMessages.push(msg);
-      }
-    }
-
-    // 计算 remaining slots
-    const remainingSlots = maxMessages - alwaysKeep.length - userMessages.length;
-
-    // 如果 remainingSlots >= 0，保留所有消息
-    if (remainingSlots >= 0) {
-      return messages;
-    }
-
-    // 否则，从 otherMessages 中只保留最近的 remainingSlots + userMessages.length 条
-    // 这样确保至少保留所有 user 消息
-    const slotsForOthers = Math.max(0, remainingSlots);
-    const trimmedOthers = otherMessages.slice(-slotsForOthers);
-
-    return [...alwaysKeep, ...userMessages, ...trimmedOthers];
   }
 
   /**
@@ -226,30 +190,7 @@ export function registerChatHandlers(store: Store) {
       const MAX_SAME_TOOL_CALLS = 3;   // 相同工具调用次数限制
       let iteration = 0;
 
-      // 上下文压缩配置
-      const compressionConfig: CompressionConfig = {
-        maxTokens: config.maxTokens || 128000,
-        threshold: 0.50,  // 50% 时触发压缩（更早触发，避免请求体过大）
-        keepRecentMessages: 20,  // 保留最近 20 条消息
-      };
-      let totalCompressedCount = 0;
       let roundChunks: string[] = [];  // 每轮的文本内容（循环外声明）
-
-      // 预先检查消息数量，如果太多就直接压缩（避免计算 token）
-      const MAX_MESSAGES_BEFORE_COMPRESSION = 15;
-      if (messages.length > MAX_MESSAGES_BEFORE_COMPRESSION) {
-        console.log(`[chat:stream] Message count (${messages.length}) exceeds limit, compressing...`);
-        const compressionResult = compressContext(messages, {
-          maxTokens: compressionConfig.maxTokens,
-          threshold: 0,  // 强制压缩
-          keepRecentMessages: compressionConfig.keepRecentMessages,
-        });
-        if (compressionResult.compressionOccurred) {
-          messages = compressionResult.compressedMessages;
-          totalCompressedCount += compressionResult.compressedCount;
-          console.log(`[chat:stream] Compressed ${compressionResult.compressedCount} messages to ${messages.length}`);
-        }
-      }
 
       while (true) {
         iteration++;
@@ -266,45 +207,26 @@ export function registerChatHandlers(store: Store) {
 
         // 计算 token 使用量
         const currentTokens = countContextTokens(messages, systemPromptContent, tools);
-        const tokenPercentage = (currentTokens / compressionConfig.maxTokens) * 100;
+        const maxTokens = config.maxTokens || 128000;
+        const tokenPercentage = (currentTokens / maxTokens) * 100;
 
         // 发送 token 使用情况给前端
         event.sender.send('chat:token_usage', {
           current: currentTokens,
-          max: compressionConfig.maxTokens,
+          max: maxTokens,
           percentage: tokenPercentage,
-          compressedCount: totalCompressedCount,
+          compressedCount: 0,
         });
-
-        // 自动上下文压缩
-        if (tokenPercentage > compressionConfig.threshold * 100) {
-          console.log(`[Context Compression] Token usage at ${tokenPercentage.toFixed(1)}%, triggering compression...`);
-          const compressionResult = compressContext(messages, compressionConfig);
-
-          if (compressionResult.compressionOccurred) {
-            messages = compressionResult.compressedMessages;
-            totalCompressedCount += compressionResult.compressedCount;
-
-            // 重新计算 token 使用量
-            const newTokens = countContextTokens(messages, systemPromptContent, tools);
-            console.log(`[Context Compression] Compressed ${compressionResult.compressedCount} messages, tokens reduced from ${currentTokens} to ${newTokens}`);
-
-            // 发送更新后的 token 使用情况
-            event.sender.send('chat:token_usage', {
-              current: newTokens,
-              max: compressionConfig.maxTokens,
-              percentage: (newTokens / compressionConfig.maxTokens) * 100,
-              compressedCount: totalCompressedCount,
-            });
-          }
-        }
 
         let hasToolCalls = false;
         roundChunks = [];  // 清空，准备新的一轮
 
         console.log('[DEBUG] Starting streamChat request, messages count:', messages.length);
+        const roundNumber = iteration;
 
+        let chunkCount = 0;
         for await (const chunk of client.streamChat(messages, currentAbortController.signal, tools)) {
+          chunkCount++;
           try {
             const parsed = JSON.parse(chunk);
 
@@ -444,10 +366,15 @@ export function registerChatHandlers(store: Store) {
           }
         }
 
+        console.log(`[DEBUG] Round ${roundNumber}: Stream ended with ${chunkCount} chunks, hasToolCalls: ${hasToolCalls}`);
+
         if (hasToolCalls) {
-          console.log('[DEBUG] Tool calls detected, continuing loop...');
+          console.log(`[DEBUG] Round ${roundNumber}: Tool calls detected, continuing loop...`);
         } else {
-          console.log('[DEBUG] No tool calls, exiting loop');
+          console.log(`[DEBUG] Round ${roundNumber}: No tool calls, roundChunks length: ${roundChunks.length}`);
+          if (roundChunks.length === 0) {
+            console.warn(`[WARN] Round ${roundNumber}: No tool calls AND no content! Model may have stopped prematurely.`);
+          }
         }
 
         if (!hasToolCalls) {

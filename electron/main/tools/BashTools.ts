@@ -127,8 +127,16 @@ export const bashTools: Tool[] = [
 **Usage**:
 - Simple commands: bash(command="ls -la")
 - Python code: bash(command="python -c \\"print('Hello')\\"")
-- Python scripts: bash(command="python script.py arg1 arg2")
+- Python scripts in workspace: bash(command="python script.py arg1 arg2")
+- Python scripts with absolute path: bash(command="python C:/path/to/script.py arg1")
 - Multiple commands: bash(command="cd src && python test.py")
+
+**Important - Windows Path Handling**:
+- DO NOT wrap paths in quotes when calling Python scripts
+- Use forward slashes (/) instead of backslashes (\\) in paths
+- Correct: python C:/path/to/script.py arg1 arg2
+- Wrong: python "C:\\\\path\\\\to\\\\script.py" "arg1"  (extra quotes will fail!)
+- If path contains spaces, use forward slashes without quotes: python C:/Program Files/script.py
 
 **Notes**:
 - On Windows, commands run via cmd.exe
@@ -169,8 +177,8 @@ export const bashTools: Tool[] = [
         const response: any = {
           success: result.exitCode === 0,
           exitCode: result.exitCode,
-          stdout: result.stdout,
-          stderr: result.stderr,
+          stdout: result.stdout.trim(),
+          stderr: result.stderr.trim(),
         };
 
         if (result.exitCode !== 0) {

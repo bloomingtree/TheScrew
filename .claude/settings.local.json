@@ -43,7 +43,26 @@
       "Bash(ssh root@shiyin \"cat /apps/supabase/docker/docker-compose.yml | grep -A 20 ''db:''\")",
       "Bash(ssh root@shiyin \"docker exec -i supabase-db psql -U postgres -c \"\"CREATE DATABASE umami;\"\" && docker exec -i supabase-db psql -U postgres -c \"\"CREATE USER umami_user WITH PASSWORD ''umami_secure_password_2025'';\"\" && docker exec -i supabase-db psql -U postgres -c \"\"GRANT ALL PRIVILEGES ON DATABASE umami TO umami_user;\"\"\")",
       "Bash(ssh root@shiyin \"docker network ls | grep supa\")",
-      "Bash(ssh root@shiyin:*)"
+      "Bash(ssh root@shiyin:*)",
+      "Bash(git remote set-url origin https://github.com/bloomingtree/TheScrew.git)",
+      "Bash(git config --global http.proxy)",
+      "Bash(git config --global https.proxy)",
+      "Bash(echo \"HTTP_PROXY: $HTTP_PROXY\")",
+      "Bash(echo \"HTTPS_PROXY: $HTTPS_PROXY\")",
+      "Bash(echo \"http_proxy: $http_proxy\")",
+      "Bash(echo \"https_proxy: $https_proxy\")",
+      "Bash(git remote set-url origin git@github.com:bloomingtree/TheScrew.git)",
+      "mcp__chrome-mcp__search_tabs_content",
+      "mcp__chrome-mcp__get_windows_and_tabs",
+      "mcp__chrome-mcp__chrome_get_web_content",
+      "Bash(npx vite build --mode development)",
+      "Bash(npx vite build)",
+      "Bash(./python.exe -m pip install defusedxml --target \"Lib/site-packages\")",
+      "Bash(\"e:/Agents/offline-agent/zero-employee/electron/main/python/python-3.8.10-embed-amd64/python.exe\" -c \":*)",
+      "Bash(wsl --list -v)",
+      "Bash(wsl --unregister docker-desktop-data)",
+      "Bash(wsl --unregister docker-desktop)",
+      "Bash(wsl --list --all)"
     ]
   }
 }
