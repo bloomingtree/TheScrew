@@ -35,6 +35,7 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
     const userImages = images.length > 0 ? images : undefined;
 
     const userMessage = {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       role: 'user',
       content: userInput,
       timestamp: Date.now(),
@@ -55,6 +56,7 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
     const ensureAssistantMessage = () => {
       if (!assistantMessageCreated) {
         const assistantMessage = {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           role: 'assistant',
           content: '',
           timestamp: Date.now(),
@@ -133,12 +135,14 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
       removeTokenUsageListener();
 
       if (result.success) {
-        // 用后端返回的完整消息序列替换当前 messages
+        // 重要：必须使用后端返回的完整消息列表更新 chatStore
+        // 因为后端会添加工具结果消息（role='tool'），这些消息需要被包含在下一次请求中
         if (result.messages) {
           const userCount = result.messages.filter((m: any) => m.role === 'user').length;
           const assistantCount = result.messages.filter((m: any) => m.role === 'assistant').length;
           const toolCount = result.messages.filter((m: any) => m.role === 'tool').length;
-          console.log('[InputArea] Received', result.messages.length, `messages (user:${userCount}, assistant:${assistantCount}, tool:${toolCount})`);
+          console.log('[InputArea] Stream completed with', result.messages.length, `messages (user:${userCount}, assistant:${assistantCount}, tool:${toolCount})`);
+          // 使用后端返回的完整消息列表更新 chatStore
           setMessages(result.messages);
         } else {
           console.log('[InputArea] No messages in response, updating last message');

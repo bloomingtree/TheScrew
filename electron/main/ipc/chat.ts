@@ -199,6 +199,7 @@ export function registerChatHandlers(store: Store) {
         if (iteration > MAX_TOOL_ITERATIONS) {
           console.error(`[ERROR] Tool iteration limit reached (${MAX_TOOL_ITERATIONS}), breaking loop`);
           messages.push({
+            id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             role: 'system',
             content: `已达到最大工具调用轮次限制。请直接回答用户问题，不要继续调用工具。`,
           });
@@ -239,6 +240,7 @@ export function registerChatHandlers(store: Store) {
                 const content = roundChunks.join('');
                 console.log('[chat:stream] Adding assistant message with content:', content.substring(0, 50) + '...');
                 messages.push({
+                  id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                   role: 'assistant',
                   content: content,
                 });
@@ -263,6 +265,7 @@ export function registerChatHandlers(store: Store) {
               if (duplicateToolCalls.length > 0) {
                 console.error(`[ERROR] Blocking duplicate tool calls: ${duplicateToolCalls.join(', ')}`);
                 messages.push({
+                  id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                   role: 'system',
                   content: `检测到重复的工具调用: ${duplicateToolCalls.join(', ')}。请停止重复调用，使用已有结果回答用户问题。`,
                 });
@@ -338,6 +341,7 @@ export function registerChatHandlers(store: Store) {
                 event.sender.send('chat:tool_results', results);
 
                 messages.push({
+                  id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                   role: 'assistant',
                   content: '',
                   tool_calls: parsed.toolCalls,
@@ -346,6 +350,7 @@ export function registerChatHandlers(store: Store) {
 
                 for (const result of results) {
                   messages.push({
+                    id: `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     role: 'tool',
                     tool_call_id: result.toolCallId,
                     content: safeStringify(result),
@@ -387,6 +392,7 @@ export function registerChatHandlers(store: Store) {
         const finalContent = roundChunks.join('');
         console.log('[chat:stream] Adding final assistant message:', finalContent.substring(0, 50) + '...');
         messages.push({
+          id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           role: 'assistant',
           content: finalContent,
         });
