@@ -9,6 +9,9 @@
  * - Adapters: Compatibility layer with existing tools
  */
 
+import { getToolRegistry, resetToolRegistry } from './ToolRegistry';
+import { getMessageBus, resetMessageBus } from './MessageBus';
+
 // ============================================================================
 // Type Exports
 // ============================================================================

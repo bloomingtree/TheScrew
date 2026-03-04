@@ -183,7 +183,7 @@ export class PyodideFileSystemBridge {
       }
 
       // 3. 过滤文件
-      const files = this.filterFiles(fileList.files, config.options);
+      const files = this.filterFiles(fileList.files, config.options || {});
       this.fileListCaches.set(name, files);
 
       // 4. 在 MEMFS 中加载文件
@@ -648,7 +648,7 @@ export class PyodideFileSystemBridge {
   /**
    * 获取工作空间挂载点（向后兼容）
    */
-  getMountPoint(): string {
+  getWorkspaceMountPoint(): string {
     const workspaceMount = this.mountPoints.get('workspace');
     return workspaceMount ? workspaceMount.mountPath : '/workspace';
   }

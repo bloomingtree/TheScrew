@@ -49,15 +49,6 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
 
   return (
     <div className="mb-3">
-      {/* 如果有工具调用，显示工具调用 */}
-      {hasToolCalls && (
-        <ToolCallSimple
-          toolCalls={message.tool_calls}
-          toolResults={getThreadToolResults()}
-          status={getToolStatus()}
-        />
-      )}
-
       {/* 如果有内容，显示回复 */}
       {hasContent && (
         <motion.div
@@ -74,15 +65,16 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
-                      code({ node, inline, className, children, ...props }) {
+                      code(props: any) {
+                        const { inline, className, children, ...rest } = props;
                         const match = /language-(\w+)/.exec(className || '');
                         return !inline && match ? (
                           <SyntaxHighlighter
-                            style={vscDarkPlus}
+                            style={vscDarkPlus as any}
                             language={match[1]}
                             PreTag="div"
                             customStyle={{ borderRadius: '6px', fontSize: '13px' }}
-                            {...props}
+                            {...rest}
                           >
                             {String(children).replace(/\n$/, '')}
                           </SyntaxHighlighter>
@@ -90,7 +82,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
                           <code
                             className="px-1.5 py-0.5 rounded text-xs font-mono"
                             style={{ backgroundColor: '#f3f4f6', color: '#e11d48' }}
-                            {...props}
+                            {...rest}
                           >
                             {children}
                           </code>
@@ -139,6 +131,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
             )}
           </div>
         </motion.div>
+      )}
+
+      {/* 如果有工具调用，显示工具调用 */}
+      {hasToolCalls && (
+        <ToolCallSimple
+          toolCalls={message.tool_calls || []}
+          toolResults={getThreadToolResults()}
+          status={getToolStatus()}
+        />
       )}
     </div>
   );

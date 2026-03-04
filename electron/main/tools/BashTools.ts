@@ -22,9 +22,16 @@ function getAppRootPath(): string {
 
 /**
  * 获取项目 Python 目录路径
+ * 开发环境: electron/main/python/python-3.8.10-embed-amd64
+ * 生产环境: resources/python/python-3.8.10-embed-amd64 (从 asar 外部加载，因为 .pyd 文件需要作为本地文件)
  */
 function getPythonDir(): string {
-  return path.join(getAppRootPath(), 'electron', 'main', 'python', 'python-3.8.10-embed-amd64');
+  if (process.env.NODE_ENV === 'development') {
+    return path.join(getAppRootPath(), 'electron', 'main', 'python', 'python-3.8.10-embed-amd64');
+  }
+  // 生产环境：使用 extraResources 复制的 Python 目录
+  // .pyd 文件必须作为本地文件存在，不能从 asar 读取
+  return path.join(process.resourcesPath || app.getPath('userData'), 'python', 'python-3.8.10-embed-amd64');
 }
 
 /**

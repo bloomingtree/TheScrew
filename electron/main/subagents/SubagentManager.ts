@@ -124,7 +124,7 @@ export class SubagentManager {
         config.maxTokens || 4096
       );
 
-      const messages = [
+      const messages: any[] = [
         {
           role: 'system',
           content: `You are a subagent working on a specific task. Complete the task efficiently and report your results.`,

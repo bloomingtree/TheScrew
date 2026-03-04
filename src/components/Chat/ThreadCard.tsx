@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Trash2, FileText, Star, Terminal, User as UserIcon } from 'lucide-react';
+import { Copy, FileText, Terminal, User as UserIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -75,7 +75,6 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
   toolResults = [],
   showTimestamp = true
 }) => {
-  const { deleteMessage } = useChatStore();
   const { openPreview } = useRightPanelStore();
   const config = getKindConfig(kind);
   const [isHovered, setIsHovered] = useState(false);
@@ -89,12 +88,6 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
     await navigator.clipboard.writeText(message.content);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
-  };
-
-  const handleDelete = () => {
-    if (window.confirm('确定要删除这条消息吗？')) {
-      deleteMessage(index);
-    }
   };
 
   // 检测是否是Word文档
@@ -130,9 +123,6 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
   const handleOpenPreview = (filepath: string) => {
     openPreview(filepath);
   };
-
-  const stars = generateStars(message.content);
-  const avatarInitials = getAvatarInitials(kind);
 
   return (
     <motion.div
@@ -486,16 +476,6 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
               >
                 <Copy size={12} />
                 {isCopied && <span>已复制</span>}
-              </button>
-              <button
-                onClick={handleDelete}
-                className="p-1.5 rounded transition-all text-[10px]"
-                style={{
-                  color: TERMINAL.pink,
-                }}
-                title="删除"
-              >
-                <Trash2 size={12} />
               </button>
             </motion.div>
           )}

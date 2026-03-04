@@ -62,7 +62,15 @@
       "Bash(wsl --list -v)",
       "Bash(wsl --unregister docker-desktop-data)",
       "Bash(wsl --unregister docker-desktop)",
-      "Bash(wsl --list --all)"
+      "Bash(wsl --list --all)",
+      "mcp__chrome-mcp__chrome_get_interactive_elements",
+      "mcp__chrome-mcp__chrome_screenshot",
+      "Bash(npm --version)",
+      "Bash(npx asar list \"release/win-unpacked/resources/app.asar\")",
+      "Bash(wsl --list --verbose)",
+      "Bash(docker --version)",
+      "Bash(npx asar extract \"release/win-unpacked/resources/app.asar\" \"temp_asar_check\")",
+      "Bash(npx asar extract \"release/win-unpacked/resources/app.asar\" \"temp_check2\")"
     ]
   }
 }

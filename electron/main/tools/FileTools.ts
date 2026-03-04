@@ -366,8 +366,8 @@ export const fileTools: Tool[] = [
           };
         }
 
-        // 替换文本
-        const newContent = content.replaceAll(old_text, new_text);
+        // 替换文本 (ES2020 compatible)
+        const newContent = content.split(old_text).join(new_text);
 
         // 写回文件
         await writeFile(fullPath, newContent, 'utf-8');

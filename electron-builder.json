@@ -8,7 +8,16 @@
   "files": [
     "dist-electron/**/*",
     "dist/**/*",
-    "package.json"
+    "package.json",
+    ".zero-employee/**/*",
+    "electron/main/python/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "electron/main/python",
+      "to": "python",
+      "filter": "**/*"
+    }
   ],
   "win": {
     "target": [

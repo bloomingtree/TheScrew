@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "electron": "cross-env NODE_ENV=development electron .",
-    "build": "tsc && vite build && electron-builder --win --x64",
+    "build": "vite build && electron-builder --win --x64",
     "preview": "vite preview",
     "postinstall": "node scripts/setup-python.js"
   },

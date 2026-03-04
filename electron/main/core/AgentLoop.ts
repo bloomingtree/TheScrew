@@ -13,12 +13,10 @@ import { OpenAIClient } from '../api/openai';
 import { getToolRegistry } from './ToolRegistry';
 import { getSkillManager } from './SkillManager';
 import { getMemoryStore } from '../memory/MemoryStore';
-import { getSubagentManager } from '../subagents/SubagentManager';
 import {
   IInboundMessage,
   IOutboundMessage,
   ISession,
-  ISessionMessage,
   IToolCall,
   ILLMMessage,
 } from './types';
@@ -41,7 +39,6 @@ export class AgentLoop {
   private toolRegistry = getToolRegistry();
   private skillManager = getSkillManager();
   private memoryStore = getMemoryStore();
-  private subagentManager = getSubagentManager();
 
   private sessions: Map<string, ISession> = new Map();
   private config: Required<AgentLoopConfig>;
@@ -131,11 +128,18 @@ export class AgentLoop {
       // Execute tool calls
       const results = await this.toolRegistry.executeAll(
         toolCalls.map(tc => ({
-          id: tc.id,
-          name: tc.function.name,
-          arguments: JSON.parse(tc.function.arguments),
+          id: (tc as any).id,
+          name: (tc as any).function?.name || tc.name,
+          arguments: (tc as any).function?.arguments
+            ? JSON.parse((tc as any).function.arguments)
+            : tc.arguments,
         })),
-        session.agentName
+        session.agentName ? {
+          sessionId: session.id,
+          agentName: session.agentName,
+          workspace: '',
+          permissions: [],
+        } : undefined
       );
 
       // Add tool calls and results to messages
@@ -187,7 +191,7 @@ export class AgentLoop {
   /**
    * Build message list - nanobot style context building
    */
-  private async buildMessages(session: ISession, message: IInboundMessage): Promise<ILLMMessage[]> {
+  private async buildMessages(session: ISession, _message: IInboundMessage): Promise<ILLMMessage[]> {
     const messages: ILLMMessage[] = [];
 
     // 1. System message (skills + memory + agent)
@@ -234,7 +238,7 @@ export class AgentLoop {
   /**
    * Build system message - nanobot style
    */
-  private async buildSystemMessage(session: ISession): Promise<string> {
+  private async buildSystemMessage(_session: ISession): Promise<string> {
     const parts: string[] = [];
 
     // 1. Skills system prompt
@@ -259,7 +263,7 @@ export class AgentLoop {
   /**
    * Get agent system prompt
    */
-  private async getAgentSystemPrompt(agentName: string): Promise<string> {
+  private async getAgentSystemPrompt(_agentName: string): Promise<string> {
     // TODO: Get from AgentManager
     return '';
   }

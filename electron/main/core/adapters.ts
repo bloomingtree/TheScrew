@@ -87,7 +87,7 @@ export function createSimpleTool(config: {
   return new ToolAdapter({
     name: config.name,
     description: config.description,
-    parameters: config.parameters,
+    parameters: config.parameters as Tool['parameters'],
     handler: config.handler,
   });
 }

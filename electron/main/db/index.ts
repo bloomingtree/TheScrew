@@ -26,8 +26,8 @@ export interface MessageRow {
   role: 'user' | 'assistant' | 'tool';
   content: string;
   timestamp: number;
-  images?: string[];
-  toolCalls?: any[];
+  images?: string; // JSON string
+  toolCalls?: string; // JSON string
   tool_call_id?: string;
 }
 
@@ -56,7 +56,7 @@ export async function initDatabase() {
  * 获取所有对话
  */
 export function getAllConversations(): ConversationRow[] {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   return conversations.map(conv => ({
     id: conv.id,
     title: conv.title,
@@ -69,7 +69,7 @@ export function getAllConversations(): ConversationRow[] {
  * 根据 ID 获取对话
  */
 export function getConversationById(id: string): ConversationRow | null {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   return conversations.find(conv => conv.id === id) || null;
 }
 
@@ -86,7 +86,7 @@ export async function createConversation(conversation: ConversationInsert): Prom
     messages: [],
   };
 
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   conversations.unshift(newConv);
   store.set('conversations', conversations);
 
@@ -102,7 +102,7 @@ export async function createConversation(conversation: ConversationInsert): Prom
  * 更新对话
  */
 export async function updateConversation(id: string, updates: Partial<Omit<ConversationInsert, 'id'>>): Promise<void> {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const index = conversations.findIndex(conv => conv.id === id);
 
   if (index === -1) return;
@@ -121,7 +121,7 @@ export async function updateConversation(id: string, updates: Partial<Omit<Conve
  * 删除对话
  */
 export async function deleteConversation(id: string): Promise<void> {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const filtered = conversations.filter(conv => conv.id !== id);
   store.set('conversations', filtered);
 }
@@ -130,7 +130,7 @@ export async function deleteConversation(id: string): Promise<void> {
  * 更新对话的更新时间
  */
 export async function touchConversation(id: string): Promise<void> {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const index = conversations.findIndex(conv => conv.id === id);
 
   if (index !== -1) {
@@ -148,7 +148,7 @@ export async function touchConversation(id: string): Promise<void> {
  * 获取对话的所有消息
  */
 export function getMessagesByConversationId(conversationId: string): MessageRow[] {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const conv = conversations.find(c => c.id === conversationId);
   return conv?.messages || [];
 }
@@ -157,7 +157,7 @@ export function getMessagesByConversationId(conversationId: string): MessageRow[
  * 根据 ID 获取消息
  */
 export function getMessageById(id: string): MessageRow | null {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   for (const conv of conversations) {
     const msg = conv.messages.find(m => m.id === id);
     if (msg) return msg;
@@ -169,7 +169,7 @@ export function getMessageById(id: string): MessageRow | null {
  * 创建消息
  */
 export async function createMessage(message: MessageInsert): Promise<MessageRow> {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const index = conversations.findIndex(conv => conv.id === message.conversation_id);
 
   if (index === -1) {
@@ -193,7 +193,7 @@ export async function createMessage(message: MessageInsert): Promise<MessageRow>
 export async function createMessages(messages: MessageInsert[]): Promise<void> {
   if (messages.length === 0) return;
 
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
 
   for (const msg of messages) {
     const index = conversations.findIndex(conv => conv.id === msg.conversation_id);
@@ -210,7 +210,7 @@ export async function createMessages(messages: MessageInsert[]): Promise<void> {
  * 删除消息
  */
 export async function deleteMessage(id: string): Promise<void> {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
 
   for (const conv of conversations) {
     const index = conv.messages.findIndex(m => m.id === id);
@@ -228,7 +228,7 @@ export async function deleteMessage(id: string): Promise<void> {
  * 删除对话的所有消息
  */
 export async function deleteMessagesByConversationId(conversationId: string): Promise<void> {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const index = conversations.findIndex(conv => conv.id === conversationId);
 
   if (index !== -1) {
@@ -248,7 +248,7 @@ export interface ConversationWithMessages extends ConversationRow {
 }
 
 export function getConversationWithMessages(id: string): ConversationWithMessages | null {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const conv = conversations.find(c => c.id === id);
 
   if (!conv) return null;
@@ -266,7 +266,7 @@ export function getConversationWithMessages(id: string): ConversationWithMessage
  * 获取所有对话（包含消息）
  */
 export function getAllConversationsWithMessages(): ConversationWithMessages[] {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   return conversations.map(conv => ({
     id: conv.id,
     title: conv.title,
@@ -280,7 +280,7 @@ export function getAllConversationsWithMessages(): ConversationWithMessages[] {
  * 搜索对话
  */
 export function searchConversations(query: string): ConversationWithMessages[] {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const searchTerm = query.toLowerCase();
 
   return conversations.filter(conv => {
@@ -320,7 +320,7 @@ export interface DatabaseStats {
 }
 
 export async function getDatabaseStats(): Promise<DatabaseStats> {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const totalMessages = conversations.reduce((sum, conv) => sum + conv.messages.length, 0);
 
   // 获取存储文件大小
@@ -363,7 +363,7 @@ export async function clearDatabase(): Promise<void> {
  * 更新对话消息列表
  */
 export async function updateConversationMessages(id: string, messages: MessageRow[]): Promise<void> {
-  const conversations = store.get<StoredConversation[]>('conversations', []);
+  const conversations = store.get('conversations', []) as StoredConversation[];
   const index = conversations.findIndex(conv => conv.id === id);
 
   if (index !== -1) {

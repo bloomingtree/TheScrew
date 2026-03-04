@@ -70,7 +70,7 @@ export function registerConversationHandlers() {
             content: msg.content,
             timestamp: msg.timestamp,
             images: msg.images ? JSON.parse(msg.images) : undefined,
-            toolCalls: msg.tool_calls ? JSON.parse(msg.tool_calls) : undefined,
+            toolCalls: msg.toolCalls ? JSON.parse(msg.toolCalls) : undefined,
             toolCallId: msg.tool_call_id || undefined,
           })),
         },
@@ -99,9 +99,9 @@ export function registerConversationHandlers() {
           role: msg.role,
           content: msg.content,
           timestamp: msg.timestamp,
-          images: msg.images,
-          toolCalls: msg.toolCalls,
-          tool_call_id: msg.toolCallId ?? null,
+          images: msg.images ? JSON.stringify(msg.images) : undefined,
+          toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : undefined,
+          tool_call_id: msg.toolCallId ?? undefined,
         }));
         await db.createMessages(messagesToInsert);
       }
@@ -177,7 +177,7 @@ export function registerConversationHandlers() {
           content: msg.content,
           timestamp: msg.timestamp,
           images: msg.images ? JSON.parse(msg.images) : undefined,
-          toolCalls: msg.tool_calls ? JSON.parse(msg.tool_calls) : undefined,
+          toolCalls: msg.toolCalls ? JSON.parse(msg.toolCalls) : undefined,
           toolCallId: msg.tool_call_id || undefined,
         })),
       };
@@ -198,9 +198,9 @@ export function registerConversationHandlers() {
         role: message.role,
         content: message.content,
         timestamp: message.timestamp,
-        images: message.images,
-        toolCalls: message.toolCalls,
-        tool_call_id: message.toolCallId ?? null,
+        images: message.images ? JSON.stringify(message.images) : undefined,
+        toolCalls: message.toolCalls ? JSON.stringify(message.toolCalls) : undefined,
+        tool_call_id: message.toolCallId ?? undefined,
       });
 
       return {
@@ -212,7 +212,7 @@ export function registerConversationHandlers() {
           content: result.content,
           timestamp: result.timestamp,
           images: result.images ? JSON.parse(result.images) : undefined,
-          toolCalls: result.tool_calls ? JSON.parse(result.tool_calls) : undefined,
+          toolCalls: result.toolCalls ? JSON.parse(result.toolCalls) : undefined,
           toolCallId: result.tool_call_id ?? undefined,
         },
       };
@@ -233,9 +233,9 @@ export function registerConversationHandlers() {
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp,
-        images: msg.images,
-        toolCalls: msg.toolCalls,
-        tool_call_id: msg.toolCallId ?? null,
+        images: msg.images ? JSON.stringify(msg.images) : undefined,
+        toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : undefined,
+        tool_call_id: msg.toolCallId ?? undefined,
       }));
 
       await db.createMessages(messagesToInsert);
@@ -282,7 +282,7 @@ export function registerConversationHandlers() {
             content: msg.content,
             timestamp: msg.timestamp,
             images: msg.images ? JSON.parse(msg.images) : undefined,
-            toolCalls: msg.tool_calls ? JSON.parse(msg.tool_calls) : undefined,
+            toolCalls: msg.toolCalls ? JSON.parse(msg.toolCalls) : undefined,
             toolCallId: msg.tool_call_id || undefined,
           })),
         })),
