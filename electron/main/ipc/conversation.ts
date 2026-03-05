@@ -69,8 +69,8 @@ export function registerConversationHandlers() {
             role: msg.role,
             content: msg.content,
             timestamp: msg.timestamp,
-            images: msg.images ? JSON.parse(msg.images) : undefined,
-            toolCalls: msg.toolCalls ? JSON.parse(msg.toolCalls) : undefined,
+            images: msg.images ? (typeof msg.images === 'string' ? JSON.parse(msg.images) : msg.images) : undefined,
+            toolCalls: msg.toolCalls ? (typeof msg.toolCalls === 'string' ? JSON.parse(msg.toolCalls) : msg.toolCalls) : undefined,
             toolCallId: msg.tool_call_id || undefined,
           })),
         },
@@ -99,8 +99,8 @@ export function registerConversationHandlers() {
           role: msg.role,
           content: msg.content,
           timestamp: msg.timestamp,
-          images: msg.images ? JSON.stringify(msg.images) : undefined,
-          toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : undefined,
+          images: msg.images ? (typeof msg.images === 'string' ? msg.images : JSON.stringify(msg.images)) : undefined,
+          toolCalls: msg.toolCalls ? (typeof msg.toolCalls === 'string' ? msg.toolCalls : JSON.stringify(msg.toolCalls)) : undefined,
           tool_call_id: msg.toolCallId ?? undefined,
         }));
         await db.createMessages(messagesToInsert);
@@ -176,8 +176,8 @@ export function registerConversationHandlers() {
           role: msg.role,
           content: msg.content,
           timestamp: msg.timestamp,
-          images: msg.images ? JSON.parse(msg.images) : undefined,
-          toolCalls: msg.toolCalls ? JSON.parse(msg.toolCalls) : undefined,
+          images: msg.images ? (typeof msg.images === 'string' ? JSON.parse(msg.images) : msg.images) : undefined,
+          toolCalls: msg.toolCalls ? (typeof msg.toolCalls === 'string' ? JSON.parse(msg.toolCalls) : msg.toolCalls) : undefined,
           toolCallId: msg.tool_call_id || undefined,
         })),
       };
@@ -198,8 +198,8 @@ export function registerConversationHandlers() {
         role: message.role,
         content: message.content,
         timestamp: message.timestamp,
-        images: message.images ? JSON.stringify(message.images) : undefined,
-        toolCalls: message.toolCalls ? JSON.stringify(message.toolCalls) : undefined,
+        images: message.images ? (typeof message.images === 'string' ? message.images : JSON.stringify(message.images)) : undefined,
+        toolCalls: message.toolCalls ? (typeof message.toolCalls === 'string' ? message.toolCalls : JSON.stringify(message.toolCalls)) : undefined,
         tool_call_id: message.toolCallId ?? undefined,
       });
 
@@ -211,8 +211,8 @@ export function registerConversationHandlers() {
           role: result.role,
           content: result.content,
           timestamp: result.timestamp,
-          images: result.images ? JSON.parse(result.images) : undefined,
-          toolCalls: result.toolCalls ? JSON.parse(result.toolCalls) : undefined,
+          images: result.images ? (typeof result.images === 'string' ? JSON.parse(result.images) : result.images) : undefined,
+          toolCalls: result.toolCalls ? (typeof result.toolCalls === 'string' ? JSON.parse(result.toolCalls) : result.toolCalls) : undefined,
           toolCallId: result.tool_call_id ?? undefined,
         },
       };
@@ -233,8 +233,8 @@ export function registerConversationHandlers() {
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp,
-        images: msg.images ? JSON.stringify(msg.images) : undefined,
-        toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : undefined,
+        images: msg.images ? (typeof msg.images === 'string' ? msg.images : JSON.stringify(msg.images)) : undefined,
+        toolCalls: msg.toolCalls ? (typeof msg.toolCalls === 'string' ? msg.toolCalls : JSON.stringify(msg.toolCalls)) : undefined,
         tool_call_id: msg.toolCallId ?? undefined,
       }));
 
@@ -281,8 +281,8 @@ export function registerConversationHandlers() {
             role: msg.role,
             content: msg.content,
             timestamp: msg.timestamp,
-            images: msg.images ? JSON.parse(msg.images) : undefined,
-            toolCalls: msg.toolCalls ? JSON.parse(msg.toolCalls) : undefined,
+            images: msg.images ? (typeof msg.images === 'string' ? JSON.parse(msg.images) : msg.images) : undefined,
+            toolCalls: msg.toolCalls ? (typeof msg.toolCalls === 'string' ? JSON.parse(msg.toolCalls) : msg.toolCalls) : undefined,
             toolCallId: msg.tool_call_id || undefined,
           })),
         })),

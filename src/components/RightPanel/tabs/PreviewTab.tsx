@@ -1,150 +1,148 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
-import { FileText, X, RefreshCw } from 'lucide-react';
-import { useRightPanelStore } from '../../../store/rightPanelStore';
-import { WordPreviewContent } from '../../WordPreview';
+import { FileText, RefreshCw, File } from 'lucide-react';
+import { useTabStore } from '@/store/tabStore';
+import { TextFilePreview, ExcelPreview, ImagePreview } from '@/components/FilePreview';
+import { WordPreviewContent } from '@/components/WordPreview';
 
-const PreviewTab: React.FC = () => {
-  const { previewFiles, currentPreviewFile, setCurrentPreviewFile, clearPreviewFiles } = useRightPanelStore();
-  const [previewData, setPreviewData] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+interface PreviewTabProps {
+  panelId?: 'left' | 'right';
+}
 
-  // 加载预览数据
-  useEffect(() => {
-    if (!currentPreviewFile) {
-      setPreviewData(null);
-      return;
-    }
+const PreviewTab: React.FC<PreviewTabProps> = ({ panelId = 'right' }) => {
+  const { leftPanel, rightPanel } = useTabStore();
+  const panel = panelId === 'left' ? leftPanel : rightPanel;
 
-    const loadPreview = async () => {
-      setIsLoading(true);
-      setError(null);
+  // 获取当前活动的预览标签
+  const activePreviewTab = panel.tabs.find(t => t.id === panel.activeTabId && (t.type === 'preview' || t.type === 'file'));
 
-      try {
-        const result = await window.electronAPI.word.parseDocument(currentPreviewFile);
-        if (result.success) {
-          setPreviewData(result.data);
-        } else {
-          setError(result.error || '加载预览失败');
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '加载预览失败');
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const filepath = activePreviewTab?.content?.filepath;
 
-    loadPreview();
-  }, [currentPreviewFile]);
-
-  // 移除文件
-  const handleRemoveFile = (filepath: string) => {
-    const { previewFiles: files } = useRightPanelStore.getState();
-    if (files.length <= 1) {
-      clearPreviewFiles();
-    } else {
-      const index = files.findIndex(f => f.filepath === filepath);
-      const nextFile = files[index + 1] || files[index - 1];
-      setCurrentPreviewFile(nextFile?.filepath || null);
-    }
-  };
-
-  // 当前文件信息
-  const currentFile = previewFiles.find(f => f.filepath === currentPreviewFile);
-
-  if (!currentPreviewFile && previewFiles.length === 0) {
+  if (!filepath) {
     return (
       <div className="h-full flex items-center justify-center text-gray-400">
         <div className="text-center">
           <FileText size={48} className="mx-auto mb-3 opacity-50" />
           <p className="text-sm">暂无文件预览</p>
-          <p className="text-xs mt-1">当大模型创建或修改文件时，会在此显示</p>
+          <p className="text-xs mt-1">点击左侧文件进行预览</p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="h-full flex flex-col">
-      {/* 文件列表 */}
-      {previewFiles.length > 0 && (
-        <div className="px-4 py-2 border-b border-gray-200 bg-gray-50">
-          <div className="flex items-center gap-2 overflow-x-auto">
-            {previewFiles.map((file) => (
-              <motion.button
-                key={file.filepath}
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                onClick={() => setCurrentPreviewFile(file.filepath)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-all ${
-                  file.filepath === currentPreviewFile
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'bg-white text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <FileText size={14} />
-                <span className="max-w-[200px] truncate">{file.filename}</span>
-                {previewFiles.length > 1 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRemoveFile(file.filepath);
-                    }}
-                    className="ml-1 hover:text-red-500"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </motion.button>
-            ))}
-          </div>
-        </div>
-      )}
+  // 根据文件扩展名判断文件类型
+  const getFileType = (filepath: string): 'text' | 'excel' | 'image' | 'word' | 'unknown' => {
+    const ext = filepath.split('.').pop()?.toLowerCase() || '';
 
-      {/* 预览内容 */}
-      <div className="flex-1 overflow-auto">
-        {isLoading && (
-          <div className="h-full flex items-center justify-center">
-            <div className="flex items-center gap-2 text-gray-500">
-              <RefreshCw size={20} className="animate-spin" />
-              <span>加载中...</span>
-            </div>
-          </div>
-        )}
+    const textExtensions = ['txt', 'md', 'markdown', 'json', 'xml', 'html', 'htm', 'css', 'scss', 'sass',
+      'js', 'jsx', 'ts', 'tsx', 'vue', 'py', 'rb', 'php', 'java', 'c', 'cpp', 'h',
+      'cs', 'go', 'rs', 'swift', 'kt', 'scala', 'groovy', 'sh', 'bash', 'zsh',
+      'yaml', 'yml', 'toml', 'ini', 'conf', 'config', 'env', 'gitignore',
+      'sql', 'csv', 'tsv', 'log', 'dockerfile', 'makefile', 'cmake'];
 
-        {error && (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center text-red-500">
-              <p className="text-sm">{error}</p>
-              <button
-                onClick={() => {
-                  setError(null);
-                  setPreviewData(null);
-                }}
-                className="mt-2 text-xs underline"
-              >
-                重试
-              </button>
-            </div>
-          </div>
-        )}
+    const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'ico'];
 
-        {!isLoading && !error && previewData && (
-          <WordPreviewContent
-            data={previewData}
-            filepath={currentPreviewFile!}
-          />
-        )}
+    const excelExtensions = ['xlsx', 'xls'];
+    const wordExtensions = ['docx'];
 
-        {!isLoading && !error && !previewData && currentFile && (
+    if (textExtensions.includes(ext)) return 'text';
+    if (imageExtensions.includes(ext)) return 'image';
+    if (excelExtensions.includes(ext)) return 'excel';
+    if (wordExtensions.includes(ext)) return 'word';
+
+    return 'unknown';
+  };
+
+  const fileType = getFileType(filepath);
+
+  // 渲染对应的预览组件
+  const renderPreview = () => {
+    switch (fileType) {
+      case 'text':
+        return <TextFilePreview filepath={filepath} />;
+      case 'image':
+        return <ImagePreview filepath={filepath} />;
+      case 'excel':
+        return <ExcelPreview filepath={filepath} />;
+      case 'word':
+        return <WordPreviewWrapper filepath={filepath} />;
+      default:
+        return (
           <div className="h-full flex items-center justify-center text-gray-400">
-            <p className="text-sm">无法预览文件: {currentFile.filename}</p>
+            <div className="text-center">
+              <File size={48} className="mx-auto mb-3 opacity-50" />
+              <p className="text-sm">暂不支持此文件类型</p>
+              <p className="text-xs mt-1 text-gray-500">{filepath}</p>
+            </div>
           </div>
-        )}
+        );
+    }
+  };
+
+  return renderPreview();
+};
+
+// Word 文档预览包装器
+const WordPreviewWrapper: React.FC<{ filepath: string }> = ({ filepath }) => {
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadPreview();
+  }, [filepath]);
+
+  const loadPreview = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const result = await window.electronAPI.word.preview(filepath);
+      if (result.success && result.data) {
+        setPreviewData(result.data);
+      } else {
+        setError(result.error || '加载预览失败');
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '加载预览失败');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400">
+        <div className="text-center">
+          <RefreshCw size={48} className="mx-auto mb-3 opacity-50 animate-spin" />
+          <p className="text-sm">加载中...</p>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400">
+        <div className="text-center">
+          <FileText size={48} className="mx-auto mb-3 opacity-50" />
+          <p className="text-sm text-red-500">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!previewData) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400">
+        <div className="text-center">
+          <FileText size={48} className="mx-auto mb-3 opacity-50" />
+          <p className="text-sm">无法预览文件</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <WordPreviewContent data={previewData} filepath={filepath} />;
 };
 
 export default PreviewTab;

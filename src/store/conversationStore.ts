@@ -73,6 +73,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   /**
    * 创建新对话
+   * 注意：空对话不会立即保存到数据库，只有在添加第一条消息时才会保存
    */
   createConversation: async () => {
     const newConversation: Conversation = {
@@ -81,34 +82,16 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      // 标记为未保存到数据库
+      _unsaved: true,
     };
 
-    try {
-      // 保存到数据库
-      const result = await window.electronAPI.conversation.create({
-        id: newConversation.id,
-        title: newConversation.title,
-        messages: [],
-      });
-
-      if (result.success) {
-        set((state) => ({
-          conversations: [newConversation, ...state.conversations],
-          currentConversationId: newConversation.id,
-        }));
-        return newConversation.id;
-      } else {
-        throw new Error(result.error || 'Failed to create conversation');
-      }
-    } catch (error) {
-      console.error('Failed to create conversation:', error);
-      // 即使数据库保存失败，也在内存中创建
-      set((state) => ({
-        conversations: [newConversation, ...state.conversations],
-        currentConversationId: newConversation.id,
-      }));
-      return newConversation.id;
-    }
+    // 只在内存中创建，不保存到数据库
+    set((state) => ({
+      conversations: [newConversation, ...state.conversations],
+      currentConversationId: newConversation.id,
+    }));
+    return newConversation.id;
   },
 
   /**
@@ -223,6 +206,29 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
    * 添加单条消息
    */
   addMessage: async (conversationId, message) => {
+    // 检查对话是否已保存到数据库
+    const conversation = get().conversations.find(c => c.id === conversationId);
+    const needsCreate = conversation && (conversation as any)._unsaved;
+
+    if (needsCreate) {
+      // 首次添加消息时，先保存对话到数据库
+      try {
+        await window.electronAPI.conversation.create({
+          id: conversationId,
+          title: conversation.title,
+          messages: [],
+        });
+        // 移除未保存标记
+        set((state) => ({
+          conversations: state.conversations.map(c =>
+            c.id === conversationId ? { ...c, _unsaved: undefined as any } : c
+          ),
+        }));
+      } catch (error) {
+        console.error('Failed to create conversation in database:', error);
+      }
+    }
+
     try {
       await window.electronAPI.message.add({
         ...message,
@@ -235,7 +241,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     set((state) => ({
       conversations: state.conversations.map(c =>
         c.id === conversationId
-          ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() }
+          ? { ...c, messages: [...c.messages, message], updatedAt: Date.now(), _unsaved: undefined as any }
           : c
       ),
     }));
@@ -246,6 +252,29 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
    */
   addMessages: async (conversationId, messages) => {
     if (messages.length === 0) return;
+
+    // 检查对话是否已保存到数据库
+    const conversation = get().conversations.find(c => c.id === conversationId);
+    const needsCreate = conversation && (conversation as any)._unsaved;
+
+    if (needsCreate) {
+      // 首次添加消息时，先保存对话到数据库
+      try {
+        await window.electronAPI.conversation.create({
+          id: conversationId,
+          title: conversation.title,
+          messages: [],
+        });
+        // 移除未保存标记
+        set((state) => ({
+          conversations: state.conversations.map(c =>
+            c.id === conversationId ? { ...c, _unsaved: undefined as any } : c
+          ),
+        }));
+      } catch (error) {
+        console.error('Failed to create conversation in database:', error);
+      }
+    }
 
     try {
       await window.electronAPI.message.addBatch(
@@ -261,7 +290,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     set((state) => ({
       conversations: state.conversations.map(c =>
         c.id === conversationId
-          ? { ...c, messages: [...c.messages, ...messages], updatedAt: Date.now() }
+          ? { ...c, messages: [...c.messages, ...messages], updatedAt: Date.now(), _unsaved: undefined as any }
           : c
       ),
     }));

@@ -5,7 +5,7 @@ import { registerChatHandlers } from './ipc/chat';
 import { registerContextHandlers } from './ipc/chat';
 import { registerConfigHandlers } from './ipc/config';
 import { registerFileHandlers } from './ipc/file';
-import { registerWorkspaceHandlers } from './ipc/workspace';
+import { registerWorkspaceHandlers, setMainWindow } from './ipc/workspace';
 import { registerConversationHandlers } from './ipc/conversation';
 import { registerToolsIpc } from './ipc/tools';
 import { registerMemoryHandlers } from './ipc/memory';
@@ -28,6 +28,8 @@ import { registerReportsHandlers } from './ipc/reports';
 import { registerWorkflowsHandlers } from './ipc/workflows';
 import { registerAnalyticsHandlers } from './ipc/analytics';
 import { registerCredentialHandlers } from './ipc/credentials';
+import { registerWordHandlers } from './ipc/word';
+import { registerFilePreviewHandlers } from './ipc/filePreview';
 
 const store = new Store();
 
@@ -46,6 +48,10 @@ mainWindow = new BrowserWindow({
   },
   autoHideMenuBar: true
   });
+
+  // 设置主窗口实例，用于文件监听通知
+  setMainWindow(mainWindow);
+
   if (process.env.NODE_ENV === 'development') {
     // 支持动态端口（Vite 可能因为端口冲突使用其他端口）
     const devServerPort = process.env.VITE_DEV_SERVER_PORT || '5173';
@@ -178,6 +184,8 @@ app.whenReady().then(async () => {
   registerWorkflowsHandlers();
   registerAnalyticsHandlers();
   registerCredentialHandlers();
+  registerWordHandlers();
+  registerFilePreviewHandlers();
 
   createWindow();
 });

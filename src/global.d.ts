@@ -45,6 +45,11 @@ interface ElectronAPI {
     getPath: () => Promise<{ path: string | null }>;
     setPath: (path: string) => Promise<{ success: boolean; path: string }>;
     listFiles: () => Promise<{ success: boolean; files?: Array<{ name: string; path: string; type: string; size?: number }>; error?: string }>;
+    listDirectory: (dirPath: string) => Promise<{ success: boolean; files?: Array<{ name: string; path: string; type: string; size?: number }>; error?: string }>;
+    // 文件监听 API
+    startWatching: () => Promise<{ success: boolean; error?: string }>;
+    stopWatching: () => Promise<{ success: boolean; error?: string }>;
+    onFileChanged: (callback: (data: { event: string; path: string }) => void) => () => void;
   };
   tools: {
     getToolSetsOverview: (conversationId: string) => Promise<{

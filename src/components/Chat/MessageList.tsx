@@ -50,7 +50,7 @@ const MessageList: React.FC = () => {
             transition={{ duration: 0.6 }}
             className="flex flex-col items-center justify-center h-full"
           >
-            <p className="text-2xl font-semibold mb-2 text-[#374151]">螺丝钉，有什么可以帮助您的吗？</p>
+            <p className="text-2xl font-semibold mb-2 text-[#374151]">我是螺丝钉，有什么可以帮助您？</p>
             <p className="text-sm text-[#9CA3AF]">今天是{new Date().toLocaleDateString('zh-CN', { weekday: 'long' })}</p>
           </motion.div>
         )}

@@ -19,6 +19,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useConversationStore } from '../../store/conversationStore';
 import { useConfigStore } from '../../store/configStore';
 import { useRightPanelStore } from '../../store/rightPanelStore';
+import { useTabStore } from '../../store/tabStore';
 import ReportsTab from '../RightPanel/tabs/ReportsTab';
 import WorkflowsTab from '../RightPanel/tabs/WorkflowsTab';
 import AnalyticsTab from '../RightPanel/tabs/AnalyticsTab';
@@ -71,6 +72,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [loadedDirectories, setLoadedDirectories] = useState<Set<string>>(new Set());
   const [workspaceNotSet, setWorkspaceNotSet] = useState(false);
 
   const {
@@ -82,10 +84,34 @@ const Sidebar: React.FC<SidebarProps> = () => {
 
   const { setConfigOpen } = useConfigStore();
   const { currentPreviewFile, setOpen: setPreviewOpen } = useRightPanelStore();
+  const { openTab, toggleSplit, isSplit } = useTabStore();
 
   // 加载工作空间文件
   useEffect(() => {
     loadWorkspaceFiles();
+
+    // 启动文件监听
+    const startWatching = async () => {
+      try {
+        const result = await window.electronAPI.workspace.startWatching?.();
+        if (!result?.success) {
+          console.warn('文件监听启动失败:', result?.error);
+        }
+      } catch (err) {
+        console.warn('文件监听不可用:', err);
+      }
+    };
+    startWatching();
+
+    // 注册文件变化监听
+    const removeListener = window.electronAPI.workspace.onFileChanged?.(() => {
+      loadWorkspaceFiles();
+    });
+
+    return () => {
+      removeListener?.();
+      window.electronAPI.workspace.stopWatching?.();
+    };
   }, []);
 
   const loadWorkspaceFiles = async () => {
@@ -142,19 +168,67 @@ const Sidebar: React.FC<SidebarProps> = () => {
     setActiveModal(type);
   };
 
-  const toggleFolder = (path: string) => {
+  const loadDirectoryContents = async (dirPath: string): Promise<WorkspaceFile[]> => {
+    try {
+      const result = await window.electronAPI.workspace.listDirectory(dirPath);
+      if (result.success && result.files) {
+        return result.files.map(file => ({
+          ...file,
+          type: file.type as 'file' | 'directory',
+          children: file.type === 'directory' ? [] : undefined,
+        }));
+      }
+      return [];
+    } catch (err) {
+      console.error('加载目录内容失败:', err);
+      return [];
+    }
+  };
+
+  const toggleFolder = async (path: string) => {
     setExpandedFolders(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(path)) {
+      const wasExpanded = newSet.has(path);
+
+      if (wasExpanded) {
+        // 收起文件夹
         newSet.delete(path);
       } else {
+        // 展开文件夹
         newSet.add(path);
+
+        // 如果目录尚未加载，则加载内容
+        if (!loadedDirectories.has(path)) {
+          loadDirectoryContents(path).then(children => {
+            setLoadedDirectories(prev => new Set(prev).add(path));
+
+            setWorkspaceFiles(prevFiles => {
+              const updateChildren = (files: WorkspaceFile[]): WorkspaceFile[] => {
+                return files.map(file => {
+                  if (file.path === path) {
+                    return { ...file, children };
+                  }
+                  if (file.children) {
+                    return { ...file, children: updateChildren(file.children) };
+                  }
+                  return file;
+                });
+              };
+              return updateChildren(prevFiles);
+            });
+          });
+        }
       }
       return newSet;
     });
   };
 
   const getFileIcon = (file: WorkspaceFile, size: number = 14) => {
+    // .zero-employee 配置文件夹使用特殊图标
+    if (file.name === '.zero-employee') {
+      return <Settings size={size} className="text-yellow-500" />;
+    }
+
     if (file.type === 'directory') {
       return <Folder size={size} className="text-yellow-500" />;
     }
@@ -182,9 +256,16 @@ const Sidebar: React.FC<SidebarProps> = () => {
       return;
     }
 
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    if (ext === 'docx') {
-      setActiveModal('preview');
+    // 打开文件预览标签在左侧面板
+    openTab({
+      type: 'preview',
+      title: file.name,
+      content: { filepath: file.path },
+    }, 'left');
+
+    // 如果当前没有分屏，自动开启分屏（聊天会移到右侧）
+    if (!isSplit) {
+      toggleSplit();
     }
   };
 
@@ -202,14 +283,10 @@ const Sidebar: React.FC<SidebarProps> = () => {
         >
           {isDirectory && (
             <span className="shrink-0">
-              {hasChildren ? (
-                isExpanded ? (
-                  <ChevronDown size={12} className="text-gray-400" />
-                ) : (
-                  <ChevronRight size={12} className="text-gray-400" />
-                )
+              {isExpanded ? (
+                <ChevronDown size={12} className="text-gray-400" />
               ) : (
-                <span style={{ width: 12 }} />
+                <ChevronRight size={12} className="text-gray-400" />
               )}
             </span>
           )}
@@ -226,6 +303,9 @@ const Sidebar: React.FC<SidebarProps> = () => {
       </div>
     );
   };
+
+  // 过滤掉未保存的空对话
+  const savedConversations = conversations.filter(c => !(c as any)._unsaved);
 
   const renderModalContent = () => {
     switch (activeModal) {
@@ -491,116 +571,167 @@ const Sidebar: React.FC<SidebarProps> = () => {
       {/* 通用 Modal */}
       <AnimatePresence>
         {activeModal && (
-          <>
-            {/* 遮罩 */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[100]"
-              onClick={() => setActiveModal(null)}
-            />
-
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
+            onClick={() => setActiveModal(null)}
+          >
             {/* Modal 内容 */}
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ duration: 0.2 }}
-              className="fixed left-[100px] top-4 bottom-4 w-[500px] bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl z-[101] flex flex-col overflow-hidden"
-              style={{ border: '1px solid rgba(65, 72, 104, 0.2)' }}
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="w-[500px] max-w-[calc(100vw-2rem)] h-[calc(100vh-2rem)] font-mono flex flex-col overflow-hidden rounded-2xl shadow-2xl"
+              style={{
+                background: TERMINAL.lightBg,
+                border: `1px solid ${TERMINAL.bgTertiary}`,
+              }}
+              onClick={(e) => e.stopPropagation()}
             >
-              {/* 头部 */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 shrink-0">
-                <h2 className="font-semibold text-gray-800">{getModalTitle()}</h2>
+              {/* 终端风格标题栏 */}
+              <div
+                className="flex items-center justify-between px-4 py-2.5 border-b shrink-0"
+                style={{
+                  background: `${TERMINAL.bgSecondary}30`,
+                  borderColor: `${TERMINAL.bgTertiary}50`,
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  {/* macOS 风格窗口控制点 */}
+                  <div className="flex gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'rgba(239, 68, 68, 0.6)' }}></div>
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'rgba(234, 179, 8, 0.6)' }}></div>
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'rgba(34, 197, 94, 0.6)' }}></div>
+                  </div>
+                  <span className="font-mono text-xs" style={{ color: TERMINAL.textSecondary }}>
+                    {activeModal === 'history' && <><HistoryIcon size={10} className="inline mr-1" /></>}
+                    {getModalTitle()}
+                  </span>
+                </div>
                 <button
                   onClick={() => setActiveModal(null)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"
+                  className="p-1.5 rounded-lg transition-all hover:bg-black/5"
+                  style={{ color: TERMINAL.textSecondary }}
                 >
-                  <X size={16} />
+                  <X size={14} />
                 </button>
               </div>
 
               {/* 内容 */}
               <div className="flex-1 overflow-hidden">
                 {activeModal === 'history' ? (
-                  <div className="h-full overflow-y-auto p-4 space-y-2">
-                    {conversations.length === 0 ? (
-                      <div className="text-center py-8 text-gray-400 text-sm">
-                        暂无历史对话
+                  <div className="h-full flex flex-col">
+                    {/* 统计信息 */}
+                    <div className="px-5 py-3 border-b" style={{ borderColor: `${TERMINAL.bgTertiary}30` }}>
+                      <div className="flex items-center gap-2 text-xs font-mono" style={{ color: TERMINAL.textSecondary }}>
+                        <span style={{ color: TERMINAL.green }}>$</span>
+                        <span>共 {savedConversations.length} 条历史对话</span>
                       </div>
-                    ) : (
-                      conversations.map((conversation, index) => (
-                        <div
-                          key={conversation.id}
-                          onClick={() => handleSelectConversation(conversation.id)}
-                          className={`group relative cursor-pointer transition-all font-mono ${
-                            currentConversationId === conversation.id ? '' : ''
-                          }`}
-                          style={{
-                            padding: '12px 16px',
-                            borderRadius: '10px',
-                            border: '1px solid',
-                            background:
-                              currentConversationId === conversation.id
-                                ? 'rgba(122, 162, 247, 0.1)'
-                                : 'rgba(255, 255, 255, 0.8)',
-                            borderColor:
-                              currentConversationId === conversation.id
-                                ? 'rgba(122, 162, 247, 0.3)'
-                                : 'rgba(65, 72, 104, 0.15)',
-                          }}
-                          onMouseEnter={(e) => {
-                            if (currentConversationId !== conversation.id) {
-                              e.currentTarget.style.background = 'rgba(42, 195, 222, 0.08)';
-                              e.currentTarget.style.borderColor = 'rgba(42, 195, 222, 0.25)';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (currentConversationId !== conversation.id) {
-                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.8)';
-                              e.currentTarget.style.borderColor = 'rgba(65, 72, 104, 0.15)';
-                            }
-                          }}
-                        >
-                          <div className="flex items-start gap-3">
-                            <span
-                              className="text-xs shrink-0 w-4"
-                              style={{ color: 'rgba(86, 95, 137, 0.6)' }}
-                            >
-                              {String(index + 1).padStart(2, '0')}
-                            </span>
-                            <div className="flex-1 min-w-0">
+                    </div>
+
+                    {/* 对话列表 */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                      {savedConversations.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                          <HistoryIcon size={48} className="mb-4 opacity-30" style={{ color: TERMINAL.textSecondary }} />
+                          <p className="text-sm font-mono" style={{ color: TERMINAL.textSecondary }}>
+                            <span style={{ color: TERMINAL.green }}>$</span> 暂无历史对话
+                          </p>
+                          <p className="text-xs mt-2 font-mono" style={{ color: TERMINAL.textSecondary }}>
+                            开始一段新对话后会自动保存
+                          </p>
+                        </div>
+                      ) : (
+                        savedConversations.map((conversation, index) => (
+                          <motion.div
+                            key={conversation.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.03 }}
+                            onClick={() => handleSelectConversation(conversation.id)}
+                            className={`group relative cursor-pointer transition-all font-mono ${
+                              currentConversationId === conversation.id ? '' : ''
+                            }`}
+                            style={{
+                              padding: '14px 18px',
+                              borderRadius: '12px',
+                              border: '1px solid',
+                              background:
+                                currentConversationId === conversation.id
+                                  ? `${TERMINAL.cyan}15`
+                                  : '#fff',
+                              borderColor:
+                                currentConversationId === conversation.id
+                                  ? TERMINAL.cyan
+                                  : `${TERMINAL.bgTertiary}40`,
+                            }}
+                            onMouseEnter={(e) => {
+                              if (currentConversationId !== conversation.id) {
+                                e.currentTarget.style.background = `${TERMINAL.cyan}08`;
+                                e.currentTarget.style.borderColor = `${TERMINAL.cyan}40`;
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (currentConversationId !== conversation.id) {
+                                e.currentTarget.style.background = '#fff';
+                                e.currentTarget.style.borderColor = `${TERMINAL.bgTertiary}40`;
+                              }
+                            }}
+                          >
+                            <div className="flex items-start gap-3">
                               <span
-                                className="text-sm truncate block"
-                                style={{
-                                  color:
-                                    currentConversationId === conversation.id
-                                      ? TERMINAL.blue
-                                      : TERMINAL.textDark,
-                                  fontWeight:
-                                    currentConversationId === conversation.id ? 500 : 400,
-                                }}
+                                className="text-xs shrink-0 w-5 pt-0.5 font-mono"
+                                style={{ color: currentConversationId === conversation.id ? TERMINAL.cyan : TERMINAL.textSecondary }}
                               >
-                                {conversation.title}
+                                {String(index + 1).padStart(2, '0')}
                               </span>
-                              <div className="text-[10px] mt-1" style={{ color: TERMINAL.textSecondary }}>
-                                {new Date(conversation.updatedAt).toLocaleDateString('zh-CN')}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span
+                                    className="text-sm truncate block font-medium"
+                                    style={{
+                                      color:
+                                        currentConversationId === conversation.id
+                                          ? TERMINAL.cyan
+                                          : TERMINAL.textDark,
+                                    }}
+                                  >
+                                    {conversation.title}
+                                  </span>
+                                  {currentConversationId === conversation.id && (
+                                    <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{
+                                      background: `${TERMINAL.cyan}20`,
+                                      color: TERMINAL.cyan
+                                    }}>
+                                      当前
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 text-xs font-mono" style={{ color: TERMINAL.textSecondary }}>
+                                  <span style={{ color: TERMINAL.green }}>📅</span>
+                                  <span>{new Date(conversation.updatedAt).toLocaleDateString('zh-CN')}</span>
+                                  <span style={{ color: TERMINAL.textSecondary }}>·</span>
+                                  <span>{conversation.messages.length} 条消息</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               onClick={(e) => handleDeleteConversation(e, conversation.id)}
-                              className="p-1.5 hover:bg-red-100 rounded text-red-500 transition-colors"
-                              title="删除"
+                              className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-red-50 text-gray-400 hover:text-red-500"
+                              title="删除对话"
+                              style={{
+                                opacity: currentConversationId === conversation.id ? '1' : undefined
+                              }}
                             >
-                              🗑️
+                              <X size={14} />
                             </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
+                          </motion.div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="h-full overflow-auto">
@@ -609,7 +740,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
                 )}
               </div>
             </motion.div>
-          </>
+          </motion.div>
         )}
       </AnimatePresence>
     </>

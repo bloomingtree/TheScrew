@@ -41,6 +41,15 @@ const electronAPI = {
     getPath: () => ipcRenderer.invoke('workspace:get_path'),
     setPath: (path: string) => ipcRenderer.invoke('workspace:set_path', path),
     listFiles: () => ipcRenderer.invoke('workspace:list_files'),
+    listDirectory: (dirPath: string) => ipcRenderer.invoke('workspace:listDirectory', dirPath),
+    // 文件监听 API
+    startWatching: () => ipcRenderer.invoke('workspace:startWatching'),
+    stopWatching: () => ipcRenderer.invoke('workspace:stopWatching'),
+    onFileChanged: (callback: (data: { event: string; path: string }) => void) => {
+      const listener = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('workspace:fileChanged', listener);
+      return () => ipcRenderer.removeListener('workspace:fileChanged', listener);
+    },
     // 新工作区管理 API
     listWorkspaces: () => ipcRenderer.invoke('workspace:listWorkspaces') as Promise<{
       success: boolean;
@@ -182,6 +191,38 @@ const electronAPI = {
     chartData: (timeRange: string) => ipcRenderer.invoke('analytics:chartData', timeRange),
     summary: (timeRange: string) => ipcRenderer.invoke('analytics:summary', timeRange),
     report: (timeRange: string) => ipcRenderer.invoke('analytics:report', timeRange),
+  },
+  // 文件预览 API
+  filePreview: {
+    preview: (filepath: string) => ipcRenderer.invoke('file:preview', filepath) as Promise<{
+      success: boolean;
+      data?: any;
+      error?: string;
+    }>,
+    getType: (filepath: string) => ipcRenderer.invoke('file:getType', filepath) as Promise<{
+      success: boolean;
+      type?: string;
+      error?: string;
+    }>,
+    canPreview: (filepath: string) => ipcRenderer.invoke('file:canPreview', filepath) as Promise<{
+      success: boolean;
+      canPreview?: boolean;
+      type?: string;
+      error?: string;
+    }>,
+  },
+  // Word 文档 API
+  word: {
+    preview: (filepath: string) => ipcRenderer.invoke('word:preview', filepath) as Promise<{
+      success: boolean;
+      data?: any;
+      error?: string;
+    }>,
+    edit: (filepath: string, location: any, newContent: string) =>
+      ipcRenderer.invoke('word:edit', filepath, location, newContent) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
   },
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   onChatChunk: (callback: (chunk: string) => void) => {

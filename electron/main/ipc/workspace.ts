@@ -1,4 +1,4 @@
-import { ipcMain, dialog } from 'electron';
+import { ipcMain, dialog, BrowserWindow, app } from 'electron';
 import Store from 'electron-store';
 import { setWorkspacePath, getWorkspacePath } from '../tools/FileTools';
 import { getWorkspaceManager } from '../config/WorkspaceManager';
@@ -9,6 +9,27 @@ import type {
 } from '../config/WorkspaceConfig';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as chokidar from 'chokidar';
+
+// 文件监听器实例
+let fileWatcher: chokidar.FSWatcher | null = null;
+
+// 获取主窗口实例（需要在注册处理器时设置）
+let mainWindow: BrowserWindow | null = null;
+
+export function setMainWindow(window: BrowserWindow) {
+  mainWindow = window;
+}
+
+// 获取应用根目录（开发环境为项目根目录，生产环境为可执行文件所在目录）
+function getAppRootPath(): string {
+  // 开发环境：返回项目根目录
+  if (process.env.NODE_ENV === 'development') {
+    return path.join(__dirname, '../../');
+  }
+  // 生产环境：返回可执行文件所在目录的父目录
+  return path.join(process.resourcesPath || app.getAppPath(), '../');
+}
 
 export function registerWorkspaceHandlers(store: Store) {
   const workspaceManager = getWorkspaceManager();
@@ -53,7 +74,13 @@ export function registerWorkspaceHandlers(store: Store) {
       // 读取工作空间目录
       const entries = fs.readdirSync(workspacePath, { withFileTypes: true });
       const files = entries
-        .filter(entry => !entry.name.startsWith('.')) // 过滤隐藏文件
+        .filter(entry => {
+          // 过滤 .workspace 和 memory 文件夹
+          if (entry.name === '.workspace' || entry.name === 'memory') {
+            return false;
+          }
+          return true;
+        })
         .map(entry => {
           const fullPath = path.join(workspacePath, entry.name);
           const stats = fs.statSync(fullPath);
@@ -67,6 +94,64 @@ export function registerWorkspaceHandlers(store: Store) {
         })
         .sort((a, b) => {
           // 目录优先，然后按名称排序
+          if (a.type === 'directory' && b.type !== 'directory') return -1;
+          if (a.type !== 'directory' && b.type === 'directory') return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+      // 添加应用配置文件夹（.zero-employee）到列表顶部
+      const appRootPath = getAppRootPath();
+      const configFolderPath = path.join(appRootPath, '.zero-employee');
+
+      let filesWithConfig = files;
+      if (fs.existsSync(configFolderPath)) {
+        const stats = fs.statSync(configFolderPath);
+        filesWithConfig = [
+          {
+            name: '.zero-employee',
+            path: configFolderPath,
+            type: 'directory' as const,
+            size: undefined,
+            modified: stats.mtime.getTime(),
+          },
+          ...files,
+        ];
+      }
+
+      return { success: true, files: filesWithConfig };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 读取目录内容（用于文件夹展开）
+  ipcMain.handle('workspace:listDirectory', async (_event, dirPath: string) => {
+    try {
+      if (!fs.existsSync(dirPath)) {
+        return { success: false, error: '目录不存在' };
+      }
+
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      const files = entries
+        .filter(entry => {
+          // 过滤隐藏文件（除了 .zero-employee 等）
+          if (entry.name.startsWith('.') && entry.name !== '.zero-employee' && entry.name !== '.git') {
+            return false;
+          }
+          return true;
+        })
+        .map(entry => {
+          const fullPath = path.join(dirPath, entry.name);
+          const stats = fs.statSync(fullPath);
+          return {
+            name: entry.name,
+            path: fullPath,
+            type: entry.isDirectory() ? 'directory' : 'file',
+            size: entry.isFile() ? stats.size : undefined,
+            modified: stats.mtime.getTime(),
+          };
+        })
+        .sort((a, b) => {
           if (a.type === 'directory' && b.type !== 'directory') return -1;
           if (a.type !== 'directory' && b.type === 'directory') return 1;
           return a.name.localeCompare(b.name);
@@ -149,6 +234,52 @@ export function registerWorkspaceHandlers(store: Store) {
     try {
       const result = await workspaceManager.validateWorkspace(workspacePath);
       return { success: true, validation: result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ========== 文件监听功能 ==========
+
+  // 启动文件监听
+  ipcMain.handle('workspace:startWatching', async () => {
+    try {
+      const workspacePath = getWorkspacePath();
+      if (!workspacePath) {
+        return { success: false, error: '未设置工作空间' };
+      }
+
+      // 停止之前的监听
+      if (fileWatcher) {
+        await fileWatcher.close();
+        fileWatcher = null;
+      }
+
+      fileWatcher = chokidar.watch(workspacePath, {
+        ignored: /^\.workspace$|^memory$/,  // 忽略特定文件夹
+        ignoreInitial: true,
+        awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 }
+      });
+
+      fileWatcher.on('all', (event, changedPath) => {
+        // 通知前端文件变化
+        mainWindow?.webContents.send('workspace:fileChanged', { event, path: changedPath });
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 停止文件监听
+  ipcMain.handle('workspace:stopWatching', async () => {
+    try {
+      if (fileWatcher) {
+        await fileWatcher.close();
+        fileWatcher = null;
+      }
+      return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
     }

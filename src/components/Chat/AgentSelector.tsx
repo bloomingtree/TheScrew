@@ -34,15 +34,15 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({ conversationId, onAgentCh
   const currentAgentInfo = getCurrentAgentInfo();
 
   return (
-    <div className="relative">
+    <div className="relative shrink-0">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-4 py-2 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151]"
-        title="选择 AI 助手"
+        className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151]"
+        title={`AI 助手: ${currentAgentInfo.description}`}
       >
         <Bot size={14} className="shrink-0" />
-        <span className="truncate max-w-[150px]">{currentAgentInfo.description}</span>
-        <ChevronDown size={14} className={`shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <span className="hidden sm:inline truncate max-w-[100px]">{currentAgentInfo.description}</span>
+        <ChevronDown size={12} className={`shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
@@ -51,7 +51,7 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({ conversationId, onAgentCh
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute top-full left-0 mt-2 z-20 bg-white rounded-lg shadow-lg border border-gray-200 min-w-[250px] max-w-[350px]">
+          <div className="absolute top-full left-0 mt-2 z-20 bg-white rounded-lg shadow-lg border border-gray-200 min-w-[200px] max-w-[300px]">
             <div className="p-2">
               <div className="text-xs text-gray-500 px-3 py-2 font-medium">选择 AI 助手</div>
               {agents.map((agent) => (
@@ -64,7 +64,7 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({ conversationId, onAgentCh
                       : 'text-gray-700 hover:bg-gray-50'
                   }`}
                 >
-                  <div className="font-medium">{agent.description}</div>
+                  <div className="font-medium truncate">{agent.description}</div>
                   {agent.model && (
                     <div className="text-[10px] text-gray-400 mt-0.5">模型: {agent.model}</div>
                   )}

@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Check } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { FileText, Save, Check, Loader2 } from 'lucide-react';
 import { toast } from '../../store/toastStore';
-import { WordPreviewData, EditLocation } from './WordPreviewDialog';
+import { WordPreviewData } from './WordPreviewDialog';
 
 interface WordPreviewContentProps {
   data: WordPreviewData;
@@ -9,71 +9,72 @@ interface WordPreviewContentProps {
 }
 
 const WordPreviewContent: React.FC<WordPreviewContentProps> = ({ data, filepath }) => {
-  const [editingLocation, setEditingLocation] = useState<EditLocation | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showSaveButton, setShowSaveButton] = useState(false);
-  const [saveButtonPosition, setSaveButtonPosition] = useState({ top: 0, left: 0 });
+  const [hasChanges, setHasChanges] = useState(false);
+  const [editedParagraphs, setEditedParagraphs] = useState<Map<number, string>>(new Map());
 
-  // 使用 ref 存储原始内容
-  const originalContentRef = useRef<Map<string, string>>(new Map());
+  // 文件名
+  const fileName = filepath.split(/[/\\]/).pop() || 'Document';
 
-  // 只获取标题段落
+  // 只获取标题段落用于目录
   const headings = data?.structure.paragraphs.filter(p => p.level !== undefined && p.level > 0 && p.text.trim()) || [];
-
-  // 生成位置的唯一标识
-  const getLocationKey = (location: EditLocation): string => {
-    if (location.type === 'paragraph') {
-      return `para-${location.index}`;
-    } else {
-      return `table-${location.tableIndex}-${location.rowIndex}-${location.columnIndex}`;
-    }
-  };
-
-  // 开始编辑
-  const handleFocus = (location: EditLocation, content: string, event: React.FocusEvent<HTMLElement>) => {
-    const key = getLocationKey(location);
-    originalContentRef.current.set(key, content);
-    setEditingLocation(location);
-    setShowSaveButton(true);
-    // 计算保存按钮位置
-    const rect = event.currentTarget.getBoundingClientRect();
-    setSaveButtonPosition({
-      top: rect.top - 45,
-      left: rect.left,
-    });
-  };
 
   // 点击目录跳转
   const handleHeadingClick = (index: number) => {
-    const element = document.querySelector(`[data-location="para-${index}"]`) as HTMLElement;
+    const element = document.getElementById(`para-${index}`);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // 高亮一下
-      element.classList.add('ring-2', 'ring-blue-300', 'bg-blue-50');
-      setTimeout(() => {
-        element.classList.remove('ring-2', 'ring-blue-300', 'bg-blue-50');
-      }, 1500);
     }
   };
 
-  // 保存编辑
+  // 切换编辑模式
+  const toggleEditMode = () => {
+    if (isEditMode && hasChanges) {
+      // 有未保存的修改，提示用户
+      if (!confirm('有未保存的修改，确定要退出编辑模式吗？')) {
+        return;
+      }
+      // 清除修改
+      setEditedParagraphs(new Map());
+      setHasChanges(false);
+    }
+    setIsEditMode(!isEditMode);
+  };
+
+  // 处理段落内容变化
+  const handleParagraphChange = useCallback((index: number, newContent: string) => {
+    setEditedParagraphs(prev => {
+      const updated = new Map(prev);
+      const originalText = data.structure.paragraphs[index]?.text || '';
+
+      if (newContent !== originalText) {
+        updated.set(index, newContent);
+      } else {
+        updated.delete(index);
+      }
+
+      setHasChanges(updated.size > 0);
+      return updated;
+    });
+  }, [data]);
+
+  // 保存修改
   const handleSave = async () => {
-    if (!editingLocation) return;
+    if (editedParagraphs.size === 0) return;
 
     setSaving(true);
     try {
-      const key = getLocationKey(editingLocation);
-      const element = document.querySelector(`[data-location="${key}"]`) as HTMLElement;
-      const newContent = element?.innerText || '';
+      // 保存所有修改的段落
+      for (const [index, content] of editedParagraphs) {
+        await window.electronAPI.word.edit(filepath, { type: 'paragraph', index }, content);
+      }
 
-      await window.electronAPI.word.edit(filepath, editingLocation, newContent);
-      toast.success('修改已保存');
+      // 清除修改状态
+      setEditedParagraphs(new Map());
+      setHasChanges(false);
 
-      originalContentRef.current.delete(key);
-      setEditingLocation(null);
-      setShowSaveButton(false);
-
-      // TODO: 触发重新加载预览
+      toast.success('文档已保存');
     } catch (error: any) {
       toast.error(error.message || '保存失败');
     } finally {
@@ -81,164 +82,160 @@ const WordPreviewContent: React.FC<WordPreviewContentProps> = ({ data, filepath 
     }
   };
 
-  // 取消编辑（按 ESC 键）
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && editingLocation) {
-        const key = getLocationKey(editingLocation);
-        const original = originalContentRef.current.get(key);
-        if (original) {
-          const element = document.querySelector(`[data-location="${key}"]`) as HTMLElement;
-          if (element) {
-            element.innerText = original;
-          }
-        }
-        originalContentRef.current.delete(key);
-        setEditingLocation(null);
-        setShowSaveButton(false);
-      }
-    };
-
-    if (editingLocation) {
-      document.addEventListener('keydown', handleKeyDown);
-    }
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [editingLocation]);
-
-  // 失去焦点时隐藏保存按钮
-  const handleBlur = (location: EditLocation) => {
-    setTimeout(() => {
-      const saveButton = document.querySelector('[data-save-button]');
-      if (document.activeElement !== saveButton && editingLocation) {
-        const key = getLocationKey(location);
-        const currentKey = getLocationKey(editingLocation);
-        if (key === currentKey) {
-          setShowSaveButton(false);
-        }
-      }
-    }, 100);
+  // 获取段落的显示内容（编辑模式下显示编辑后的内容）
+  const getParagraphText = (index: number) => {
+    return editedParagraphs.get(index) ?? data.structure.paragraphs[index]?.text ?? '';
   };
 
-  // 根据标题级别设置样式
-  const getHeadingStyle = (level: number) => {
-    const styles = {
-      1: 'text-base font-bold text-gray-900',
-      2: 'text-sm font-semibold text-gray-800',
-      3: 'text-sm font-medium text-gray-700',
-      4: 'text-xs font-medium text-gray-600',
-      5: 'text-xs text-gray-600',
-      6: 'text-xs text-gray-500',
-    };
-    return styles[level as keyof typeof styles] || styles[6];
-  };
-
-  return (
-    <div className="flex-1 flex overflow-hidden">
-      {/* 左侧：目录（只显示标题） */}
-      <div className="w-40 border-r border-gray-200 flex flex-col bg-gray-50">
-        <div className="px-3 py-2 border-b border-gray-200 bg-gray-100">
-          <span className="text-xs font-semibold text-gray-600">目录</span>
-        </div>
-
-        {/* 标题列表 */}
-        <div className="flex-1 overflow-y-auto py-2">
-          {headings.length === 0 ? (
-            <div className="text-center text-gray-400 py-4 text-xs">无标题</div>
-          ) : (
-            <div className="space-y-0.5">
-              {headings.map((p) => {
-                const key = `para-${p.index}`;
-                const isEditing = editingLocation?.type === 'paragraph' && editingLocation.index === p.index;
-
-                return (
-                  <div
-                    key={key}
-                    onClick={() => handleHeadingClick(p.index)}
-                    className={`
-                      px-3 py-1.5 cursor-pointer transition-all text-xs
-                      ${isEditing ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-200 text-gray-700'}
-                    `}
-                    style={{ paddingLeft: `${((p.level ?? 1) - 1) * 8 + 12}px` }}
-                  >
-                    <span className={getHeadingStyle(p.level ?? 1)}>{p.text}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+  // 如果没有内容，显示提示
+  if (!data || data.structure.paragraphs.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400">
+        <div className="text-center">
+          <FileText size={48} className="mx-auto mb-3 opacity-50" />
+          <p className="text-sm">文档内容为空</p>
         </div>
       </div>
+    );
+  }
 
-      {/* 右侧：内容预览（可编辑） */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        {/* 浮动保存按钮 */}
-        {showSaveButton && (
-          <div
-            data-save-button
-            style={{ top: saveButtonPosition.top, left: saveButtonPosition.left }}
-            className="absolute z-10 flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg shadow-lg border border-blue-200"
-          >
-            <span className="text-xs text-gray-500">ESC 取消</span>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-1 px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors disabled:opacity-50 text-xs"
-            >
-              {saving ? '保存中...' : (
-                <>
-                  <Check size={12} />
-                  保存
-                </>
-              )}
-            </button>
+  return (
+    <div className="flex-1 flex overflow-hidden bg-gray-100">
+      {/* 左侧：目录 */}
+      {headings.length > 0 && (
+        <div className="w-48 border-r border-gray-300 bg-white flex flex-col shadow-sm">
+          <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+            <h3 className="text-sm font-semibold text-gray-700">目录</h3>
           </div>
-        )}
+          <div className="flex-1 overflow-y-auto py-3">
+            <div className="space-y-0.5">
+              {headings.map((p) => (
+                <div
+                  key={`toc-${p.index}`}
+                  onClick={() => handleHeadingClick(p.index)}
+                  className="px-3 py-1.5 cursor-pointer hover:bg-blue-50 text-gray-600 hover:text-blue-700 transition-all text-sm"
+                  style={{ paddingLeft: `${((p.level ?? 1) - 1) * 12 + 12}px` }}
+                >
+                  <span className={p.level === 1 ? 'font-semibold' : ''}>{p.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
-        {/* 预览内容 */}
-        <div className="flex-1 overflow-y-auto p-6" onClick={(e) => {
-          if ((e.target as HTMLElement).closest('[data-location]') === null) {
-            setShowSaveButton(false);
-          }
-        }}>
-          <div className="prose prose-sm max-w-none">
+      {/* 右侧：文档内容 */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* 工具栏 */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">{fileName}</span>
+            <span className="text-xs text-gray-400">
+              {data.structure.paragraphs.length} 段 · {data.structure.tables.length} 表格
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasChanges && (
+              <span className="text-xs text-orange-500">有未保存的修改</span>
+            )}
+            <button
+              onClick={toggleEditMode}
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center gap-1 ${
+                isEditMode
+                  ? 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                  : 'bg-blue-500 hover:bg-blue-600 text-white'
+              }`}
+              disabled={saving}
+              title={isEditMode ? '退出编辑' : '编辑文档'}
+            >
+              {isEditMode ? '退出' : '编辑'}
+            </button>
+            {isEditMode && hasChanges && (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-3 py-1.5 text-xs rounded-lg bg-green-500 hover:bg-green-600 text-white transition-colors flex items-center gap-1 disabled:opacity-50"
+                title="保存修改"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    保存中...
+                  </>
+                ) : (
+                  <>
+                    <Save size={12} />
+                    保存
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 文档内容区域 */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Word 风格的页面 */}
+          <div
+            className="mx-auto my-6 bg-white shadow-lg"
+            style={{
+              width: '210mm',
+              minHeight: '297mm',
+              padding: '25mm 20mm',
+              fontFamily: '"Calibri", "Segoe UI", "Microsoft YaHei", sans-serif',
+              fontSize: '11pt',
+              lineHeight: '1.5',
+              color: '#000',
+            }}
+          >
             {/* 渲染段落 */}
             {data?.structure.paragraphs.map((p) => {
-              const key = `para-${p.index}`;
-              const location: EditLocation = { type: 'paragraph', index: p.index };
-              const isEditing = editingLocation?.type === 'paragraph' && editingLocation.index === p.index;
-
-              // 根据标题级别设置样式
               const getTag = () => {
                 if (p.level === 1) return 'h1';
                 if (p.level === 2) return 'h2';
                 if (p.level === 3) return 'h3';
+                if (p.level === 4) return 'h4';
+                if (p.level === 5) return 'h5';
+                if (p.level === 6) return 'h6';
                 return 'p';
               };
 
               const Tag = getTag();
 
+              // 标题样式
+              const headingStyles: Record<number, string> = {
+                1: 'text-2xl font-bold text-gray-900 mb-4',
+                2: 'text-xl font-semibold text-gray-800 mb-3',
+                3: 'text-lg font-medium text-gray-800 mb-2',
+                4: 'text-base font-medium text-gray-700 mb-2',
+                5: 'text-sm font-medium text-gray-700 mb-1',
+                6: 'text-sm text-gray-600 mb-1',
+              };
+
+              // 普通段落样式
+              const paragraphStyle = 'mb-2 text-justify';
+
+              const className = p.level ? headingStyles[p.level] : paragraphStyle;
+              const hasChange = editedParagraphs.has(p.index);
+
               return (
                 <Tag
-                  key={key}
-                  data-location={key}
-                  contentEditable
-                  suppressContentEditableWarning
-                  onFocus={(e) => handleFocus(location, p.text, e)}
-                  onBlur={() => handleBlur(location)}
-                  className={`
-                    py-1 px-2 -mx-2 rounded cursor-text
-                    ${isEditing
-                      ? 'bg-blue-50 ring-2 ring-blue-400 outline-none'
-                      : 'hover:bg-gray-50 focus:bg-blue-50 focus:ring-2 focus:ring-blue-200 outline-none'}
-                    transition-all
-                    ${p.level ? 'font-bold' : ''}
-                  `}
-                  style={{ fontSize: p.level ? undefined : '14px' }}
+                  key={`para-${p.index}`}
+                  id={`para-${p.index}`}
+                  className={className}
                 >
-                  {p.text || <span className="text-gray-400 italic">(空段落)</span>}
+                  {isEditMode ? (
+                    <input
+                      type="text"
+                      value={getParagraphText(p.index)}
+                      onChange={(e) => handleParagraphChange(p.index, e.target.value)}
+                      className={`w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none transition-colors ${
+                        hasChange ? 'border-orange-300 bg-orange-50' : ''
+                      }`}
+                    />
+                  ) : (
+                    <span>{getParagraphText(p.index) || '\u00A0'}</span>
+                  )}
                 </Tag>
               );
             })}
@@ -246,43 +243,18 @@ const WordPreviewContent: React.FC<WordPreviewContentProps> = ({ data, filepath 
             {/* 渲染表格 */}
             {data?.structure.tables.map((table) => (
               <div key={`table-${table.index}`} className="my-4">
-                <table className="min-w-full border border-gray-300 rounded">
+                <table className="min-w-full border-collapse border border-gray-400">
                   <tbody>
                     {table.rows.map((row) => (
-                      <tr key={`row-${table.index}-${row.index}`} className="border-b border-gray-200">
-                        {row.cells.map((cell, ci) => {
-                          const key = `table-${table.index}-${row.index}-${ci}`;
-                          const location: EditLocation = {
-                            type: 'table',
-                            tableIndex: table.index,
-                            rowIndex: row.index,
-                            columnIndex: ci
-                          };
-                          const isEditing = editingLocation?.type === 'table' &&
-                                          editingLocation.tableIndex === table.index &&
-                                          editingLocation.rowIndex === row.index &&
-                                          editingLocation.columnIndex === ci;
-
-                          return (
-                            <td
-                              key={key}
-                              data-location={key}
-                              contentEditable
-                              suppressContentEditableWarning
-                              onFocus={(e) => handleFocus(location, cell.text, e)}
-                              onBlur={() => handleBlur(location)}
-                              className={`
-                                p-2 border-r border-gray-200 min-w-[80px] cursor-text
-                                ${isEditing
-                                  ? 'bg-blue-50 ring-2 ring-blue-400 outline-none'
-                                  : 'hover:bg-gray-50 focus:bg-blue-50 focus:ring-2 focus:ring-blue-200 outline-none'}
-                                transition-all text-sm
-                              `}
-                            >
-                              {cell.text || <span className="text-gray-400 italic">(空)</span>}
-                            </td>
-                          );
-                        })}
+                      <tr key={`row-${table.index}-${row.index}`}>
+                        {row.cells.map((cell, ci) => (
+                          <td
+                            key={`cell-${table.index}-${row.index}-${ci}`}
+                            className="border border-gray-300 px-3 py-2 text-sm"
+                          >
+                            {cell.text || '\u00A0'}
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
@@ -290,14 +262,17 @@ const WordPreviewContent: React.FC<WordPreviewContentProps> = ({ data, filepath 
               </div>
             ))}
           </div>
-        </div>
 
-        {/* 底部提示 */}
-        {!editingLocation && (
-          <div className="px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs text-gray-500">
-            点击文字进行编辑 | ESC 取消 | 点击目录跳转
+          {/* 底部信息 */}
+          <div className="text-center py-4 text-xs text-gray-500 border-t border-gray-200">
+            <p>{fileName}</p>
+            {isEditMode ? (
+              <p>编辑模式 - 点击文本进行修改，完成后点击"保存"按钮</p>
+            ) : (
+              <p>预览模式 - 点击"编辑"按钮进行修改</p>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
