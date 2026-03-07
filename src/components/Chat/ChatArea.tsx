@@ -5,7 +5,6 @@ import { useChatStore } from '../../store/chatStore';
 import MessageList from './MessageList';
 import InputArea from './InputArea';
 import WorkspaceSelector from '../Workspace/WorkspaceSelector';
-import AgentSelector from './AgentSelector';
 
 const ChatArea: React.FC = () => {
   const { currentConversationId, createConversation, updateConversationMessages } = useConversationStore();
@@ -117,47 +116,41 @@ const ChatArea: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#F5F5F0]">
-      <div className="bg-white/80 backdrop-blur border-b border-gray-200/50 px-2 sm:px-3 py-2 flex items-center flex-shrink-0 gap-2">
-        <button
-          onClick={() => setShowWorkspaceSelector(true)}
-          className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
-          title={workspacePath || '选择工作空间'}
-        >
-          <Folder size={14} className="shrink-0" />
-          <span className="truncate max-w-[100px]">
-            {workspacePath ? workspacePath.split(/[\\/]/).pop() : '工作空间'}
-          </span>
-        </button>
-        <button
-          onClick={() => setShowWorkspaceSelector(true)}
-          className="sm:hidden flex items-center justify-center w-8 h-8 rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
-          title={workspacePath || '选择工作空间'}
-        >
-          <Folder size={14} className="shrink-0" />
-        </button>
-        <AgentSelector
-          conversationId={currentConversationId}
-          onAgentChange={(agentName) => {
-            console.log('[ChatArea] Agent changed to:', agentName);
-          }}
-        />
-        <button
-          onClick={handleNewChat}
-          className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
-          title="新建对话"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            <line x1="12" y1="9" x2="12" y2="15"/>
-            <line x1="9" y1="12" x2="15" y2="12"/>
-          </svg>
-          <span className="hidden sm:inline font-medium">新建对话</span>
-        </button>
-      </div>
       <div className="flex-1 overflow-hidden min-h-0">
         <MessageList />
       </div>
       <div className="flex-shrink-0">
+        <div className="bg-[#F5F5F0]/80 backdrop-blur border-t border-gray-200/50 px-2 sm:px-3 py-2 flex items-center flex-shrink-0 gap-2">
+          <button
+            onClick={() => setShowWorkspaceSelector(true)}
+            className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
+            title={workspacePath || '选择工作空间'}
+          >
+            <Folder size={14} className="shrink-0" />
+            <span className="truncate max-w-[100px]">
+              {workspacePath ? workspacePath.split(/[\\/]/).pop() : '工作空间'}
+            </span>
+          </button>
+          <button
+            onClick={() => setShowWorkspaceSelector(true)}
+            className="sm:hidden flex items-center justify-center w-8 h-8 rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
+            title={workspacePath || '选择工作空间'}
+          >
+            <Folder size={14} className="shrink-0" />
+          </button>
+          <button
+            onClick={handleNewChat}
+            className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
+            title="新建对话"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              <line x1="12" y1="9" x2="12" y2="15"/>
+              <line x1="9" y1="12" x2="15" y2="12"/>
+            </svg>
+            <span className="hidden sm:inline font-medium">新建对话</span>
+          </button>
+        </div>
         <InputArea />
       </div>
       <WorkspaceSelector

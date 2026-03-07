@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { readFile, stat } from 'fs/promises';
+import { readFile, writeFile, stat } from 'fs/promises';
 import path from 'path';
 
 // ============================================================================
@@ -306,6 +306,24 @@ export function registerFilePreviewHandlers() {
       return { success: true, canPreview, type };
     } catch (error: any) {
       return { success: false, error: error.message, canPreview: false };
+    }
+  });
+
+  // 保存文本文件
+  ipcMain.handle('file:saveText', async (_event, filepath: string, content: string) => {
+    try {
+      // 验证是否为文本文件
+      if (!isTextFile(filepath)) {
+        return { success: false, error: '只支持保存文本文件' };
+      }
+
+      await writeFile(filepath, content, 'utf-8');
+      console.log('[FilePreview] Saved text file:', filepath, 'Size:', content.length);
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('[FilePreview] Error saving text file:', error);
+      return { success: false, error: error.message };
     }
   });
 

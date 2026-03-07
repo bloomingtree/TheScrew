@@ -8,6 +8,7 @@ import { Message, ToolResult } from '../../types';
 import { getKindConfig, MessageKind } from '../../types/thread';
 import { useChatStore } from '../../store/chatStore';
 import { useRightPanelStore } from '../../store/rightPanelStore';
+import { extractTextFromContent } from '../../utils/messageContent';
 
 interface ThreadCardProps {
   message: Message;
@@ -84,8 +85,11 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
   const isUser = kind === 'user';
   const isDark = kind === 'thinking' || kind === 'executing';
 
+  // 提取文本内容（处理多模态格式）
+  const textContent = extractTextFromContent(message.content as any);
+
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(message.content);
+    await navigator.clipboard.writeText(textContent);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
   };
@@ -415,7 +419,7 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
                   },
                 }}
               >
-                {message.content}
+                {textContent}
               </ReactMarkdown>
             </div>
 

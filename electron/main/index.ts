@@ -22,14 +22,15 @@ import { cronTools, heartbeatTools } from './tools/SchedulerTools';
 import { bashTools, bashToolSet } from './tools/BashTools';
 import { setWorkspacePath } from './tools/FileTools';
 import { registerToolSetMeta } from './tools/ToolManager';
-import { reportTools, reportToolGroup } from './reports/ReportTools';
-import { getTemplateEngine } from './reports';
-import { registerReportsHandlers } from './ipc/reports';
-import { registerWorkflowsHandlers } from './ipc/workflows';
-import { registerAnalyticsHandlers } from './ipc/analytics';
+// Reports functionality removed
 import { registerCredentialHandlers } from './ipc/credentials';
 import { registerWordHandlers } from './ipc/word';
 import { registerFilePreviewHandlers } from './ipc/filePreview';
+import { registerP2PHandlers } from './ipc/p2p';
+import { registerFileEditorHandlers } from './ipc/fileEditor';
+import { getTransferService } from './p2p/TransferService';
+import { registerAttachmentHandlers } from './ipc/attachments';
+import { attachmentTools } from './tools/AttachmentTools';
 
 const store = new Store();
 
@@ -77,9 +78,6 @@ app.whenReady().then(async () => {
 
   // 初始化技能管理器
   await getSkillManager().initialize();
-
-  // 初始化报告模板引擎
-  await getTemplateEngine().initialize();
 
   // 将现有工具适配到新的 ToolRegistry
   const toolManager = getToolManager();
@@ -152,19 +150,19 @@ app.whenReady().then(async () => {
     toolManager.registerTool(tool);
   }
 
-  // 注册报告工具到 ToolManager
-  for (const tool of reportTools) {
+  // 注册附件工具到 ToolManager
+  for (const tool of attachmentTools) {
     toolManager.registerTool(tool);
   }
 
   // 注册工具集元数据
   registerToolSetMeta(bashToolSet);
   registerToolSetMeta({
-    name: reportToolGroup.name,
-    description: reportToolGroup.description || '',
-    capabilities: ['生成工作报告', '周报', '日报', '月报'],
-    keywords: reportToolGroup.keywords,
-    estimatedTokens: 500,
+    name: 'attachments',
+    description: '附件管理工具',
+    capabilities: ['列出附件', '获取附件内容', '保存附件到工作空间', '多文件工作流处理'],
+    keywords: ['附件', '上传', '文件', '文档', '工作流'],
+    estimatedTokens: 300,
   });
 
   // 注册 IPC 处理器
@@ -180,12 +178,19 @@ app.whenReady().then(async () => {
   registerSkillsHandlers();
   registerSchedulerHandlers();
   registerPythonHandlers();
-  registerReportsHandlers();
-  registerWorkflowsHandlers();
-  registerAnalyticsHandlers();
+  // Reports handlers removed
   registerCredentialHandlers();
   registerWordHandlers();
   registerFilePreviewHandlers();
+  registerP2PHandlers();
+  registerFileEditorHandlers();
+  registerAttachmentHandlers();
+
+  // 启动 P2P 传输服务（HTTP 服务器）
+  const transferService = getTransferService();
+  await transferService.start().catch(err => {
+    console.error('[Main] Failed to start transfer service:', err);
+  });
 
   createWindow();
 });

@@ -21,6 +21,10 @@ export function setMainWindow(window: BrowserWindow) {
   mainWindow = window;
 }
 
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow;
+}
+
 // 获取应用根目录（开发环境为项目根目录，生产环境为可执行文件所在目录）
 function getAppRootPath(): string {
   // 开发环境：返回项目根目录

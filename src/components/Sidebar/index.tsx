@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Settings,
-  Sparkles,
-  Zap,
-  BarChart3,
   History as HistoryIcon,
   X,
   Folder,
@@ -14,16 +11,16 @@ import {
   ChevronRight,
   ChevronDown,
   HardDrive,
+  Lightbulb,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useConversationStore } from '../../store/conversationStore';
 import { useConfigStore } from '../../store/configStore';
 import { useRightPanelStore } from '../../store/rightPanelStore';
 import { useTabStore } from '../../store/tabStore';
-import ReportsTab from '../RightPanel/tabs/ReportsTab';
-import WorkflowsTab from '../RightPanel/tabs/WorkflowsTab';
-import AnalyticsTab from '../RightPanel/tabs/AnalyticsTab';
 import PreviewTab from '../RightPanel/tabs/PreviewTab';
+import SkillsTab from '../RightPanel/tabs/SkillsTab';
+import FileExplorer from '../FileExplorer/FileExplorer';
 
 // 终端风格色彩常量
 const TERMINAL = {
@@ -45,9 +42,7 @@ const TERMINAL = {
 
 // 功能按钮配置
 const FUNCTION_ITEMS = [
-  { key: 'reports', icon: Sparkles, label: '工作报告', color: TERMINAL.purple },
-  { key: 'workflows', icon: Zap, label: '工作流', color: TERMINAL.orange },
-  { key: 'analytics', icon: BarChart3, label: '数据分析', color: TERMINAL.green },
+  { key: 'skills', icon: Lightbulb, label: '技能', color: TERMINAL.yellow },
 ];
 
 interface WorkspaceFile {
@@ -59,7 +54,7 @@ interface WorkspaceFile {
   children?: WorkspaceFile[];
 }
 
-type ModalType = 'history' | 'reports' | 'workflows' | 'analytics' | 'preview' | null;
+type ModalType = 'history' | 'skills' | 'preview' | null;
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -69,11 +64,12 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
+  const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+  const [workspaceNotSet, setWorkspaceNotSet] = useState(false);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [loadedDirectories, setLoadedDirectories] = useState<Set<string>>(new Set());
-  const [workspaceNotSet, setWorkspaceNotSet] = useState(false);
 
   const {
     conversations,
@@ -86,33 +82,33 @@ const Sidebar: React.FC<SidebarProps> = () => {
   const { currentPreviewFile, setOpen: setPreviewOpen } = useRightPanelStore();
   const { openTab, toggleSplit, isSplit } = useTabStore();
 
-  // 加载工作空间文件
+  // 获取工作空间路径
   useEffect(() => {
-    loadWorkspaceFiles();
-
-    // 启动文件监听
-    const startWatching = async () => {
+    const getWorkspacePath = async () => {
       try {
-        const result = await window.electronAPI.workspace.startWatching?.();
-        if (!result?.success) {
-          console.warn('文件监听启动失败:', result?.error);
+        const result = await window.electronAPI.workspace.getPath();
+        if (result.path) {
+          setWorkspacePath(result.path);
+          setWorkspaceNotSet(false);
+        } else {
+          setWorkspaceNotSet(true);
         }
       } catch (err) {
-        console.warn('文件监听不可用:', err);
+        console.error('获取工作空间失败:', err);
+        setWorkspaceNotSet(true);
       }
     };
-    startWatching();
-
-    // 注册文件变化监听
-    const removeListener = window.electronAPI.workspace.onFileChanged?.(() => {
-      loadWorkspaceFiles();
-    });
-
-    return () => {
-      removeListener?.();
-      window.electronAPI.workspace.stopWatching?.();
-    };
+    getWorkspacePath();
   }, []);
+
+  // FileExplorer 文件点击处理 - 在 Monaco Editor 中打开
+  const handleFileClick = (filepath: string) => {
+    openTab({
+      type: 'editor',
+      title: filepath.split(/[/\\]/).pop() || '文件',
+      content: { filepath },
+    }, 'left');
+  };
 
   const loadWorkspaceFiles = async () => {
     setIsLoadingFiles(true);
@@ -139,6 +135,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
   const selectWorkspace = async () => {
     const result = await window.electronAPI.workspace.select();
     if (result.path) {
+      setWorkspacePath(result.path);
       setWorkspaceNotSet(false);
       await loadWorkspaceFiles();
     }
@@ -250,7 +247,8 @@ const Sidebar: React.FC<SidebarProps> = () => {
     }
   };
 
-  const handleFileClick = (file: WorkspaceFile) => {
+  // 旧版文件树点击处理（保留兼容）
+  const handleLegacyFileClick = (file: WorkspaceFile) => {
     if (file.type === 'directory') {
       toggleFolder(file.path);
       return;
@@ -277,7 +275,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
     return (
       <div key={file.path}>
         <div
-          onClick={() => handleFileClick(file)}
+          onClick={() => handleLegacyFileClick(file)}
           className="flex items-center gap-1 py-1 px-2 rounded cursor-pointer hover:bg-white/50 transition-colors"
           style={{ paddingLeft: `${level * 12 + 8}px` }}
         >
@@ -309,12 +307,8 @@ const Sidebar: React.FC<SidebarProps> = () => {
 
   const renderModalContent = () => {
     switch (activeModal) {
-      case 'reports':
-        return <ReportsTab />;
-      case 'workflows':
-        return <WorkflowsTab />;
-      case 'analytics':
-        return <AnalyticsTab />;
+      case 'skills':
+        return <SkillsTab />;
       case 'preview':
         return <PreviewTab />;
       default:
@@ -324,12 +318,8 @@ const Sidebar: React.FC<SidebarProps> = () => {
 
   const getModalTitle = () => {
     switch (activeModal) {
-      case 'reports':
-        return '工作报告';
-      case 'workflows':
-        return '工作流';
-      case 'analytics':
-        return '数据分析';
+      case 'skills':
+        return '技能';
       case 'preview':
         return currentPreviewFile?.split(/[\\/]/).pop() || '文件预览';
       case 'history':
@@ -356,7 +346,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
       >
         {/* 设置按钮 */}
         <div
-          className="py-3 px-2 border-b"
+          className="py-1 px-2 border-b"
           style={{ borderColor: 'rgba(65, 72, 104, 0.15)', minWidth: '48px' }}
         >
           <button
@@ -486,7 +476,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
         <div className="flex-1 overflow-y-auto px-2 pb-2 flex flex-col gap-2">
           {/* 工作空间按钮 */}
           <button
-            onClick={workspaceNotSet ? selectWorkspace : loadWorkspaceFiles}
+            onClick={selectWorkspace}
             className={`flex items-center gap-2 overflow-hidden rounded-lg transition-all font-mono text-sm justify-start ${
               isOpen
                 ? 'w-full h-8 py-2 px-2'
@@ -506,9 +496,9 @@ const Sidebar: React.FC<SidebarProps> = () => {
               e.currentTarget.style.background = workspaceNotSet ? 'rgba(247, 118, 142, 0.15)' : 'rgba(255, 255, 255, 0.6)';
               e.currentTarget.style.borderColor = workspaceNotSet ? 'rgba(247, 118, 142, 0.4)' : 'rgba(65, 72, 104, 0.2)';
             }}
-            title={workspaceNotSet ? "点击选择工作空间" : "刷新文件列表"}
+            title={workspaceNotSet ? "点击选择工作空间" : (workspacePath || "工作空间")}
           >
-            <HardDrive size={16} className={`${isLoadingFiles ? 'animate-spin' : ''} shrink-0`} />
+            <HardDrive size={16} className="shrink-0" />
             {isOpen && (
               <motion.span
                 initial={{ opacity: 0 }}
@@ -517,7 +507,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
                 className="text-sm truncate font-semibold"
                 style={{ color: workspaceNotSet ? TERMINAL.pink : TERMINAL.textDark }}
               >
-                {workspaceNotSet ? '选择工作空间' : '工作空间'}
+                {workspaceNotSet ? '选择工作空间' : (workspacePath?.split(/[/\\]/).pop() || '工作空间')}
               </motion.span>
             )}
           </button>
@@ -525,11 +515,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
           {/* 文件列表 */}
           {isOpen && (
             <div className="flex-1 overflow-y-auto">
-              {isLoadingFiles ? (
-                <div className="text-center py-4 text-xs" style={{ color: TERMINAL.textSecondary }}>
-                  加载中...
-                </div>
-              ) : workspaceNotSet ? (
+              {workspaceNotSet ? (
                 <div className="text-center py-6 px-3">
                   <p className="text-xs mb-3" style={{ color: TERMINAL.textSecondary }}>
                     未设置工作空间
@@ -554,13 +540,16 @@ const Sidebar: React.FC<SidebarProps> = () => {
                     选择文件夹
                   </button>
                 </div>
-              ) : workspaceFiles.length === 0 ? (
-                <div className="text-center py-4 text-xs" style={{ color: TERMINAL.textSecondary }}>
-                  空文件夹
+              ) : workspacePath ? (
+                <div className="h-full">
+                  <FileExplorer
+                    rootPath={workspacePath}
+                    onFileClick={handleFileClick}
+                  />
                 </div>
               ) : (
-                <div className="space-y-0.5">
-                  {workspaceFiles.map(file => renderFileNode(file))}
+                <div className="text-center py-4 text-xs" style={{ color: TERMINAL.textSecondary }}>
+                  加载中...
                 </div>
               )}
             </div>

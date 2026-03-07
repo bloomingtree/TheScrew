@@ -6,11 +6,10 @@
  * 系统提示词结构：
  * 1. 核心身份 (中文)
  * 2. 时间信息 (中文)
- * 3. Bootstrap 文件 (IDENTITY.md, AGENTS.md, SOUL.md, USER.md, TOOLS.md)
+ * 3. Bootstrap 文件 (IDENTITY.md, SOUL.md, USER.md, TOOLS.md)
  * 4. 内存 (长期记忆 + 今日笔记)
  * 5. 技能 (Always Skills 完整内容 + On-Demand Skills 摘要)
- * 6. Agent 提示词 (如果指定了 Agent)
- * 7. 工具定义 (JSON Schema)
+ * 6. 工具定义 (JSON Schema)
  */
 
 import { readFile } from 'fs/promises';
@@ -18,15 +17,12 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import { getSimpleSkillManager } from './SimpleSkillManager';
 import { getMemoryStore } from '../memory/MemoryStore';
-import { getAgentManager } from '../agents/AgentManager';
 import { getToolManager } from '../tools/ToolManager';
 
 /**
  * Context Builder options
  */
 export interface ContextBuilderOptions {
-  /** Agent name (optional) */
-  agentName?: string;
   /** Workspace path (optional) */
   workspacePath?: string;
   /** Include memory in system prompt */
@@ -40,7 +36,6 @@ export interface ContextBuilderOptions {
  */
 const BOOTSTRAP_FILES = {
   IDENTITY: 'IDENTITY.md',
-  AGENTS: 'AGENTS.md',
   SOUL: 'SOUL.md',
   USER: 'USER.md',
   TOOLS: 'TOOLS.md',
@@ -52,7 +47,6 @@ const BOOTSTRAP_FILES = {
 export class ContextBuilder {
   private skillManager = getSimpleSkillManager();
   private memoryStore = getMemoryStore();
-  private agentManager = getAgentManager();
   private toolManager = getToolManager();
 
   /**
@@ -87,15 +81,7 @@ export class ContextBuilder {
       sections.push(skillsSection);
     }
 
-    // 6. Agent 提示词 (如果指定)
-    if (options.agentName) {
-      const agentSection = await this._buildAgentSection(options.agentName);
-      if (agentSection) {
-        sections.push(agentSection);
-      }
-    }
-
-    // 7. 工具定义
+    // 6. 工具定义
     const toolsSection = await this._buildToolsSection(options);
     if (toolsSection) {
       sections.push(toolsSection);
@@ -168,17 +154,6 @@ export class ContextBuilder {
         sections.push(`## 系统身份\n\n${content}`);
       } catch (e) {
         console.warn('[ContextBuilder] Failed to read IDENTITY.md:', e);
-      }
-    }
-
-    // 读取 AGENTS.md
-    const agentsPath = join(bootstrapPath, BOOTSTRAP_FILES.AGENTS);
-    if (existsSync(agentsPath)) {
-      try {
-        const content = await readFile(agentsPath, 'utf-8');
-        sections.push(`## Agent 定义\n\n${content}`);
-      } catch (e) {
-        console.warn('[ContextBuilder] Failed to read AGENTS.md:', e);
       }
     }
 
@@ -282,24 +257,7 @@ export class ContextBuilder {
   }
 
   /**
-   * 6. Agent 提示词部分
-   */
-  private async _buildAgentSection(agentName: string): Promise<string | null> {
-    try {
-      const agent = this.agentManager.getAgent(agentName);
-      if (!agent || !agent.systemPrompt) {
-        return null;
-      }
-
-      return `# Agent: ${agentName}\n\n${agent.systemPrompt}`;
-    } catch (e) {
-      console.warn('[ContextBuilder] Failed to build agent section:', e);
-      return null;
-    }
-  }
-
-  /**
-   * 7. 工具概览部分 (简洁列表)
+   * 6. 工具概览部分 (简洁列表)
    *
    * 注意：详细的工具定义通过 OpenAI Function Calling 的 tools 参数传递
    * 系统提示词中只保留工具概览，让大模型知道有哪些可用工具

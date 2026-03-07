@@ -24,14 +24,35 @@ export function estimateTokens(text: string): number {
 }
 
 /**
+ * 从多模态内容中提取文本
+ */
+function extractTextFromContent(content: any): string {
+  if (!content) return '';
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((part: any) => part.type === 'text' && part.text)
+      .map((part: any) => part.text)
+      .join('\n');
+  }
+  return '';
+}
+
+/**
  * 计算消息数组的 token 数量
  */
 export function countMessagesTokens(messages: any[]): number {
   let total = 0;
   for (const msg of messages) {
-    total += estimateTokens(msg.content || '');
+    const textContent = extractTextFromContent(msg.content);
+    total += estimateTokens(textContent);
     // 计算元数据的 token 开销（role、tool_calls 等）
     total += 10;
+    // 如果有图片，增加额外开销（每张图片约 85 tokens）
+    if (Array.isArray(msg.content)) {
+      const imageCount = msg.content.filter((part: any) => part.type === 'image_url').length;
+      total += imageCount * 85;
+    }
   }
   return total;
 }
@@ -68,7 +89,8 @@ export function compressMessagesToSummary(messages: any[]): string {
 
   for (const msg of messages) {
     const role = msg.role === 'user' ? '用户' : msg.role === 'assistant' ? '助手' : '工具';
-    const content = (msg.content || '').slice(0, 100); // 限制每条消息最多 100 字符
+    const rawContent = extractTextFromContent(msg.content);
+    const content = rawContent.slice(0, 100); // 限制每条消息最多 100 字符
 
     if (msg.tool_calls) {
       summary.push(`${role}调用了工具: ${msg.tool_calls.map((tc: any) => tc.function.name).join(', ')}`);

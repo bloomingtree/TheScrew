@@ -2,6 +2,24 @@ import React, { useRef } from 'react';
 import { X, ChevronDown } from 'lucide-react';
 import { useTabStore, Tab } from '../../store/tabStore';
 
+// 终端风格色彩常量
+const TERMINAL = {
+  bg: '#1a1b26',
+  bgSecondary: '#24283b',
+  bgTertiary: '#414868',
+  lightBg: '#fff8f0',
+  green: '#9ece6a',
+  orange: '#ff9e64',
+  blue: '#7aa2f7',
+  cyan: '#2ac3de',
+  purple: '#bb9af7',
+  pink: '#f7768e',
+  yellow: '#e0af68',
+  textPrimary: '#c0caf5',
+  textSecondary: '#565f89',
+  textDark: '#1a1b26',
+};
+
 interface TabBarProps {
   panelId: 'left' | 'right';
 }
@@ -37,33 +55,72 @@ const TabBar: React.FC<TabBarProps> = ({ panelId }) => {
     return (
       <div
         key={tab.id}
-        className={`group shrink-0 flex items-center gap-2 px-3 py-2 border-r text-sm cursor-pointer select-none transition-colors ${
+        className={`group shrink-0 flex items-center gap-2 px-4 py-2.5 border-r text-sm font-mono cursor-pointer select-none transition-all relative ${
           isActive
-            ? 'bg-white text-gray-900 border-gray-200'
-            : 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200'
+            ? ''
+            : 'opacity-60 hover:opacity-100'
         }`}
+        style={{
+          background: isActive ? '#fff' : `${TERMINAL.bgSecondary}15`,
+          borderColor: `${TERMINAL.bgTertiary}30`,
+          color: isActive ? TERMINAL.textDark : TERMINAL.textSecondary,
+        }}
         onClick={() => handleTabClick(tab.id)}
       >
-        {Icon && <Icon size={14} className="shrink-0" />}
-        <span className="max-w-[150px] truncate">
+        {/* 图标 */}
+        {Icon && (
+          <span style={{ color: isActive ? TERMINAL.cyan : TERMINAL.textSecondary }}>
+            <Icon size={13} className="shrink-0" />
+          </span>
+        )}
+
+        {/* 标题 */}
+        <span className="max-w-[120px] truncate font-medium">
           {tab.title}
-          {tab.isModified && <span className="text-yellow-600 ml-1">*</span>}
         </span>
+
+        {/* 修改标记 */}
+        {tab.isModified && (
+          <span style={{ color: TERMINAL.yellow }}>*</span>
+        )}
+
+        {/* 关闭按钮 */}
         {tab.canClose !== false && (
           <button
             onClick={(e) => handleTabClose(e, tab.id)}
-            className="shrink-0 opacity-0 group-hover:opacity-100 hover:bg-gray-300 rounded p-0.5 transition-all"
+            className="shrink-0 rounded transition-all"
+            style={{
+              opacity: isActive ? 1 : 0,
+              background: 'transparent',
+              padding: '2px',
+            }}
             title="关闭标签"
           >
-            <X size={12} />
+            <X size={11} style={{ color: isActive ? TERMINAL.textSecondary : TERMINAL.textSecondary }} />
           </button>
+        )}
+
+        {/* 激活状态指示器 */}
+        {isActive && (
+          <div
+            className="absolute bottom-0 left-0 right-0 h-0.5"
+            style={{
+              background: `linear-gradient(90deg, ${TERMINAL.cyan}, ${TERMINAL.blue})`,
+            }}
+          />
         )}
       </div>
     );
   };
 
   return (
-    <div className="flex items-center bg-gray-200 border-b border-gray-300">
+    <div
+      className="flex items-center"
+      style={{
+        background: '#F5F5F0',
+      }}
+    >
+      {/* 标签列表 */}
       <div
         ref={scrollContainerRef}
         className="flex-1 flex items-center overflow-x-auto scrollbar-hide"
@@ -72,10 +129,18 @@ const TabBar: React.FC<TabBarProps> = ({ panelId }) => {
       >
         {panel.tabs.map(renderTab)}
       </div>
-      {/* 可选：下拉菜单按钮 */}
+
+      {/* 下拉菜单按钮 */}
       {panel.tabs.length > 5 && (
-        <button className="shrink-0 px-2 py-1 text-gray-500 hover:text-gray-700 hover:bg-gray-300 rounded">
-          <ChevronDown size={14} />
+        <button
+          className="shrink-0 px-3 py-2 rounded transition-all font-mono text-xs"
+          style={{
+            color: TERMINAL.textSecondary,
+            background: 'transparent',
+          }}
+          title="更多标签"
+        >
+          <ChevronDown size={13} />
         </button>
       )}
     </div>

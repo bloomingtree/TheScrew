@@ -30,11 +30,6 @@ const electronAPI = {
     stream: (messages: any[], conversationId?: string) => ipcRenderer.invoke('chat:stream', messages, conversationId),
     stop: () => ipcRenderer.invoke('chat:stop'),
     generateTitle: (message: string) => ipcRenderer.invoke('chat:generateTitle', message) as Promise<{ success: boolean; title?: string; error?: string }>,
-    setAgent: (conversationId: string, agentName: string) => ipcRenderer.invoke('chat:setAgent', conversationId, agentName),
-    getAgent: (conversationId: string) => ipcRenderer.invoke('chat:getAgent', conversationId),
-    getAllAgents: () => ipcRenderer.invoke('chat:getAllAgents'),
-    getAgentSystemPrompt: (conversationId: string) => ipcRenderer.invoke('chat:getAgentSystemPrompt', conversationId),
-    getAgentModel: (conversationId: string) => ipcRenderer.invoke('chat:getAgentModel', conversationId),
   },
   workspace: {
     select: () => ipcRenderer.invoke('workspace:select'),
@@ -112,6 +107,37 @@ const electronAPI = {
   file: {
     selectImage: () => ipcRenderer.invoke('file:select-image') as Promise<{ canceled: boolean; data?: string }>,
     saveFile: (content: string, filename: string) => ipcRenderer.invoke('file:save', content, filename),
+  },
+  // Attachment API
+  attachment: {
+    selectFiles: (options: { multiple?: boolean; messageId?: string }) =>
+      ipcRenderer.invoke('attachment:selectFiles', options) as Promise<{
+        canceled: boolean;
+        attachments?: any[];
+        error?: string;
+      }>,
+    listByMessage: (messageId: string) =>
+      ipcRenderer.invoke('attachment:listByMessage', messageId) as Promise<{
+        success: boolean;
+        attachments?: any[];
+        error?: string;
+      }>,
+    delete: (attachmentId: string) =>
+      ipcRenderer.invoke('attachment:delete', attachmentId) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    getContent: (attachmentId: string) =>
+      ipcRenderer.invoke('attachment:getContent', attachmentId) as Promise<{
+        success: boolean;
+        attachment?: any;
+        error?: string;
+      }>,
+    updateMessageId: (attachmentId: string, messageId: string) =>
+      ipcRenderer.invoke('attachment:updateMessageId', attachmentId, messageId) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
   },
   pyodide: {
     listFiles: (workspacePath: string) => ipcRenderer.invoke('pyodide:list-files', workspacePath) as Promise<{
@@ -210,6 +236,10 @@ const electronAPI = {
       type?: string;
       error?: string;
     }>,
+    saveText: (filepath: string, content: string) => ipcRenderer.invoke('file:saveText', filepath, content) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
   },
   // Word 文档 API
   word: {
@@ -223,6 +253,171 @@ const electronAPI = {
         success: boolean;
         error?: string;
       }>,
+  },
+  // Skills API
+  skills: {
+    listSimple: () => ipcRenderer.invoke('skills:listSimple') as Promise<{
+      success: boolean;
+      skills?: any[];
+      error?: string;
+    }>,
+    loadSimple: (name: string) => ipcRenderer.invoke('skills:loadSimple', name) as Promise<{
+      success: boolean;
+      skill?: any;
+      error?: string;
+    }>,
+    buildSummary: (activeSkills?: string[]) => ipcRenderer.invoke('skills:buildSummary', activeSkills) as Promise<{
+      success: boolean;
+      summary?: string;
+      error?: string;
+    }>,
+    reloadWorkspace: () => ipcRenderer.invoke('skills:reloadWorkspace') as Promise<{
+      success: boolean;
+      count?: number;
+      error?: string;
+    }>,
+    // Export/Import
+    export: (skillName: string) => ipcRenderer.invoke('skills:export', skillName) as Promise<{
+      success: boolean;
+      zipData?: Uint8Array;
+      suggestedFileName?: string;
+      error?: string;
+    }>,
+    import: (filePath: string) => ipcRenderer.invoke('skills:import', filePath) as Promise<{
+      success: boolean;
+      skill?: any;
+      error?: string;
+    }>,
+    importFromBuffer: (buffer: Uint8Array) => ipcRenderer.invoke('skills:importFromBuffer', buffer) as Promise<{
+      success: boolean;
+      skill?: any;
+      error?: string;
+    }>,
+    importFromContent: (content: string) => ipcRenderer.invoke('skills:importFromContent', content) as Promise<{
+      success: boolean;
+      skill?: any;
+      error?: string;
+    }>,
+    delete: (skillName: string) => ipcRenderer.invoke('skills:delete', skillName) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    setVisibility: (skillName: string, visibility: 'public' | 'organization' | 'private') =>
+      ipcRenderer.invoke('skills:setVisibility', skillName, visibility) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    getShareable: () => ipcRenderer.invoke('skills:getShareable') as Promise<{
+      success: boolean;
+      skills?: any[];
+      error?: string;
+    }>,
+  },
+  // File Editor API
+  fileEditor: {
+    readFile: (filepath: string) => ipcRenderer.invoke('fileEditor:readFile', filepath) as Promise<{
+      success: boolean;
+      content?: string;
+      error?: string;
+    }>,
+    saveFile: (filepath: string, content: string) => ipcRenderer.invoke('fileEditor:saveFile', filepath, content) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    createFile: (filepath: string, content?: string) => ipcRenderer.invoke('fileEditor:createFile', filepath, content) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    createDirectory: (dirpath: string) => ipcRenderer.invoke('fileEditor:createDirectory', dirpath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    deleteFile: (filepath: string) => ipcRenderer.invoke('fileEditor:deleteFile', filepath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    renameFile: (oldPath: string, newPath: string) => ipcRenderer.invoke('fileEditor:renameFile', oldPath, newPath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    copyFile: (sourcePath: string, targetPath: string) => ipcRenderer.invoke('fileEditor:copyFile', sourcePath, targetPath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    moveFile: (sourcePath: string, targetPath: string) => ipcRenderer.invoke('fileEditor:moveFile', sourcePath, targetPath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    listDirectory: (dirpath: string) => ipcRenderer.invoke('fileEditor:listDirectory', dirpath) as Promise<{
+      success: boolean;
+      entries?: Array<{
+        name: string;
+        path: string;
+        type: 'file' | 'directory';
+        size?: number;
+        modified?: number;
+      }>;
+      error?: string;
+    }>,
+    watchFiles: (dirpath: string) => ipcRenderer.invoke('fileEditor:watchFiles', dirpath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    unwatchFiles: () => ipcRenderer.invoke('fileEditor:unwatchFiles') as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    onFileChanged: (callback: (data: { event: string; path: string }) => void) => {
+      const listener = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('fileEditor:fileChanged', listener);
+      return () => ipcRenderer.removeListener('fileEditor:fileChanged', listener);
+    },
+    openWithSystem: (filepath: string) => ipcRenderer.invoke('fileEditor:openWithSystem', filepath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  },
+  // P2P API
+  p2p: {
+    startDiscovery: () => ipcRenderer.invoke('p2p:startDiscovery') as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    stopDiscovery: () => ipcRenderer.invoke('p2p:stopDiscovery') as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    getPeers: () => ipcRenderer.invoke('p2p:getPeers') as Promise<{
+      success: boolean;
+      peers?: Array<{
+        id: string;
+        name: string;
+        avatar?: string;
+        ip: string;
+        port: number;
+        lastSeen: number;
+        skillsCount: number;
+      }>;
+      error?: string;
+    }>,
+    getPeerSkills: (peerIp: string) => ipcRenderer.invoke('p2p:getPeerSkills', peerIp) as Promise<{
+      success: boolean;
+      skills?: any[];
+      error?: string;
+    }>,
+    downloadSkill: (peerIp: string, skillName: string) => ipcRenderer.invoke('p2p:downloadSkill', peerIp, skillName) as Promise<{
+      success: boolean;
+      skill?: any;
+      error?: string;
+    }>,
+    setDeviceName: (name: string) => ipcRenderer.invoke('p2p:setDeviceName', name) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    setDeviceAvatar: (avatar: string) => ipcRenderer.invoke('p2p:setDeviceAvatar', avatar) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
   },
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   onChatChunk: (callback: (chunk: string) => void) => {

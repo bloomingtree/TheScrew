@@ -17,6 +17,10 @@
  * description: 技能描述
  * emoji: 🎯
  * keywords: keyword1,keyword2
+ * visibility: public
+ * author: 作者名
+ * version: 1.0.0
+ * tags: [标签1, 标签2]
  * ---
  *
  * # 技能内容
@@ -24,10 +28,12 @@
  * 这里是使用指南...
  */
 
-import { readdir, readFile, stat } from 'fs/promises';
-import { join, relative, resolve } from 'path';
-import { existsSync } from 'fs';
+import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
+import { join, relative, resolve, basename } from 'path';
+import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
 import { app } from 'electron';
+import { createHash } from 'crypto';
+import AdmZip from 'adm-zip';
 
 /**
  * 获取应用根路径
@@ -42,6 +48,11 @@ function getAppRootPath(): string {
 }
 
 /**
+ * 技能可见性
+ */
+export type SkillVisibility = 'public' | 'organization' | 'private';
+
+/**
  * 技能元数据
  */
 export interface SkillMeta {
@@ -52,6 +63,33 @@ export interface SkillMeta {
   category?: string;
   path: string;
   mode?: 'always' | 'on-demand';  // nanobot: always 表示始终完整加载
+
+  // 分享相关字段
+  visibility?: SkillVisibility;   // 可见性：公开/组织内/私密
+  author?: string;                // 作者
+  version?: string;               // 版本号
+  tags?: string[];                // 标签（便于搜索）
+  createdAt?: number;             // 创建时间
+  updatedAt?: number;             // 更新时间
+}
+
+/**
+ * 技能包格式（用于导出/导入）
+ */
+export interface SkillPackage {
+  format: 'zero-employee-skill';
+  version: '1.0';
+  skill: {
+    meta: Omit<SkillMeta, 'path'>;  // 不包含 path，导入时重新生成
+    content: string;                // SKILL.md 内容（移除 frontmatter）
+  };
+  dependencies?: {
+    scripts?: Array<{               // 依赖的脚本文件
+      name: string;
+      content: string;              // base64 编码
+    }>;
+  };
+  checksum?: string;                // SHA256 校验和
 }
 
 /**
@@ -138,6 +176,10 @@ export class SimpleSkillManager {
     let emoji = '';
     let keywords: string[] = [];
     let mode: 'always' | 'on-demand' = 'on-demand';  // 默认 on-demand
+    let visibility: SkillVisibility = 'organization';  // 默认组织内可见
+    let author: string | undefined;
+    let version: string | undefined;
+    let tags: string[] | undefined;
 
     if (frontmatterMatch) {
       try {
@@ -147,12 +189,24 @@ export class SimpleSkillManager {
         name = parsed.name || name;
         description = parsed.description || description;
         emoji = parsed.emoji || parsed.metadata?.emoji || '';
-        keywords = parsed.keywords || parsed.metadata?.keywords || [];
-
-        // 解析 mode 字段
-        const parsedMode = parsed.mode || parsed.metadata?.mode;
-        if (parsedMode === 'always') {
+        keywords = parsed.keywords ? parsed.keywords.split(',').map((k: string) => k.trim()) :
+                   (parsed.metadata?.keywords || []);
+        if (parsed.mode === 'always') {
           mode = 'always';
+        }
+
+        // 解析新增字段
+        if (parsed.visibility && ['public', 'organization', 'private'].includes(parsed.visibility)) {
+          visibility = parsed.visibility as SkillVisibility;
+        }
+        author = parsed.author;
+        version = parsed.version;
+        if (parsed.tags) {
+          if (Array.isArray(parsed.tags)) {
+            tags = parsed.tags;
+          } else if (typeof parsed.tags === 'string') {
+            tags = parsed.tags.split(',').map((t: string) => t.trim());
+          }
         }
       } catch (error) {
         console.warn(`[SimpleSkillManager] Failed to parse YAML in: ${path}`, error);
@@ -167,6 +221,10 @@ export class SimpleSkillManager {
       category,
       path,
       mode,
+      visibility,
+      author,
+      version,
+      tags,
     };
   }
 
@@ -364,6 +422,330 @@ ${sections.join('\n\n')}`;
     } catch (error: any) {
       return { success: false, count: 0 };
     }
+  }
+
+  /**
+   * 格式化 YAML frontmatter
+   */
+  private formatFrontmatter(meta: SkillMeta): string {
+    const lines = ['---'];
+
+    lines.push(`name: ${meta.name}`);
+    if (meta.description) lines.push(`description: ${meta.description}`);
+    if (meta.emoji) lines.push(`emoji: ${meta.emoji}`);
+    if (meta.keywords && meta.keywords.length > 0) {
+      lines.push(`keywords: ${meta.keywords.join(',')}`);
+    }
+    if (meta.category) lines.push(`category: ${meta.category}`);
+    if (meta.mode) lines.push(`mode: ${meta.mode}`);
+    if (meta.visibility) lines.push(`visibility: ${meta.visibility}`);
+    if (meta.author) lines.push(`author: ${meta.author}`);
+    if (meta.version) lines.push(`version: ${meta.version}`);
+    if (meta.tags && meta.tags.length > 0) {
+      lines.push(`tags: [${meta.tags.map(t => `"${t}"`).join(', ')}]`);
+    }
+
+    lines.push('---');
+    return lines.join('\n');
+  }
+
+  /**
+   * 导出技能为 zip 包
+   * zip 结构：
+   * skill-name/
+   *   SKILL.md
+   *   scripts/
+   *     ...
+   */
+  async exportSkillToZip(skillName: string): Promise<Buffer> {
+    const skills = await this.listSkills();
+    const skill = skills.find(s => s.name === skillName || s.category === skillName);
+    if (!skill) {
+      throw new Error(`Skill not found: ${skillName}`);
+    }
+
+    const skillDir = join(this.workspaceSkillsDir, skill.category || skillName);
+    if (!existsSync(skillDir)) {
+      throw new Error(`Skill directory not found: ${skillDir}`);
+    }
+
+    const zip = new AdmZip();
+
+    // 递归添加目录中的所有文件
+    const addDirectoryToZip = (dirPath: string, zipPath: string) => {
+      const entries = readdirSync(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = join(dirPath, entry.name);
+        const entryZipPath = join(zipPath, entry.name);
+
+        if (entry.isDirectory()) {
+          addDirectoryToZip(fullPath, entryZipPath);
+        } else if (entry.isFile()) {
+          const content = readFileSync(fullPath);
+          zip.addFile(entryZipPath, content);
+        }
+      }
+    };
+
+    // 添加技能目录到 zip（根目录为技能名）
+    addDirectoryToZip(skillDir, skill.category || skillName);
+
+    console.log(`[SimpleSkillManager] Exported skill to zip: ${skillName}`);
+    return zip.toBuffer();
+  }
+
+  /**
+   * 导出技能为包（旧 JSON 格式，保留兼容）
+   */
+  async exportSkill(skillName: string): Promise<SkillPackage> {
+    const skill = await this.loadSkill(skillName);
+    if (!skill) {
+      throw new Error(`Skill not found: ${skillName}`);
+    }
+
+    // 移除 path 字段，不需要在导出包中包含
+    const { path, ...metaWithoutPath } = skill;
+
+    const packageData: SkillPackage = {
+      format: 'zero-employee-skill',
+      version: '1.0',
+      skill: {
+        meta: metaWithoutPath,
+        content: skill.content,
+      },
+    };
+
+    // 计算校验和
+    const content = JSON.stringify(packageData);
+    packageData.checksum = createHash('sha256').update(content).digest('hex');
+
+    console.log(`[SimpleSkillManager] Exported skill: ${skillName}`);
+    return packageData;
+  }
+
+  /**
+   * 从 zip 文件导入技能
+   * 支持的 zip 结构：
+   * skill-name/
+   *   SKILL.md
+   *   scripts/
+   *     ...
+   */
+  async importSkillFromZip(buffer: Buffer): Promise<SkillMeta> {
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    if (zipEntries.length === 0) {
+      throw new Error('Empty zip file');
+    }
+
+    // 查找 SKILL.md 文件，确定技能名
+    const skillMdEntry = zipEntries.find(e =>
+      !e.isDirectory && e.entryName.endsWith('SKILL.md')
+    );
+
+    if (!skillMdEntry) {
+      throw new Error('Invalid skill zip: SKILL.md not found');
+    }
+
+    // 提取技能名（zip 根目录名）
+    const pathParts = skillMdEntry.entryName.split('/');
+    const skillName = pathParts[0];
+
+    if (!skillName) {
+      throw new Error('Invalid skill zip: cannot determine skill name');
+    }
+
+    // 创建技能目录
+    const skillDir = join(this.workspaceSkillsDir, skillName);
+    await mkdir(skillDir, { recursive: true });
+
+    // 解压所有文件到技能目录
+    for (const entry of zipEntries) {
+      if (entry.isDirectory) continue;
+
+      // 去掉根目录前缀（skill-name/）
+      const relativePath = entry.entryName.substring(skillName.length + 1);
+      if (!relativePath) continue;
+
+      const targetPath = join(skillDir, relativePath);
+      const targetDir = join(targetPath, '..');
+
+      // 确保目标目录存在
+      if (!existsSync(targetDir)) {
+        await mkdir(targetDir, { recursive: true });
+      }
+
+      // 写入文件
+      const content = entry.getData();
+      await writeFile(targetPath, content);
+    }
+
+    console.log(`[SimpleSkillManager] Imported skill from zip: ${skillName}`);
+
+    // 解析并返回技能元数据
+    const skillMdPath = join(skillDir, 'SKILL.md');
+    return this.parseSkillMd(skillMdPath, skillName);
+  }
+
+  /**
+   * 从文件导入技能（支持 .zip 和旧 .zes/.json 格式）
+   */
+  async importSkill(filePath: string): Promise<SkillMeta> {
+    // 检测文件类型
+    if (filePath.endsWith('.zip')) {
+      const buffer = await readFile(filePath);
+      return this.importSkillFromZip(buffer);
+    }
+
+    // 旧格式：JSON
+    const content = await readFile(filePath, 'utf-8');
+    return this.importSkillFromContent(content);
+  }
+
+  /**
+   * 从 Buffer 导入技能（自动检测 zip 或 JSON 格式）
+   */
+  async importSkillFromBuffer(buffer: Buffer): Promise<SkillMeta> {
+    // 尝试检测是否为 zip 文件（zip 文件以 PK 签名开头）
+    const isZip = buffer.length >= 4 &&
+      buffer[0] === 0x50 && buffer[1] === 0x4B; // 'PK'
+
+    if (isZip) {
+      return this.importSkillFromZip(buffer);
+    }
+
+    // 尝试作为 JSON 解析
+    const content = buffer.toString('utf-8');
+    return this.importSkillFromContent(content);
+  }
+
+  /**
+   * 从内容导入技能（旧 JSON 格式，保留兼容）
+   */
+  async importSkillFromContent(content: string): Promise<SkillMeta> {
+    let packageData: SkillPackage;
+
+    try {
+      packageData = JSON.parse(content);
+    } catch (error) {
+      throw new Error('Invalid skill file format');
+    }
+
+    // 验证格式
+    if (packageData.format !== 'zero-employee-skill') {
+      throw new Error('Invalid skill format');
+    }
+
+    // 验证校验和
+    if (packageData.checksum) {
+      const contentWithoutChecksum = JSON.stringify({
+        ...packageData,
+        checksum: undefined,
+      });
+      const computedChecksum = createHash('sha256').update(contentWithoutChecksum).digest('hex');
+      if (computedChecksum !== packageData.checksum) {
+        throw new Error('Skill checksum validation failed');
+      }
+    }
+
+    // 保存技能到 .zero-employee/skills/
+    const skillDir = join(this.workspaceSkillsDir, packageData.skill.meta.name);
+    await mkdir(skillDir, { recursive: true });
+
+    const skillMdPath = join(skillDir, 'SKILL.md');
+    const frontmatter = this.formatFrontmatter({
+      ...packageData.skill.meta,
+      path: skillMdPath,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    } as SkillMeta);
+    const skillContent = `${frontmatter}\n\n${packageData.skill.content}`;
+
+    await writeFile(skillMdPath, skillContent, 'utf-8');
+
+    console.log(`[SimpleSkillManager] Imported skill: ${packageData.skill.meta.name}`);
+
+    // 返回导入后的技能元数据
+    return {
+      ...packageData.skill.meta,
+      path: skillMdPath,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  /**
+   * 删除技能
+   */
+  async deleteSkill(skillName: string): Promise<boolean> {
+    const skills = await this.listSkills();
+    const skill = skills.find(s => s.name === skillName);
+
+    if (!skill) {
+      return false;
+    }
+
+    try {
+      // 删除整个技能目录
+      const skillDir = join(this.workspaceSkillsDir, skillName);
+      const { rm } = await import('fs/promises');
+      await rm(skillDir, { recursive: true, force: true });
+
+      console.log(`[SimpleSkillManager] Deleted skill: ${skillName}`);
+      return true;
+    } catch (error) {
+      console.error(`[SimpleSkillManager] Failed to delete skill: ${skillName}`, error);
+      return false;
+    }
+  }
+
+  /**
+   * 设置技能可见性
+   */
+  async setSkillVisibility(skillName: string, visibility: SkillVisibility): Promise<boolean> {
+    const skills = await this.listSkills();
+    const skill = skills.find(s => s.name === skillName);
+
+    if (!skill) {
+      return false;
+    }
+
+    try {
+      // 读取现有内容
+      const content = await readFile(skill.path, 'utf-8');
+
+      // 替换 visibility 字段
+      let newContent = content;
+      const visibilityRegex = /^visibility:\s*\w+$/m;
+      if (visibilityRegex.test(content)) {
+        newContent = content.replace(visibilityRegex, `visibility: ${visibility}`);
+      } else {
+        // 在 mode 后面插入
+        const modeRegex = /^(mode:\s*\w+)$/m;
+        if (modeRegex.test(content)) {
+          newContent = content.replace(modeRegex, `$1\nvisibility: ${visibility}`);
+        } else {
+          // 在 --- 后插入
+          newContent = content.replace(/^---\n/, `---\nvisibility: ${visibility}\n`);
+        }
+      }
+
+      await writeFile(skill.path, newContent, 'utf-8');
+      console.log(`[SimpleSkillManager] Set skill visibility: ${skillName} -> ${visibility}`);
+      return true;
+    } catch (error) {
+      console.error(`[SimpleSkillManager] Failed to set skill visibility: ${skillName}`, error);
+      return false;
+    }
+  }
+
+  /**
+   * 获取可分享的技能列表（根据可见性过滤）
+   */
+  async getShareableSkills(): Promise<SkillMeta[]> {
+    const allSkills = await this.listSkills();
+    return allSkills.filter(s => s.visibility !== 'private');
   }
 }
 

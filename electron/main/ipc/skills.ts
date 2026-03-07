@@ -308,5 +308,121 @@ export function registerSkillsHandlers(): void {
     }
   });
 
+  // ========== Export/Import (SimpleSkillManager) ==========
+
+  // Export skill to zip
+  ipcMain.handle('skills:export', async (_event, skillName: string) => {
+    try {
+      const zipBuffer = await simpleSkillManager.exportSkillToZip(skillName);
+      // 将 Buffer 转换为 Uint8Array 以便通过 IPC 传输
+      return {
+        success: true,
+        zipData: zipBuffer,  // Electron 会自动处理 Buffer 传输
+        suggestedFileName: `${skillName}.zip`,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Import skill from file (supports .zip and legacy .zes/.json)
+  ipcMain.handle('skills:import', async (_event, filePath: string) => {
+    try {
+      const meta = await simpleSkillManager.importSkill(filePath);
+      return {
+        success: true,
+        skill: meta,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Import skill from buffer (supports zip or JSON format)
+  ipcMain.handle('skills:importFromBuffer', async (_event, buffer: Buffer) => {
+    try {
+      const meta = await simpleSkillManager.importSkillFromBuffer(buffer);
+      return {
+        success: true,
+        skill: meta,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Import skill from content (string - legacy JSON format)
+  ipcMain.handle('skills:importFromContent', async (_event, content: string) => {
+    try {
+      const meta = await simpleSkillManager.importSkillFromContent(content);
+      return {
+        success: true,
+        skill: meta,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Delete skill
+  ipcMain.handle('skills:delete', async (_event, skillName: string) => {
+    try {
+      const deleted = await simpleSkillManager.deleteSkill(skillName);
+      return {
+        success: deleted,
+        error: deleted ? undefined : `Failed to delete skill: ${skillName}`,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Set skill visibility
+  ipcMain.handle('skills:setVisibility', async (_event, skillName: string, visibility: 'public' | 'organization' | 'private') => {
+    try {
+      const updated = await simpleSkillManager.setSkillVisibility(skillName, visibility);
+      return {
+        success: updated,
+        error: updated ? undefined : `Failed to set visibility for skill: ${skillName}`,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  // Get shareable skills (for P2P sharing)
+  ipcMain.handle('skills:getShareable', async () => {
+    try {
+      const skills = await simpleSkillManager.getShareableSkills();
+      return {
+        success: true,
+        skills,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
   console.log('[IPC] Skills handlers registered');
 }

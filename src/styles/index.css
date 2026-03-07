@@ -428,3 +428,21 @@ code {
   transform: translateY(-2px);
   box-shadow: var(--terminal-shadow-lg);
 }
+
+/* ====================================
+   Twemoji 样式（Windows 7 兼容）
+   ==================================== */
+.twemoji {
+  display: inline-block;
+  vertical-align: text-bottom;
+  width: 1.2em;
+  height: 1.2em;
+  margin: 0 0.05em;
+}
+
+/* 消息中的 emoji 大小 */
+.prose .twemoji,
+.markdown-content .twemoji {
+  width: 1.1em;
+  height: 1.1em;
+}

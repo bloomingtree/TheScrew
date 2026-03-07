@@ -1,14 +1,14 @@
 import { create } from 'zustand';
-import { MessageSquare, File, Settings, BarChart3, Zap, History, Folder } from 'lucide-react';
+import { MessageSquare, File, Settings, BarChart3, Zap, History, Folder, Edit, type LucideIcon } from 'lucide-react';
 
-export type TabType = 'chat' | 'file' | 'preview' | 'files' | 'history' | 'reports' | 'workflows' | 'analytics';
+export type TabType = 'chat' | 'file' | 'preview' | 'files' | 'history' | 'editor' | 'skills';
 
 export interface Tab {
   id: string;
   type: TabType;
   title: string;
   content?: any; // 标签特定内容（文件路径、对话ID等）
-  icon?: React.ComponentType<{ size?: number; className?: string }>;
+  icon?: LucideIcon | React.ComponentType<{ size?: number; className?: string }>;
   isActive: boolean;
   isModified?: boolean; // 显示未保存标记
   canClose?: boolean; // 聊天标签默认不可关闭
@@ -51,12 +51,11 @@ const getTabIcon = (type: TabType) => {
   switch (type) {
     case 'chat': return MessageSquare;
     case 'file':
-    case 'preview': return File;
+    case 'preview':
+    case 'editor': return Edit;
     case 'files': return Folder;
     case 'history': return History;
-    case 'reports': return BarChart3;
-    case 'workflows': return Zap;
-    case 'analytics': return BarChart3;
+    case 'skills': return Settings;
     default: return File;
   }
 };

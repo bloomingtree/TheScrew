@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Paperclip, X, StopCircle } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { useConfigStore } from '../../store/configStore';
 import { useConversationStore } from '../../store/conversationStore';
 import TokenIndicator from './TokenIndicator';
+import AttachmentList from './AttachmentList';
+import type { Attachment } from '../../types';
 
 const InputArea: React.FC = () => {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, setTokenUsage } = useChatStore();
@@ -24,7 +27,7 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
   }, [input]);
 
   const handleSend = async () => {
-    if (!input.trim() && images.length === 0) return;
+    if (!input.trim() && images.length === 0 && attachments.length === 0) return;
     if (isStreaming) return;
     if (!apiKey) {
       alert('请先配置 API Key');
@@ -33,16 +36,30 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
 
     const userInput = input.trim();
     const userImages = images.length > 0 ? images : undefined;
+    const userAttachments = attachments.length > 0 ? attachments : undefined;
+
+    // 生成消息 ID
+    const messageId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     const userMessage = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: messageId,
       role: 'user',
       content: userInput,
       timestamp: Date.now(),
+      images: userImages,
+      attachments: userAttachments,
     };
+
+    // 更新附件的 messageId
+    if (userAttachments) {
+      for (const attachment of userAttachments) {
+        await window.electronAPI.attachment.updateMessageId(attachment.id, messageId);
+      }
+    }
 
     setInput('');
     setImages([]);
+    setAttachments([]);
 
     // 添加用户消息
     addMessage(userMessage);
@@ -176,6 +193,56 @@ const result = await window.electronAPI.file.selectImage();
     }
   };
 
+  /**
+   * 统一附件上传
+   * 支持图片、Office 文档、文本文件等多种类型
+   */
+  const handleAttachmentUpload = async () => {
+    try {
+      const messageId = `temp-${Date.now()}`;
+      const result = await window.electronAPI.attachment.selectFiles({
+        multiple: true,
+        messageId,
+      });
+
+      if (!result.canceled && result.attachments) {
+        // 分离图片附件和其他附件
+        const newImages: string[] = [];
+        const newAttachments: Attachment[] = [];
+
+        for (const attachment of result.attachments) {
+          if (attachment.fileType === 'image' && attachment.extractedContent?.preview) {
+            // 图片添加到 images 状态（保持向后兼容）
+            newImages.push(attachment.extractedContent.preview);
+          } else {
+            // 其他附件添加到 attachments
+            newAttachments.push(attachment);
+          }
+        }
+
+        setImages((prev) => [...prev, ...newImages]);
+        setAttachments((prev) => [...prev, ...newAttachments]);
+      }
+    } catch (error) {
+      console.error('文件上传失败:', error);
+    }
+  };
+
+  /**
+   * 移除附件
+   */
+  const handleRemoveAttachment = async (id: string) => {
+    // 从附件列表中移除
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+
+    // 从存储中删除（可选，如果需要彻底删除）
+    try {
+      await window.electronAPI.attachment.delete(id);
+    } catch (error) {
+      console.error('删除附件失败:', error);
+    }
+  };
+
   const handleRemoveImage = (index: number) => {
     setImages(prev => prev.filter((_, i) => i !== index));
   };
@@ -189,30 +256,53 @@ const result = await window.electronAPI.file.selectImage();
 
 return (
     <div className="glass border-t border-gray-200/50 p-2 flex-shrink-0">
-      {images.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-3">
-          {images.map((image, index) => (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="relative inline-block"
-            >
-              <img
-                src={image}
-                alt="上传的图片"
-                className="w-20 h-20 object-cover rounded-xl border border-gray-200/50 bg-white/50"
-              />
-              <button
-                onClick={() => handleRemoveImage(index)}
-                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500/90 backdrop-blur text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg"
+      <AnimatePresence>
+        {/* 图片预览（保留向后兼容） */}
+        {images.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-3 flex flex-wrap gap-3"
+          >
+            {images.map((image, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className="relative inline-block"
               >
-                <X size={12} />
-              </button>
-            </motion.div>
-          ))}
-        </div>
-      )}
+                <img
+                  src={image}
+                  alt="上传的图片"
+                  className="w-20 h-20 object-cover rounded-xl border border-gray-200/50 bg-white/50"
+                />
+                <button
+                  onClick={() => handleRemoveImage(index)}
+                  className="absolute -top-2 -right-2 w-6 h-6 bg-red-500/90 backdrop-blur text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg"
+                >
+                  <X size={12} />
+                </button>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+
+        {/* 附件列表 */}
+        {attachments.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <AttachmentList
+              attachments={attachments}
+              onRemove={handleRemoveAttachment}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="relative">
         <div className="flex flex-col gap-2 px-3 py-2 rounded-xl bg-white/60 border border-gray-200/50 shadow-sm focus-within:ring-2 focus-within:ring-primary-blue/30 focus-within:border-primary-blue transition-all">
@@ -229,9 +319,9 @@ return (
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2">
               <button
-                onClick={handleImageUpload}
+                onClick={handleAttachmentUpload}
                 className="p-1.5 rounded-lg transition-all hover:bg-gray-200/50 text-cream-500 hover:text-cream-700"
-                title="上传图片"
+                title="上传附件（图片、文档等）"
               >
                 <Paperclip size={16} />
               </button>
@@ -249,7 +339,7 @@ return (
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!input.trim() && images.length === 0}
+                disabled={!input.trim() && images.length === 0 && attachments.length === 0}
                 className="p-1.5 text-white rounded-lg shadow-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none hover:shadow-md transition-all bg-primary-blue"
                 title="发送"
               >

@@ -8,9 +8,129 @@ import { bashTools } from '../tools/BashTools';
 import { getWorkspacePath } from '../tools/FileTools';
 import { getContextBuilder } from '../core/ContextBuilder';
 import { countContextTokens } from '../utils/tokenCounter';
+import type { Attachment, Message } from '../../../src/types';
 
 let currentClient: OpenAIClient | null = null;
 let currentAbortController: AbortController | null = null;
+
+/**
+ * 处理消息中的附件，将附件内容注入到消息中供 LLM 理解
+ * @param messages 原始消息数组
+ * @param maxAttachmentTokens 附件内容最大 token 数限制
+ * @returns 处理后的消息数组（符合 OpenAI 多模态格式）
+ */
+function processAttachmentsInMessages(messages: any[], maxAttachmentTokens: number = 8000): any[] {
+  // 估算文本 token 数（简单估算：1 token ≈ 4 字符）
+  const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+  // 用于存储所有附件信息的总 token 数
+  let totalAttachmentTokens = 0;
+  const processedMessages: any[] = [];
+
+  for (const msg of messages) {
+    // 只处理用户消息
+    if (msg.role !== 'user') {
+      processedMessages.push(msg);
+      continue;
+    }
+
+    // 检查是否有附件
+    const hasImages = msg.images && Array.isArray(msg.images) && msg.images.length > 0;
+    const hasAttachments = msg.attachments && Array.isArray(msg.attachments) && msg.attachments.length > 0;
+
+    if (!hasImages && !hasAttachments) {
+      processedMessages.push(msg);
+      continue;
+    }
+
+    const contentParts: any[] = [];
+    const originalContent = typeof msg.content === 'string' ? msg.content : '';
+
+    // 添加原始文本内容
+    if (originalContent) {
+      contentParts.push({
+        type: 'text',
+        text: originalContent,
+      });
+    }
+
+    // 处理图片附件（多模态格式）
+    if (hasImages) {
+      for (const imageData of msg.images) {
+        // 支持 base64 data URL 格式
+        if (typeof imageData === 'string' && imageData.startsWith('data:')) {
+          contentParts.push({
+            type: 'image_url',
+            image_url: {
+              url: imageData,
+            },
+          });
+        }
+      }
+    }
+
+    // 处理其他附件（文档、数据等）
+    if (hasAttachments) {
+      const attachmentInfos: string[] = [];
+
+      for (const attachment of msg.attachments as Attachment[]) {
+        // 构建附件基础信息
+        let attachmentInfo = `\n\n---\n**附件：${attachment.fileName}**\n`;
+        attachmentInfo += `- 类型：${attachment.fileType}\n`;
+        attachmentInfo += `- 大小：${(attachment.fileSize / 1024).toFixed(1)} KB\n`;
+
+        // 如果有提取的文本内容，添加到消息中
+        if (attachment.extractedContent?.text) {
+          const text = attachment.extractedContent.text;
+          const textTokens = estimateTokens(text);
+
+          // 检查是否会超出限制
+          if (totalAttachmentTokens + textTokens > maxAttachmentTokens) {
+            // 超出限制，只添加摘要/预览
+            console.warn(`[Attachment] 附件 ${attachment.fileName} 内容过长 (${textTokens} tokens)，只保留预览`);
+            attachmentInfo += `\n**文件预览（内容过大，已截断）：**\n\`\`\`\n${text.slice(0, 2000)}\n...\n[完整内容共 ${text.length} 字符，约 ${textTokens} tokens]\n\`\`\`\n`;
+          } else {
+            // 未超出限制，添加完整内容
+            attachmentInfo += `\n**文件内容：**\n\`\`\`\n${text}\n\`\`\`\n`;
+            totalAttachmentTokens += textTokens;
+          }
+        } else if (attachment.extractedContent?.preview) {
+          attachmentInfo += `\n**文件预览：**\n\`\`\`\n${attachment.extractedContent.preview}\n\`\`\`\n`;
+        }
+
+        attachmentInfos.push(attachmentInfo);
+      }
+
+      // 将附件信息追加到文本内容
+      if (attachmentInfos.length > 0) {
+        // 找到文本部分并追加附件信息
+        const textPart = contentParts.find((p) => p.type === 'text');
+        const attachmentText = '\n\n---\n**用户上传了以下附件：**' + attachmentInfos.join('');
+
+        if (textPart) {
+          textPart.text += attachmentText;
+        } else {
+          contentParts.unshift({
+            type: 'text',
+            text: attachmentText,
+          });
+        }
+      }
+    }
+
+    // 返回多模态格式（始终使用数组格式，保持一致性）
+    if (contentParts.length > 0) {
+      processedMessages.push({
+        ...msg,
+        content: contentParts,
+      });
+    } else {
+      processedMessages.push(msg);
+    }
+  }
+
+  return processedMessages;
+}
 
   function safeStringify(obj: any, indent: number | string = 2): string {
     const cache = new Set();
@@ -35,17 +155,15 @@ let currentAbortController: AbortController | null = null;
    * 构建中文系统提示词
    * 使用 ContextBuilder 生成完整的 nanobot 风格提示词
    *
-   * 包含：核心身份 + 时间 + Bootstrap 文件 + 内存 + 技能 + Agent + 工具定义
+   * 包含：核心身份 + 时间 + Bootstrap 文件 + 内存 + 技能 + 工具定义
    */
   async function buildNanobotStyleSystemPrompt(conversationId?: string): Promise<string> {
     try {
       const contextBuilder = getContextBuilder();
       const workspacePath = getWorkspacePath();
-      const agentName = conversationId ? toolManager.getAgent(conversationId) : undefined;
 
       // nanobot 风格：不需要 activeSkills 参数，skills 会自动加载
       const systemPrompt = await contextBuilder.buildSystemPrompt({
-        agentName,
         workspacePath: workspacePath || undefined,
         includeMemory: true,
       });
@@ -159,7 +277,10 @@ export function registerChatHandlers(store: Store) {
       const printCount = Math.min(3, messages.length);
       for (let i = Math.max(0, messages.length - printCount); i < messages.length; i++) {
         const m = messages[i];
-        console.log(`  [${i}] ${m.role}: ${m.content?.substring(0, 40)}${m.content?.length > 40 ? '...' : ''} ${m.tool_calls ? '(tool_calls)' : ''}`);
+        const contentPreview = typeof m.content === 'string'
+          ? m.content?.substring(0, 40) + (m.content?.length > 40 ? '...' : '')
+          : `[多模态内容: ${(m.content as any[])?.length || 0} 部分]`;
+        console.log(`  [${i}] ${m.role}: ${contentPreview} ${m.tool_calls ? '(tool_calls)' : ''}`);
       }
 
       // 重置对话的工具组状态（每次新对话都从基础工具开始）
@@ -178,6 +299,9 @@ export function registerChatHandlers(store: Store) {
 
       messages = [systemMessage, ...messages];
       console.log('[chat:stream] After adding system message, total:', messages.length);
+
+      // 处理消息中的附件，将附件内容注入到消息中
+      messages = processAttachmentsInMessages(messages);
 
       // 获取当前激活的工具定义
       let tools = conversationId
@@ -417,7 +541,10 @@ export function registerChatHandlers(store: Store) {
       const lastFew = Math.min(3, apiMessages.length);
       for (let i = Math.max(0, apiMessages.length - lastFew); i < apiMessages.length; i++) {
         const m = apiMessages[i];
-        console.log(`  [${i}] ${m.role}: ${m.content?.substring(0, 40)}${m.content?.length > 40 ? '...' : ''} ${m.tool_calls ? '(tool_calls)' : ''}`);
+        const contentPreview = typeof m.content === 'string'
+          ? m.content?.substring(0, 40) + (m.content?.length > 40 ? '...' : '')
+          : `[多模态内容: ${(m.content as any[])?.length || 0} 部分]`;
+        console.log(`  [${i}] ${m.role}: ${contentPreview} ${m.tool_calls ? '(tool_calls)' : ''}`);
       }
 
       return {
@@ -497,38 +624,6 @@ export function registerChatHandlers(store: Store) {
 
     return { success: true };
   });
-
-  // ==================== Agent 管理 ====================
-
-  // 设置对话的 Agent
-  ipcMain.handle('chat:setAgent', (_event, conversationId: string, agentName: string) => {
-    toolManager.setAgent(conversationId, agentName);
-    return { success: true, agentName };
-  });
-
-  // 获取对话的当前 Agent
-  ipcMain.handle('chat:getAgent', (_event, conversationId: string) => {
-    const agentName = toolManager.getAgent(conversationId);
-    return { success: true, agentName };
-  });
-
-  // 获取所有可用的 Agents
-  ipcMain.handle('chat:getAllAgents', () => {
-    const agents = toolManager.getAllAgents();
-    return { success: true, agents };
-  });
-
-  // 获取 Agent 的系统提示词
-  ipcMain.handle('chat:getAgentSystemPrompt', (_event, conversationId: string) => {
-    const prompt = toolManager.getAgentSystemPrompt(conversationId);
-    return { success: true, prompt };
-  });
-
-  // 获取 Agent 的模型配置
-  ipcMain.handle('chat:getAgentModel', (_event, conversationId: string) => {
-    const model = toolManager.getAgentModel(conversationId);
-    return { success: true, model };
-  });
 }
 
 /**
@@ -539,7 +634,6 @@ export function registerContextHandlers(): void {
 
   // Build system prompt with ContextBuilder
   ipcMain.handle('context:buildSystemPrompt', async (_event, options?: {
-    agentName?: string;
     workspacePath?: string;
     includeMemory?: boolean;
     maxMemoryTokens?: number;
@@ -560,7 +654,6 @@ export function registerContextHandlers(): void {
 
   // Estimate system prompt tokens
   ipcMain.handle('context:estimateTokens', async (_event, options?: {
-    agentName?: string;
     workspacePath?: string;
     includeMemory?: boolean;
   }) => {

@@ -1,3 +1,27 @@
+/**
+ * 附件类型定义
+ */
+interface Attachment {
+  id: string;
+  messageId: string;
+  fileName: string;
+  fileType: 'image' | 'document' | 'archive' | 'data' | 'unknown';
+  mimeType: string;
+  fileSize: number;
+  checksum: string;
+  storageType: 'embedded' | 'external';
+  storagePath?: string;
+  extractedContent?: {
+    text?: string;
+    preview?: string;
+    pageCount?: number;
+    sheetCount?: number;
+  };
+  createdAt: number;
+  status: 'pending' | 'processing' | 'ready' | 'error';
+  error?: string;
+}
+
 interface ElectronAPI {
   pyodide: {
     listFiles: (workspacePath: string) => Promise<{
@@ -33,12 +57,6 @@ interface ElectronAPI {
     stream: (messages: any[], conversationId?: string) => Promise<any>;
     stop: () => Promise<void>;
     generateTitle: (message: string) => Promise<{ success: boolean; title?: string; error?: string }>;
-    // Agent 管理
-    setAgent: (conversationId: string, agentName: string) => Promise<{ success: boolean; agentName?: string }>;
-    getAgent: (conversationId: string) => Promise<{ success: boolean; agentName?: string | null }>;
-    getAllAgents: () => Promise<{ success: boolean; agents?: Array<{ name: string; description: string; model?: string }> }>;
-    getAgentSystemPrompt: (conversationId: string) => Promise<{ success: boolean; prompt?: string }>;
-    getAgentModel: (conversationId: string) => Promise<{ success: boolean; model?: string }>;
   };
   workspace: {
     select: () => Promise<{ path: string | null; error?: string }>;
@@ -89,6 +107,108 @@ interface ElectronAPI {
   file: {
     selectImage: () => Promise<{ canceled: boolean; data?: string }>;
     saveFile: (content: string, filename: string) => Promise<void>;
+  };
+  attachment: {
+    selectFiles: (options: { multiple?: boolean; messageId?: string }) => Promise<{
+      canceled: boolean;
+      attachments?: Attachment[];
+      error?: string;
+    }>;
+    listByMessage: (messageId: string) => Promise<{
+      success: boolean;
+      attachments?: Attachment[];
+      error?: string;
+    }>;
+    delete: (attachmentId: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    getContent: (attachmentId: string) => Promise<{
+      success: boolean;
+      attachment?: Attachment;
+      error?: string;
+    }>;
+    updateMessageId: (attachmentId: string, messageId: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+  };
+  filePreview: {
+    preview: (filepath: string) => Promise<{
+      success: boolean;
+      data?: any;
+      error?: string;
+    }>;
+    getType: (filepath: string) => Promise<{
+      success: boolean;
+      type?: string;
+      error?: string;
+    }>;
+    canPreview: (filepath: string) => Promise<{
+      success: boolean;
+      canPreview?: boolean;
+      type?: string;
+      error?: string;
+    }>;
+    saveText: (filepath: string, content: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+  };
+  fileEditor: {
+    readFile: (filepath: string) => Promise<{
+      success: boolean;
+      content?: string;
+      error?: string;
+    }>;
+    saveFile: (filepath: string, content: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    createFile: (filepath: string, content?: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    createDirectory: (dirpath: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    deleteFile: (filepath: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    renameFile: (oldPath: string, newPath: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    copyFile: (sourcePath: string, targetPath: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    moveFile: (sourcePath: string, targetPath: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    listDirectory: (dirpath: string) => Promise<{
+      success: boolean;
+      entries?: Array<{
+        name: string;
+        path: string;
+        type: 'file' | 'directory';
+        size?: number;
+        modified?: number;
+      }>;
+      error?: string;
+    }>;
+    watchFiles: (dirpath: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    unwatchFiles: () => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    onFileChanged: (callback: (data: { event: string; path: string }) => void) => () => void;
   };
   conversation: {
     getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>;
@@ -169,17 +289,33 @@ interface ElectronAPI {
     reload: (name: string) => Promise<{ success: boolean; error?: string }>;
     reloadWorkspace: () => Promise<{ success: boolean; alwaysCount: number; onDemandCount: number; error?: string }>;
     getStats: () => Promise<{ success: boolean; stats?: any; error?: string }>;
+    listSimple: () => Promise<{ success: boolean; skills?: any[]; error?: string }>;
+    loadSimple: (name: string) => Promise<{ success: boolean; skill?: any; error?: string }>;
+    buildSummary: (activeSkills?: string[]) => Promise<{ success: boolean; summary?: string; error?: string }>;
+    export: (skillName: string) => Promise<{ success: boolean; packageData?: any; suggestedFileName?: string; error?: string }>;
+    import: (filePath: string) => Promise<{ success: boolean; skill?: any; error?: string }>;
+    importFromContent: (content: string) => Promise<{ success: boolean; skill?: any; error?: string }>;
+    delete: (skillName: string) => Promise<{ success: boolean; error?: string }>;
+    setVisibility: (skillName: string, visibility: 'public' | 'organization' | 'private') => Promise<{ success: boolean; error?: string }>;
+    getShareable: () => Promise<{ success: boolean; skills?: any[]; error?: string }>;
+  };
+  p2p: {
+    startDiscovery: () => Promise<{ success: boolean; error?: string }>;
+    stopDiscovery: () => Promise<{ success: boolean; error?: string }>;
+    getPeers: () => Promise<{ success: boolean; peers?: Array<{ id: string; name: string; avatar?: string; ip: string; port: number; lastSeen: number; skillsCount: number }>; error?: string }>;
+    getPeerSkills: (peerIp: string) => Promise<{ success: boolean; skills?: any[]; error?: string }>;
+    downloadSkill: (peerIp: string, skillName: string) => Promise<{ success: boolean; skill?: any; error?: string }>;
+    setDeviceName: (name: string) => Promise<{ success: boolean; error?: string }>;
+    setDeviceAvatar: (avatar: string) => Promise<{ success: boolean; error?: string }>;
   };
   context: {
     buildSystemPrompt: (options?: {
-      agentName?: string;
       workspacePath?: string;
       includeMemory?: boolean;
       activeSkills?: string[];
       maxMemoryTokens?: number;
     }) => Promise<{ success: boolean; prompt?: string; error?: string }>;
     estimateTokens: (options?: {
-      agentName?: string;
       workspacePath?: string;
       includeMemory?: boolean;
       activeSkills?: string[];

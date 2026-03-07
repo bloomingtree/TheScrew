@@ -40,15 +40,15 @@ const MessageList: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto py-6 px-4">
+    <div className="h-full overflow-y-auto">
       {/* 居中布局容器 */}
-      <div className="max-w-[1600px] mx-auto">
+      <div className="max-w-[1600px] mx-auto h-full">
         {messages.length === 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="flex flex-col items-center justify-center h-full"
+            className="flex flex-col items-center pt-[20%]"
           >
             <p className="text-2xl font-semibold mb-2 text-[#374151]">我是螺丝钉，有什么可以帮助您？</p>
             <p className="text-sm text-[#9CA3AF]">今天是{new Date().toLocaleDateString('zh-CN', { weekday: 'long' })}</p>
