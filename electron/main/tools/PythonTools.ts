@@ -12,21 +12,12 @@
 
 import { Tool } from './ToolManager';
 import { ipcMain, BrowserWindow } from 'electron';
+import { getPathManager, CONFIG_DIR_NAME } from '../config/PathManager';
 
 // 获取当前活跃的 Renderer 窗口
 function getFocusedWindow(): BrowserWindow | null {
   const windows = BrowserWindow.getAllWindows();
   return windows.find(w => w.isFocused()) || windows[0] || null;
-}
-
-/**
- * 获取应用根路径
- */
-function getAppRootPath(): string {
-  if (process.env.NODE_ENV === 'development') {
-    return require('path').resolve(__dirname, '../../');
-  }
-  return process.resourcesPath || require('electron').app.getPath('userData');
 }
 
 /**
@@ -39,7 +30,7 @@ export const pythonTools: Tool[] = [
 
 Modes:
 - 'code': Execute Python code directly (default)
-- 'script': Execute a script from .zero-employee/skills/ directory
+- 'script': Execute a script from ${CONFIG_DIR_NAME}/skills/ directory
 - 'status': Get Python runtime status
 - 'validate': Validate Python code without executing
 
@@ -160,12 +151,12 @@ async function handleScript(skillName: string, scriptPath: string, scriptArgs: s
     }
 
     // 读取脚本文件
-    const appRoot = getAppRootPath();
-    const scriptFilePath = join(appRoot, '.zero-employee', 'skills', skillName, scriptPath);
+    const appRoot = getPathManager().getConfigPath();
+    const scriptFilePath = join(appRoot, 'skills', skillName, scriptPath);
     const scriptCode = await readFile(scriptFilePath, 'utf-8');
 
     // 获取 skill 目录的绝对路径
-    const skillDir = join(appRoot, '.zero-employee', 'skills', skillName);
+    const skillDir = join(appRoot, 'skills', skillName);
     const scriptDir = dirname(join(skillDir, scriptPath));
 
     // Python 路径

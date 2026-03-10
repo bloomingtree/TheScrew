@@ -244,7 +244,7 @@ const SkillsTab: React.FC = () => {
             <p className="text-sm text-gray-500">
               {searchQuery || selectedCategory !== 'all' || selectedVisibility !== 'all'
                 ? '没有找到匹配的技能'
-                : '还没有技能，在 .zero-employee/skills/ 目录下创建 SKILL.md 文件来添加技能'}
+                : '还没有技能，在 .config/skills/ 目录下创建 SKILL.md 文件来添加技能'}
             </p>
           </div>
         ) : (
@@ -518,7 +518,7 @@ const SkillsTab: React.FC = () => {
       {viewMode === 'mine' && (
         <div className="px-4 py-2 border-t border-gray-200 bg-gray-50">
           <p className="text-xs text-gray-500">
-            💡 技能文件位于 <code>.zero-employee/skills/</code> 目录下
+            💡 技能文件位于 <code>.config/skills/</code> 目录下
           </p>
         </div>
       )}

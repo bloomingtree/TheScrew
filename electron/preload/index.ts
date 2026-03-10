@@ -103,6 +103,23 @@ const electronAPI = {
     set: (config: any) => ipcRenderer.invoke('config:set', config),
     validate: (config: any) => ipcRenderer.invoke('config:validate', config),
     getModelInfo: (config: any) => ipcRenderer.invoke('config:getModelInfo', config),
+    // 模型配置 API
+    modelConfig: {
+      getAll: () => ipcRenderer.invoke('modelConfig:getAll') as Promise<{
+        configs: any[];
+        activeConfigId: string;
+      }>,
+      getActive: () => ipcRenderer.invoke('modelConfig:getActive') as Promise<any | null>,
+      add: (config: any) => ipcRenderer.invoke('modelConfig:add', config) as Promise<any>,
+      update: (id: string, config: any) => ipcRenderer.invoke('modelConfig:update', id, config) as Promise<any | null>,
+      delete: (id: string) => ipcRenderer.invoke('modelConfig:delete', id) as Promise<{ success: boolean }>,
+      setActive: (id: string) => ipcRenderer.invoke('modelConfig:setActive', id) as Promise<any | null>,
+      duplicate: (id: string) => ipcRenderer.invoke('modelConfig:duplicate', id) as Promise<any | null>,
+      import: (configs: any[]) => ipcRenderer.invoke('modelConfig:import', configs) as Promise<any[]>,
+      export: () => ipcRenderer.invoke('modelConfig:export') as Promise<any[]>,
+      sync: (modelConfigs: any) => ipcRenderer.invoke('modelConfig:sync', modelConfigs) as Promise<{ success: boolean }>,
+      migrateFromLocalStorage: (data: string) => ipcRenderer.invoke('modelConfig:migrateFromLocalStorage', data) as Promise<{ success: boolean }>,
+    },
   },
   file: {
     selectImage: () => ipcRenderer.invoke('file:select-image') as Promise<{ canceled: boolean; data?: string }>,

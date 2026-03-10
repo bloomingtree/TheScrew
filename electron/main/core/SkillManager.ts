@@ -13,6 +13,7 @@ import { readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { ISkill, ISkillMeta } from './types';
+import { CONFIG_DIR_NAME } from '../config/PathManager';
 
 /**
  * Skill file structure
@@ -45,7 +46,7 @@ export class SkillManager {
   constructor(skillsPaths: string[]) {
     this.skillsPaths = skillsPaths;
     // Track workspace path separately
-    this.workspaceSkillsPath = skillsPaths.find(p => p.includes('.zero-employee'));
+    this.workspaceSkillsPath = skillsPaths.find(p => p.includes(CONFIG_DIR_NAME));
     console.log('[SkillManager] Initialized with paths:', skillsPaths);
   }
 
@@ -608,13 +609,13 @@ let skillManagerInstance: SkillManager | null = null;
 /**
  * Get the singleton SkillManager instance
  *
- * Note: Only loads from workspace skills directory (.zero-employee/skills/)
+ * Note: Only loads from workspace skills directory (.config/skills/)
  * Built-in office skills have been removed to align with nanobot's simplified specification.
  */
 export function getSkillManager(): SkillManager {
   if (!skillManagerInstance) {
     // Only load from workspace skills directory
-    const workspacePath = require('path').resolve(process.cwd(), '.zero-employee', 'skills');
+    const workspacePath = require('path').resolve(process.cwd(), CONFIG_DIR_NAME, 'skills');
 
     skillManagerInstance = new SkillManager([workspacePath]);
   }

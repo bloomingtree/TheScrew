@@ -9,6 +9,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { app } from 'electron';
 import Store from 'electron-store';
+import { getPathManager } from './PathManager';
 
 /**
  * 加密配置
@@ -54,8 +55,8 @@ export class CredentialStore {
   private store: Store<CredentialData>;
 
   constructor() {
-    // 凭证存储路径: {userData}/credentials/
-    this.credentialsPath = path.join(app.getPath('userData'), 'credentials');
+    // 凭证存储路径: 使用 PathManager 获取
+    this.credentialsPath = getPathManager().getCredentialsPath();
     this.masterKey = this.getOrCreateMasterKey();
     this.store = new Store<CredentialData>({
       name: 'api-keys',

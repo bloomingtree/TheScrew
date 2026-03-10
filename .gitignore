@@ -30,8 +30,11 @@ build/*.dll
 .claude
 
 learn-code
-.zero-employee
 public
+
+# Config folder - track configs but ignore runtime data
+.config
+.zero-employee
 
 # Python runtime (third-party)
 electron/main/python/

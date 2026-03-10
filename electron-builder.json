@@ -9,13 +9,18 @@
     "dist-electron/**/*",
     "dist/**/*",
     "package.json",
-    ".zero-employee/**/*",
+    ".config/**/*",
     "electron/main/python/**/*"
   ],
   "extraResources": [
     {
       "from": "electron/main/python",
       "to": "python",
+      "filter": "**/*"
+    },
+    {
+      "from": ".config",
+      "to": ".config",
       "filter": "**/*"
     }
   ],

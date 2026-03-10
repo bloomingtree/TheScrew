@@ -58,8 +58,13 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
           })
         );
 
+        // 保留未保存的对话（_unsaved 标记的对话）
+        const currentConversations = get().conversations;
+        const unsavedConversations = currentConversations.filter(c => (c as any)._unsaved);
+
         set({
-          conversations: conversationsWithData,
+          // 将未保存的对话放在最前面
+          conversations: [...unsavedConversations, ...conversationsWithData],
           isLoaded: true,
         });
       } else {
@@ -91,6 +96,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       conversations: [newConversation, ...state.conversations],
       currentConversationId: newConversation.id,
     }));
+
     return newConversation.id;
   },
 
@@ -137,9 +143,44 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
    */
   updateConversationMessages: async (id, messages) => {
     try {
-      // 批量添加新消息到数据库
       const existingConv = get().conversations.find(c => c.id === id);
-      if (existingConv) {
+      if (!existingConv) return;
+
+      // 检查对话是否还未保存到数据库
+      const needsCreate = (existingConv as any)._unsaved;
+
+      if (needsCreate) {
+        // 首次保存：创建对话并添加所有消息
+
+        // 如果标题还是默认的"新对话"，用第一条用户消息生成标题
+        let title = existingConv.title;
+        if (title === '新对话' && messages.length > 0) {
+          const firstUserMessage = messages.find(m => m.role === 'user');
+          if (firstUserMessage && firstUserMessage.content) {
+            const content = typeof firstUserMessage.content === 'string'
+              ? firstUserMessage.content
+              : '';
+            const trimmed = content.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+            title = trimmed.length > 15 ? trimmed.substring(0, 15) + '...' : trimmed;
+          }
+        }
+
+        await window.electronAPI.conversation.create({
+          id: id,
+          title: title,
+          messages: messages,
+        });
+
+        // 更新内存中的标题
+        if (title !== existingConv.title) {
+          set((state) => ({
+            conversations: state.conversations.map(c =>
+              c.id === id ? { ...c, title } : c
+            ),
+          }));
+        }
+      } else {
+        // 增量更新：只添加新消息
         const newMessages = messages.slice(existingConv.messages.length);
         if (newMessages.length > 0) {
           await window.electronAPI.message.addBatch(
@@ -149,19 +190,22 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
             }))
           );
         } else {
-          // 如果消息数量减少，可能需要其他处理逻辑
           await window.electronAPI.conversation.touch(id);
         }
       }
+
+      // 统一更新状态：更新消息并移除未保存标记
+      set((state) => ({
+        conversations: state.conversations.map(c =>
+          c.id === id
+            ? { ...c, messages, updatedAt: Date.now(), _unsaved: undefined as any }
+            : c
+        ),
+      }));
+
     } catch (error) {
       console.error('Failed to update messages in database:', error);
     }
-
-    set((state) => ({
-      conversations: state.conversations.map(c =>
-        c.id === id ? { ...c, messages, updatedAt: Date.now() } : c
-      ),
-    }));
   },
 
   /**

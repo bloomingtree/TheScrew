@@ -17,6 +17,7 @@ import {
   WorkspaceStructure,
   WorkspaceValidationResult,
 } from './WorkspaceConfig';
+import { CONFIG_DIR_NAME } from './PathManager';
 
 /**
  * 工作区管理器类
@@ -55,7 +56,7 @@ export class WorkspaceManager {
     return {
       workspaceDir: path.join(workspacePath, '.workspace'),
       stateDir: path.join(workspacePath, '.workspace', 'state'),
-      configDir: path.join(workspacePath, '.zero-employee'),
+      configDir: path.join(workspacePath, CONFIG_DIR_NAME),
       memoryDir: path.join(workspacePath, 'memory'),
       dailyNotesDir: path.join(workspacePath, 'memory', 'daily_notes'),
     };
@@ -103,12 +104,12 @@ export class WorkspaceManager {
    * 复制默认配置文件
    */
   private async copyDefaultConfigFiles(targetDir: string): Promise<void> {
-    // 默认配置文件位于项目根目录的 .zero-employee/
+    // 默认配置文件位于项目根目录的 .config/
     const projectConfigDir = path.join(
       process.env.NODE_ENV === 'development'
         ? path.join(__dirname, '../../../..')
         : path.join(app.getAppPath(), '../..'),
-      '.zero-employee'
+      CONFIG_DIR_NAME
     );
 
     const configFiles = [

@@ -2,24 +2,9 @@ import { readdir, readFile, stat, writeFile } from 'fs/promises';
 import path from 'path';
 import { app } from 'electron';
 import { Tool } from './ToolManager';
+import { getPathManager, CONFIG_DIR_NAME } from '../config/PathManager';
 
 let workspacePath: string | null = null;
-
-/**
- * 获取应用根路径
- * 开发环境: 项目根目录
- * 生产环境: resources 目录
- *
- * 注意: 编译后代码在 dist-electron/main/，
- * 所以需要向上两级 (../..) 到达项目根目录
- */
-function getAppRootPath(): string {
-  if (process.env.NODE_ENV === 'development') {
-    // 编译后: dist-electron/main -> ../.. -> 项目根目录
-    return path.resolve(__dirname, '../..');
-  }
-  return process.resourcesPath || app.getPath('userData');
-}
 
 /**
  * 搜索配置常量
@@ -111,7 +96,7 @@ export const fileTools: Tool[] = [
 
 **可选参数**：
 - recursive: 是否递归列出子目录（默认 false）
-- namespace: 命名空间，workspace（工作空间）或 config（.zero-employee 配置目录，默认 workspace）
+- namespace: 命名空间，workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录，默认 workspace）
 
 **警告**：recursive=true 时会递归遍历所有子目录，对于大型目录可能导致性能问题。
 - 有深度限制（${SEARCH_CONFIG.MAX_DEPTH} 层）和文件数量限制（${SEARCH_CONFIG.MAX_FILES} 个文件）
@@ -134,7 +119,7 @@ export const fileTools: Tool[] = [
         },
         namespace: {
           type: 'string',
-          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          description: `命名空间：workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录）`,
           enum: ['workspace', 'config'],
           default: 'workspace',
         },
@@ -154,7 +139,7 @@ export const fileTools: Tool[] = [
 
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(getAppRootPath(), '.zero-employee');
+          rootPath = getPathManager().getConfigPath();
         } else {
           rootPath = workspacePath;
         }
@@ -183,13 +168,13 @@ export const fileTools: Tool[] = [
 
   {
     name: 'read_file',
-    description: `读取文件内容。支持从工作空间或配置目录（.zero-employee）读取文件。
+    description: `读取文件内容。支持从工作空间或配置目录（${CONFIG_DIR_NAME}）读取文件。
 
 **必需参数**：
 - filepath: 文件路径（如 "README.md" 或 "skills/docx/SKILL.md"）
 
 **可选参数**：
-- namespace: 命名空间，workspace（工作空间）或 config（.zero-employee 配置目录，默认 workspace）
+- namespace: 命名空间，workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录，默认 workspace）
 
 使用示例：
 - 读取工作空间文件：filepath="README.md"
@@ -207,7 +192,7 @@ export const fileTools: Tool[] = [
         },
         namespace: {
           type: 'string',
-          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          description: `命名空间：workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录）`,
           enum: ['workspace', 'config'],
           default: 'workspace',
         },
@@ -223,7 +208,7 @@ export const fileTools: Tool[] = [
         // 根据 namespace 决定根目录
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(getAppRootPath(), '.zero-employee');
+          rootPath = getPathManager().getConfigPath();
         } else {
           rootPath = workspacePath;
         }
@@ -258,7 +243,7 @@ export const fileTools: Tool[] = [
         },
         namespace: {
           type: 'string',
-          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          description: `命名空间：workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录）`,
           enum: ['workspace', 'config'],
           default: 'workspace',
         },
@@ -273,7 +258,7 @@ export const fileTools: Tool[] = [
 
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(getAppRootPath(), '.zero-employee');
+          rootPath = getPathManager().getConfigPath();
         } else {
           rootPath = workspacePath;
         }
@@ -324,7 +309,7 @@ export const fileTools: Tool[] = [
         },
         namespace: {
           type: 'string',
-          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          description: `命名空间：workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录）`,
           enum: ['workspace', 'config'],
           default: 'workspace',
         },
@@ -347,7 +332,7 @@ export const fileTools: Tool[] = [
 
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(getAppRootPath(), '.zero-employee');
+          rootPath = getPathManager().getConfigPath();
         } else {
           rootPath = workspacePath;
         }
@@ -421,7 +406,7 @@ export const fileTools: Tool[] = [
         },
         namespace: {
           type: 'string',
-          description: '命名空间：workspace（工作空间）或 config（.zero-employee 配置目录）',
+          description: `命名空间：workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录）`,
           enum: ['workspace', 'config'],
           default: 'workspace',
         },
@@ -440,7 +425,7 @@ export const fileTools: Tool[] = [
 
         let rootPath: string;
         if (namespace === 'config') {
-          rootPath = path.join(getAppRootPath(), '.zero-employee');
+          rootPath = getPathManager().getConfigPath();
         } else {
           rootPath = workspacePath;
         }

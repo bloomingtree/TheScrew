@@ -72,7 +72,10 @@
       "Bash(npx asar extract \"release/win-unpacked/resources/app.asar\" \"temp_asar_check\")",
       "Bash(npx asar extract \"release/win-unpacked/resources/app.asar\" \"temp_check2\")",
       "Bash(npm run build:vite)",
-      "Bash(npm run vite)"
+      "Bash(npm run vite)",
+      "WebSearch",
+      "Read(//e/Agents/offline-agent/zero-employee/$APPDATA/**)",
+      "Read(//c/Users/Administrator/AppData/Roaming/**)"
     ]
   }
 }

@@ -34,18 +34,7 @@ import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
 import { app } from 'electron';
 import { createHash } from 'crypto';
 import AdmZip from 'adm-zip';
-
-/**
- * 获取应用根路径
- * - 开发环境: 项目根目录
- * - 生产环境: resources 目录或用户数据目录
- */
-function getAppRootPath(): string {
-  if (process.env.NODE_ENV === 'development') {
-    return resolve(__dirname, '../..');
-  }
-  return process.resourcesPath || app.getPath('userData');
-}
+import { getPathManager, CONFIG_DIR_NAME } from '../config/PathManager';
 
 /**
  * 技能可见性
@@ -106,9 +95,11 @@ export interface Skill extends SkillMeta {
  */
 export class SimpleSkillManager {
   private workspaceSkillsDir: string;
+  private workspacePath: string;
 
   constructor(workspacePath: string) {
-    this.workspaceSkillsDir = join(workspacePath, '.zero-employee', 'skills');
+    this.workspacePath = workspacePath;
+    this.workspaceSkillsDir = join(workspacePath, CONFIG_DIR_NAME, 'skills');
     console.log('[SimpleSkillManager] Initialized with:', {
       workspace: this.workspaceSkillsDir,
     });
@@ -288,7 +279,7 @@ export class SimpleSkillManager {
    */
   private async get_config_structure(): Promise<string> {
     try {
-      const configRoot = join(getAppRootPath(), '.zero-employee');
+      const configRoot = join(this.workspacePath, CONFIG_DIR_NAME);
       if (!existsSync(configRoot)) {
         return '  (config 目录不存在)';
       }
@@ -321,10 +312,10 @@ export class SimpleSkillManager {
 
     for (const skill of skills) {
       const emoji = skill.emoji ? `${skill.emoji} ` : '';
-      // 计算相对于 .zero-employee/skills 的路径
+      // 计算相对于 .config/skills 的路径
       const relativePath = relative(this.workspaceSkillsDir, skill.path);
-      const skillPath = `.zero-employee/skills/${relativePath}`;
-      const skillDir = `.zero-employee/skills/${skill.category}`;
+      const skillPath = `${CONFIG_DIR_NAME}/skills/${relativePath}`;
+      const skillDir = `${CONFIG_DIR_NAME}/skills/${skill.category}`;
 
       sections.push(
         `### ${emoji}${skill.name}\n\n${skill.description}\n\n**SKILL.md**: \`${skillPath}\`\n**技能目录**: \`${skillDir}/\``
@@ -350,18 +341,18 @@ export class SimpleSkillManager {
 3. 阅读文档中的示例和说明后再执行操作
 
 **文件路径说明**：
-- 技能文件位于 \`.zero-employee/skills/\` 目录下
+- 技能文件位于 \`${CONFIG_DIR_NAME}/skills/\` 目录下
 - 使用 \`namespace: "config"\` 参数访问配置目录下的文件
-- \`filepath\` 或 \`directory\` 是相对于 \`.zero-employee/\` 根目录的路径
+- \`filepath\` 或 \`directory\` 是相对于 \`${CONFIG_DIR_NAME}/\` 根目录的路径
 - **所有文件操作工具都返回 \`fullPath\`（绝对路径）**
 
-**当前 config 目录结构**（.zero-employee/）：
+**当前 config 目录结构**（${CONFIG_DIR_NAME}/）：
 ${configStructure}
 
 **脚本执行说明**：
 - bash 工具的默认工作目录是用户的 **workspace**
 - 执行技能脚本时使用 \`fullPath\`（绝对路径），不依赖当前工作目录
-- 示例：\`bash({ command: "python E:/path/to/.zero-employee/skills/docx/scripts/accept_changes.py input.docx output.docx" })\`
+- 示例：\`bash({ command: "python E:/path/to/${CONFIG_DIR_NAME}/skills/docx/scripts/accept_changes.py input.docx output.docx" })\`
 
 你有以下技能可用：
 
@@ -395,7 +386,7 @@ ${sections.join('\n\n')}`;
         if (content.length > MAX_SKILL_CONTENT_LENGTH) {
           console.warn(`[SimpleSkillManager] Skill "${skill.name}" content too large (${content.length} chars), truncating to ${MAX_SKILL_CONTENT_LENGTH}`);
           const relativePath = relative(this.workspaceSkillsDir, skill.path);
-          const skillPath = `.zero-employee/skills/${relativePath}`;
+          const skillPath = `${CONFIG_DIR_NAME}/skills/${relativePath}`;
           content = content.slice(0, MAX_SKILL_CONTENT_LENGTH) +
             `\n\n... (内容过长，已截断。使用 read_file 工具读取完整内容: filepath="${skillPath}", namespace="config")`;
         }
@@ -649,7 +640,7 @@ ${sections.join('\n\n')}`;
       }
     }
 
-    // 保存技能到 .zero-employee/skills/
+    // 保存技能到 .config/skills/
     const skillDir = join(this.workspaceSkillsDir, packageData.skill.meta.name);
     await mkdir(skillDir, { recursive: true });
 
@@ -760,8 +751,9 @@ let simpleSkillManagerInstance: SimpleSkillManager | null = null;
  */
 export function getSimpleSkillManager(): SimpleSkillManager {
   if (!simpleSkillManagerInstance) {
-    // Default to app root directory (where .zero-employee is located)
-    simpleSkillManagerInstance = new SimpleSkillManager(getAppRootPath());
+    // Default to app root directory (where .config is located)
+    const pathManager = getPathManager();
+    simpleSkillManagerInstance = new SimpleSkillManager(pathManager.getAppRoot());
   }
   return simpleSkillManagerInstance;
 }

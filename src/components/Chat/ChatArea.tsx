@@ -15,27 +15,17 @@ const ChatArea: React.FC = () => {
   const hasInitialized = useRef(false);
   const lastSyncedMessagesRef = useRef<any[]>([]);
 
-  useEffect(() => {
-    console.log('workspacePath 状态变化:', workspacePath);
-  }, [workspacePath]);
-
   // 初始化时创建对话（使用 ref 确保只执行一次）
   useEffect(() => {
     if (hasInitialized.current) {
-      console.log('[ChatArea] Already initialized, skipping');
       return;
     }
     hasInitialized.current = true;
 
-    console.log('[ChatArea] Initializing, currentConversationId:', currentConversationId);
-
     // 只有当确实没有对话时才创建新对话
     const state = useConversationStore.getState();
     if (!currentConversationId && state.conversations.length === 0) {
-      console.log('[ChatArea] Creating first conversation');
       createConversation();
-    } else {
-      console.log('[ChatArea] Conversation exists, skipping creation');
     }
     loadWorkspacePath();
   }, []); // 只在组件挂载时执行一次
@@ -76,7 +66,6 @@ const ChatArea: React.FC = () => {
 
     // 只有当 messages 有内容时才同步
     if (messages.length > 0) {
-      console.log('[ChatArea] Syncing messages to conversationStore:', messages.length);
       updateConversationMessages(currentConversationId, messages);
       lastSyncedMessagesRef.current = messages;
     }

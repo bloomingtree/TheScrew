@@ -10,6 +10,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { CONFIG_DIR_NAME } from '../config/PathManager';
 
 export interface AgentConfig {
   name: string;
@@ -90,7 +91,7 @@ export class AgentManager {
   private agentsDir: string;
 
   constructor(agentsDir?: string) {
-    this.agentsDir = agentsDir || path.resolve(process.cwd(), '.zero-employee', 'agents');
+    this.agentsDir = agentsDir || path.resolve(process.cwd(), CONFIG_DIR_NAME, 'agents');
   }
 
   /**

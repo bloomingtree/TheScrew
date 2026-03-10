@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from 'fs/promises';
 import { app } from 'electron';
 import path from 'path';
+import { getPathManager } from '../config/PathManager';
 
 interface TruncationConfig {
   maxPreviewSize: number;      // 预览大小（字符数），默认 2048
@@ -37,11 +38,10 @@ class OutputTruncator {
 
   /**
    * 获取输出文件目录
-   * 使用 Electron 的 userData 路径，跨平台兼容
+   * 使用 PathManager 统一管理的路径
    */
   private getOutputDir(): string {
-    const userDataPath = app.getPath('userData');
-    return path.join(userDataPath, '.claude', 'projects', 'zero-employee', 'tool-results');
+    return path.join(getPathManager().getDataPath(), 'tool-results');
   }
 
   /**

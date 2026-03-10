@@ -18,6 +18,7 @@ import { existsSync } from 'fs';
 import { getSimpleSkillManager } from './SimpleSkillManager';
 import { getMemoryStore } from '../memory/MemoryStore';
 import { getToolManager } from '../tools/ToolManager';
+import { CONFIG_DIR_NAME } from '../config/PathManager';
 
 /**
  * Context Builder options
@@ -143,7 +144,7 @@ export class ContextBuilder {
       return null;
     }
 
-    const bootstrapPath = join(options.workspacePath, '.zero-employee');
+    const bootstrapPath = join(options.workspacePath, CONFIG_DIR_NAME);
     const sections: string[] = [];
 
     // 读取 IDENTITY.md

@@ -135,7 +135,7 @@ export async function executePythonInWorkspace(
     maxFileSize?: number;
     timeout?: number;
     autoSync?: boolean;
-    /** 配置文件夹路径（.zero-employee） */
+    /** 配置文件夹路径（.config） */
     configPath?: string;
     /** 额外的 Python 路径，用于加载模块 */
     pythonPath?: string[];
@@ -216,7 +216,7 @@ export function unmountWorkspace(): void {
  * 挂载工作空间和配置目录
  *
  * @param workspacePath 工作空间路径
- * @param configPath 配置目录路径（可选，如 .zero-employee）
+ * @param configPath 配置目录路径（可选，如 .config）
  * @param options 挂载选项
  * @returns 是否成功挂载
  *
@@ -225,7 +225,7 @@ export function unmountWorkspace(): void {
  * // 挂载工作空间和配置
  * await mountWorkspaceAndConfig(
  *   'D:\\work\\myproject',
- *   'D:\\work\\myproject\\.zero-employee'
+ *   'D:\\work\\myproject\\.config'
  * );
  * ```
  */
@@ -256,7 +256,7 @@ export async function mountWorkspaceAndConfig(
  * ```typescript
  * // 注册工作空间和配置文件夹
  * registerMountPoint('workspace', 'D:\\work\\myproject', 'workspace');
- * registerMountPoint('config', 'D:\\work\\myproject\\.zero-employee', 'config');
+ * registerMountPoint('config', 'D:\\work\\myproject\\.config', 'config');
  *
  * // 挂载所有
  * await mountAll();

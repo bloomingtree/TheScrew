@@ -2,6 +2,7 @@ import { ipcMain, dialog, BrowserWindow, app } from 'electron';
 import Store from 'electron-store';
 import { setWorkspacePath, getWorkspacePath } from '../tools/FileTools';
 import { getWorkspaceManager } from '../config/WorkspaceManager';
+import { getPathManager, CONFIG_DIR_NAME } from '../config/PathManager';
 import type {
   WorkspaceInfo,
   CreateWorkspaceOptions,
@@ -23,16 +24,6 @@ export function setMainWindow(window: BrowserWindow) {
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
-}
-
-// 获取应用根目录（开发环境为项目根目录，生产环境为可执行文件所在目录）
-function getAppRootPath(): string {
-  // 开发环境：返回项目根目录
-  if (process.env.NODE_ENV === 'development') {
-    return path.join(__dirname, '../../');
-  }
-  // 生产环境：返回可执行文件所在目录的父目录
-  return path.join(process.resourcesPath || app.getAppPath(), '../');
 }
 
 export function registerWorkspaceHandlers(store: Store) {
@@ -103,16 +94,15 @@ export function registerWorkspaceHandlers(store: Store) {
           return a.name.localeCompare(b.name);
         });
 
-      // 添加应用配置文件夹（.zero-employee）到列表顶部
-      const appRootPath = getAppRootPath();
-      const configFolderPath = path.join(appRootPath, '.zero-employee');
+      // 添加应用配置文件夹到列表顶部
+      const configFolderPath = getPathManager().getConfigPath();
 
       let filesWithConfig = files;
       if (fs.existsSync(configFolderPath)) {
         const stats = fs.statSync(configFolderPath);
         filesWithConfig = [
           {
-            name: '.zero-employee',
+            name: CONFIG_DIR_NAME,
             path: configFolderPath,
             type: 'directory' as const,
             size: undefined,
@@ -138,8 +128,8 @@ export function registerWorkspaceHandlers(store: Store) {
       const entries = fs.readdirSync(dirPath, { withFileTypes: true });
       const files = entries
         .filter(entry => {
-          // 过滤隐藏文件（除了 .zero-employee 等）
-          if (entry.name.startsWith('.') && entry.name !== '.zero-employee' && entry.name !== '.git') {
+          // 过滤隐藏文件（除了 .config 等）
+          if (entry.name.startsWith('.') && entry.name !== CONFIG_DIR_NAME && entry.name !== '.git') {
             return false;
           }
           return true;
