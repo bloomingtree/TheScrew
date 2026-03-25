@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -14,6 +14,9 @@ import {
   Check,
   Star,
   Edit2,
+  Save,
+  RotateCcw,
+  Zap,
 } from 'lucide-react';
 import { useConfigStore } from '../../store/configStore';
 import { toast } from '../../store/toastStore';
@@ -55,6 +58,23 @@ const ConfigDialog: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [validatingId, setValidatingId] = useState<string | null>(null);
+
+  // 本地编辑状态 - 用于延迟保存
+  const [localConfigs, setLocalConfigs] = useState<Record<string, ModelConfig>>({});
+  const [hasChanges, setHasChanges] = useState<Record<string, boolean>>({});
+
+  // 当配置对话框打开时，初始化本地配置状态
+  useEffect(() => {
+    if (isConfigOpen) {
+      const configs: Record<string, ModelConfig> = {};
+      modelConfigs.configs.forEach(config => {
+        configs[config.id] = { ...config };
+      });
+      setLocalConfigs(configs);
+      setHasChanges({});
+    }
+  }, [isConfigOpen, modelConfigs.configs]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds(prev => {
@@ -109,6 +129,85 @@ const ConfigDialog: React.FC = () => {
   const handleSetActive = (id: string) => {
     setActiveConfig(id);
     toast.success('已切换到该配置');
+  };
+
+  // 保存单个配置的修改
+  const handleSaveConfig = (id: string) => {
+    const localConfig = localConfigs[id];
+    if (localConfig) {
+      updateModelConfig(id, localConfig);
+      setHasChanges(prev => {
+        const newChanges = { ...prev };
+        delete newChanges[id];
+        return newChanges;
+      });
+      toast.success('配置已保存');
+    }
+  };
+
+  // 重置单个配置的修改
+  const handleResetConfig = (id: string) => {
+    const originalConfig = modelConfigs.configs.find(c => c.id === id);
+    if (originalConfig) {
+      setLocalConfigs(prev => ({
+        ...prev,
+        [id]: { ...originalConfig },
+      }));
+      setHasChanges(prev => {
+        const newChanges = { ...prev };
+        delete newChanges[id];
+        return newChanges;
+      });
+      toast.info('已重置修改');
+    }
+  };
+
+  // 更新本地配置状态
+  const updateLocalConfig = (id: string, updates: Partial<ModelConfig>) => {
+    setLocalConfigs(prev => ({
+      ...prev,
+      [id]: { ...prev[id], ...updates },
+    }));
+    setHasChanges(prev => ({
+      ...prev,
+      [id]: true,
+    }));
+  };
+
+  // 保存所有修改
+  const handleSaveAll = () => {
+    Object.keys(hasChanges).forEach(id => {
+      if (hasChanges[id] && localConfigs[id]) {
+        updateModelConfig(id, localConfigs[id]);
+      }
+    });
+    setHasChanges({});
+    toast.success('所有修改已保存');
+  };
+
+  // 验证配置
+  const handleValidateConfig = async (id: string) => {
+    const config = localConfigs[id] || modelConfigs.configs.find(c => c.id === id);
+    if (!config) return;
+
+    if (!config.apiKey) {
+      toast.error('请先填写 API Key');
+      return;
+    }
+
+    setValidatingId(id);
+    try {
+      const result = await window.electronAPI.config.validate(config);
+      if (result.valid) {
+        toast.success('API 验证成功');
+      } else {
+        toast.error(`验证失败: ${result.error || '未知错误'}`);
+      }
+    } catch (err: any) {
+      toast.error(`验证出错: ${err.message}`);
+    } finally {
+      setValidatingId(null);
+    }
   };
 
   const handleStartEditName = (id: string, currentName: string) => {
@@ -170,6 +269,17 @@ const ConfigDialog: React.FC = () => {
     const isExpanded = expandedIds.has(config.id);
     const isActive = modelConfigs.activeConfigId === config.id;
     const isEditing = editingId === config.id;
+    const localConfig = localConfigs[config.id] || config;
+    const hasChange = hasChanges[config.id];
+
+    // 更新本地配置
+    const updateLocalConfig = (key: keyof ModelConfig, value: any) => {
+      setLocalConfigs(prev => ({
+        ...prev,
+        [config.id]: { ...prev[config.id], [key]: value }
+      }));
+      setHasChanges(prev => ({ ...prev, [config.id]: true }));
+    };
 
     return (
       <motion.div
@@ -180,7 +290,7 @@ const ConfigDialog: React.FC = () => {
         className="rounded-lg border overflow-hidden mb-3"
         style={{
           background: isActive ? `${TERMINAL.cyan}08` : '#fff',
-          borderColor: isActive ? TERMINAL.cyan : `${TERMINAL.bgTertiary}40`,
+          borderColor: hasChange ? TERMINAL.yellow : (isActive ? TERMINAL.cyan : `${TERMINAL.bgTertiary}40`),
         }}
       >
         {/* 配置头部 */}
@@ -197,6 +307,13 @@ const ConfigDialog: React.FC = () => {
             {/* 激活标记 */}
             {isActive && (
               <Star size={12} fill={TERMINAL.yellow} style={{ color: TERMINAL.yellow }} />
+            )}
+
+            {/* 修改标记 */}
+            {hasChange && (
+              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: TERMINAL.yellow, color: '#fff' }}>
+                未保存
+              </span>
             )}
 
             {/* 配置名称 */}
@@ -223,7 +340,7 @@ const ConfigDialog: React.FC = () => {
                 className="text-sm font-mono truncate flex-1"
                 style={{ color: TERMINAL.textDark }}
               >
-                {config.name}
+                {localConfig.name}
               </span>
             )}
 
@@ -235,12 +352,21 @@ const ConfigDialog: React.FC = () => {
                 color: TERMINAL.purple,
               }}
             >
-              {config.model}
+              {localConfig.model}
             </span>
           </div>
 
           {/* 操作按钮 */}
           <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => handleValidateConfig(config.id)}
+              disabled={validatingId === config.id}
+              className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-50"
+              title="验证 API 配置"
+              style={{ color: TERMINAL.cyan }}
+            >
+              <Zap size={14} className={validatingId === config.id ? 'animate-pulse' : ''} />
+            </button>
             {!isActive && (
               <button
                 onClick={() => handleSetActive(config.id)}
@@ -252,7 +378,7 @@ const ConfigDialog: React.FC = () => {
               </button>
             )}
             <button
-              onClick={() => handleStartEditName(config.id, config.name)}
+              onClick={() => handleStartEditName(config.id, localConfig.name)}
               className="p-1.5 rounded hover:bg-gray-100"
               title="重命名"
               style={{ color: TERMINAL.textSecondary }}
@@ -303,15 +429,13 @@ const ConfigDialog: React.FC = () => {
                   </label>
                   <input
                     type="password"
-                    value={config.apiKey}
-                    onChange={(e) =>
-                      updateModelConfig(config.id, { apiKey: e.target.value })
-                    }
+                    value={localConfig.apiKey}
+                    onChange={(e) => updateLocalConfig('apiKey', e.target.value)}
                     placeholder="sk-xxxxxxxx"
                     className="w-full px-3 py-2 rounded-lg text-sm font-mono border focus:outline-none"
                     style={{
                       background: '#fff',
-                      borderColor: `${TERMINAL.bgTertiary}50`,
+                      borderColor: hasChange ? TERMINAL.yellow : `${TERMINAL.bgTertiary}50`,
                       color: TERMINAL.textDark,
                     }}
                   />
@@ -328,15 +452,13 @@ const ConfigDialog: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    value={config.baseUrl}
-                    onChange={(e) =>
-                      updateModelConfig(config.id, { baseUrl: e.target.value })
-                    }
+                    value={localConfig.baseUrl}
+                    onChange={(e) => updateLocalConfig('baseUrl', e.target.value)}
                     placeholder="https://api.openai.com/v1"
                     className="w-full px-3 py-2 rounded-lg text-sm font-mono border focus:outline-none"
                     style={{
                       background: '#fff',
-                      borderColor: `${TERMINAL.bgTertiary}50`,
+                      borderColor: hasChange ? TERMINAL.yellow : `${TERMINAL.bgTertiary}50`,
                       color: TERMINAL.textDark,
                     }}
                   />
@@ -353,15 +475,13 @@ const ConfigDialog: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    value={config.model}
-                    onChange={(e) =>
-                      updateModelConfig(config.id, { model: e.target.value })
-                    }
+                    value={localConfig.model}
+                    onChange={(e) => updateLocalConfig('model', e.target.value)}
                     placeholder="gpt-4"
                     className="w-full px-3 py-2 rounded-lg text-sm font-mono border focus:outline-none"
                     style={{
                       background: '#fff',
-                      borderColor: `${TERMINAL.bgTertiary}50`,
+                      borderColor: hasChange ? TERMINAL.yellow : `${TERMINAL.bgTertiary}50`,
                       color: TERMINAL.textDark,
                     }}
                   />
@@ -382,19 +502,15 @@ const ConfigDialog: React.FC = () => {
                         min="0"
                         max="2"
                         step="0.1"
-                        value={config.temperature}
-                        onChange={(e) =>
-                          updateModelConfig(config.id, {
-                            temperature: parseFloat(e.target.value),
-                          })
-                        }
+                        value={localConfig.temperature}
+                        onChange={(e) => updateLocalConfig('temperature', parseFloat(e.target.value))}
                         className="flex-1 accent-purple-500"
                       />
                       <span
                         className="text-xs font-mono w-8 text-right"
                         style={{ color: TERMINAL.cyan }}
                       >
-                        {config.temperature}
+                        {localConfig.temperature}
                       </span>
                     </div>
                   </div>
@@ -410,16 +526,12 @@ const ConfigDialog: React.FC = () => {
                       type="number"
                       min="1"
                       max="128000"
-                      value={config.maxTokens}
-                      onChange={(e) =>
-                        updateModelConfig(config.id, {
-                          maxTokens: parseInt(e.target.value) || 32768,
-                        })
-                      }
+                      value={localConfig.maxTokens}
+                      onChange={(e) => updateLocalConfig('maxTokens', parseInt(e.target.value) || 32768)}
                       className="w-full px-3 py-2 rounded-lg text-sm font-mono border focus:outline-none"
                       style={{
                         background: '#fff',
-                        borderColor: `${TERMINAL.bgTertiary}50`,
+                        borderColor: hasChange ? TERMINAL.yellow : `${TERMINAL.bgTertiary}50`,
                         color: TERMINAL.textDark,
                       }}
                     />
@@ -580,17 +692,52 @@ const ConfigDialog: React.FC = () => {
                 </AnimatePresence>
               </div>
 
-              {/* 底部提示 */}
+              {/* 底部操作栏 */}
               <div
-                className="px-4 py-2 border-t text-xs text-center shrink-0"
+                className="px-4 py-3 border-t flex items-center justify-between shrink-0"
                 style={{
                   borderColor: `${TERMINAL.bgTertiary}20`,
-                  color: TERMINAL.textSecondary,
                 }}
               >
-                <span style={{ color: TERMINAL.yellow }}>★</span> 星标表示当前激活的配置
-                {' · '}
-                点击 <Check size={10} className="inline" style={{ color: TERMINAL.green }} /> 切换配置
+                <div className="text-xs" style={{ color: TERMINAL.textSecondary }}>
+                  <span style={{ color: TERMINAL.yellow }}>★</span> 当前配置
+                  {' · '}
+                  {Object.keys(hasChanges).some(k => hasChanges[k]) && (
+                    <span style={{ color: TERMINAL.orange }}>
+                      有未保存的修改
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setLocalConfigs({});
+                      setHasChanges({});
+                    }}
+                    disabled={!Object.keys(hasChanges).some(k => hasChanges[k])}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono border transition-all disabled:opacity-40"
+                    style={{
+                      borderColor: `${TERMINAL.bgTertiary}50`,
+                      color: TERMINAL.textSecondary,
+                    }}
+                  >
+                    <RotateCcw size={12} />
+                    重置
+                  </button>
+                  <button
+                    onClick={handleSaveAll}
+                    disabled={!Object.keys(hasChanges).some(k => hasChanges[k])}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono border transition-all disabled:opacity-40"
+                    style={{
+                      background: Object.keys(hasChanges).some(k => hasChanges[k]) ? TERMINAL.green : `${TERMINAL.bgTertiary}50`,
+                      borderColor: TERMINAL.green,
+                      color: '#fff',
+                    }}
+                  >
+                    <Save size={12} />
+                    保存全部
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

@@ -103,6 +103,33 @@ interface ElectronAPI {
     set: (config: any) => Promise<void>;
     validate: (config: any) => Promise<any>;
     getModelInfo: (config: any) => Promise<{ maxTokens?: number; modelInfo?: any }>;
+    // 模型配置 API
+    modelConfig: {
+      getAll: () => Promise<{
+        configs: any[];
+        activeConfigId: string;
+      }>;
+      getActive: () => Promise<any | null>;
+      add: (config: any) => Promise<any>;
+      update: (id: string, config: any) => Promise<any | null>;
+      delete: (id: string) => Promise<{ success: boolean }>;
+      setActive: (id: string) => Promise<any | null>;
+      duplicate: (id: string) => Promise<any | null>;
+      import: (configs: any[]) => Promise<any[]>;
+      export: () => Promise<any[]>;
+      sync: (modelConfigs: any) => Promise<{ success: boolean }>;
+      migrateFromLocalStorage: (data: string) => Promise<{ success: boolean }>;
+    };
+    // 应用设置 API
+    appSettings: {
+      get: () => Promise<{
+        enableThinking: boolean;
+        [key: string]: any;
+      }>;
+      save: (settings: any) => Promise<{ success: boolean }>;
+      getThinkingEnabled: () => Promise<boolean>;
+      setThinkingEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
+    };
   };
   file: {
     selectImage: () => Promise<{ canceled: boolean; data?: string }>;

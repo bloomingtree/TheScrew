@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Paperclip, X, StopCircle } from 'lucide-react';
+import { Send, Paperclip, X, StopCircle, Brain } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { useConfigStore } from '../../store/configStore';
 import { useConversationStore } from '../../store/conversationStore';
@@ -16,8 +16,13 @@ const InputArea: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, setTokenUsage } = useChatStore();
-  const { apiKey } = useConfigStore();
+  const { apiKey, appSettings, setThinkingEnabled, loadAppSettings } = useConfigStore();
   const { currentConversationId, generateTitle } = useConversationStore();
+
+  // 加载应用设置
+  useEffect(() => {
+    loadAppSettings();
+  }, []);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -326,6 +331,18 @@ return (
                 <Paperclip size={16} />
               </button>
               <TokenIndicator />
+              {/* 思考模式开关 */}
+              <button
+                onClick={() => setThinkingEnabled(!appSettings.enableThinking)}
+                className={`p-1.5 rounded-lg transition-all ${
+                  appSettings.enableThinking
+                    ? 'bg-purple-100 text-purple-600 hover:bg-purple-200'
+                    : 'text-gray-400 hover:bg-gray-200/50 hover:text-gray-600'
+                }`}
+                title={appSettings.enableThinking ? '思考模式：已开启' : '思考模式：已关闭'}
+              >
+                <Brain size={16} />
+              </button>
             </div>
 
             {isStreaming ? (

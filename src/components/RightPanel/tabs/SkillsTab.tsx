@@ -66,15 +66,14 @@ const SkillsTab: React.FC = () => {
 
   useEffect(() => {
     loadSkills();
-    // 自动启动设备发现
-    startDiscovery();
-    // 定期刷新设备列表
-    const interval = setInterval(() => {
-      if (isDiscovering) {
-        refreshPeers();
-      }
-    }, 5000);
-    return () => clearInterval(interval);
+    // TODO: 附近设备功能待调试和完善后再启用
+    // startDiscovery();
+    // const interval = setInterval(() => {
+    //   if (isDiscovering) {
+    //     refreshPeers();
+    //   }
+    // }, 5000);
+    // return () => clearInterval(interval);
   }, []);
 
   // 获取分类列表
@@ -441,7 +440,8 @@ const SkillsTab: React.FC = () => {
               <span>我的技能</span>
               <span className="text-xs opacity-75">({skills.length})</span>
             </button>
-            <button
+            {/* TODO: 附近设备功能待调试和完善后再启用 */}
+            {/* <button
               onClick={() => setViewMode('nearby')}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 viewMode === 'nearby'
@@ -452,7 +452,7 @@ const SkillsTab: React.FC = () => {
               {isDiscovering ? <Wifi size={14} /> : <WifiOff size={14} />}
               <span>附近设备</span>
               <span className="text-xs opacity-75">({peers.length})</span>
-            </button>
+            </button> */}
           </div>
 
           {/* 操作按钮 */}

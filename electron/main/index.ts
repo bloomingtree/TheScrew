@@ -186,11 +186,12 @@ app.whenReady().then(async () => {
   registerFileEditorHandlers();
   registerAttachmentHandlers();
 
+  // TODO: P2P 传输服务待调试和完善后再启用
   // 启动 P2P 传输服务（HTTP 服务器）
-  const transferService = getTransferService();
-  await transferService.start().catch(err => {
-    console.error('[Main] Failed to start transfer service:', err);
-  });
+  // const transferService = getTransferService();
+  // await transferService.start().catch(err => {
+  //   console.error('[Main] Failed to start transfer service:', err);
+  // });
 
   createWindow();
 });

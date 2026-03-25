@@ -9,6 +9,7 @@ import { getWorkspacePath } from '../tools/FileTools';
 import { getContextBuilder } from '../core/ContextBuilder';
 import { countContextTokens } from '../utils/tokenCounter';
 import type { Attachment, Message } from '../../../src/types';
+import { getAppConfigStore } from '../config/AppConfigStore';
 
 let currentClient: OpenAIClient | null = null;
 let currentAbortController: AbortController | null = null;
@@ -198,7 +199,9 @@ export function registerChatHandlers(store: Store) {
 
   ipcMain.handle('chat:generateTitle', async (_event, message: string) => {
     try {
-      const config = store.get('config') as any;
+      // 从 AppConfigStore 获取激活的配置
+      const appConfigStore = getAppConfigStore();
+      const config = appConfigStore.getActiveConfig();
 
       if (!config || !config.apiKey) {
         throw new Error('请先配置 API Key');
@@ -249,11 +252,28 @@ export function registerChatHandlers(store: Store) {
 
   ipcMain.handle('chat:stream', async (event, messages: any[], conversationId?: string) => {
     try {
-      const config = store.get('config') as any;
+      // 从 AppConfigStore 获取激活的配置
+      const appConfigStore = getAppConfigStore();
+      const config = appConfigStore.getActiveConfig();
 
-      if (!config || !config.apiKey) {
+      console.log('[ChatHandler] getActiveConfig result:', config ? {
+        name: config.name,
+        model: config.model,
+        hasApiKey: !!config?.apiKey,
+        baseUrl: config?.baseUrl
+      } : 'null');
+
+      if (!config) {
+        console.error('[ChatHandler] No active config found in AppConfigStore');
+        throw new Error('未找到有效配置，请先在设置中配置模型信息');
+      }
+
+      if (!config.apiKey) {
+        console.error('[ChatHandler] API Key is empty in config');
         throw new Error('请先配置 API Key');
       }
+
+      console.log('[OpenAIClient] Using config - name:', config.name, 'model:', config.model);
 
       if (currentAbortController) {
         currentAbortController.abort();

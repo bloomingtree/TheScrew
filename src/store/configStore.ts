@@ -1,10 +1,18 @@
 import { create } from 'zustand';
 import { Config, ModelConfig, ModelConfigs } from '../types';
 
+// 应用设置接口
+interface AppSettings {
+  enableThinking: boolean;
+  [key: string]: any;
+}
+
 interface ConfigState extends Config {
   isConfigOpen: boolean;
   // 多配置支持
   modelConfigs: ModelConfigs;
+  // 应用设置
+  appSettings: AppSettings;
 
   // 单配置操作（兼容旧代码）
   setConfig: (config: Partial<Config>) => void;
@@ -20,6 +28,17 @@ interface ConfigState extends Config {
   importConfigs: (configs: ModelConfig[]) => void;
   exportConfigs: () => ModelConfig[];
   getActiveConfig: () => ModelConfig | null;
+
+  // 应用设置操作
+  loadAppSettings: () => Promise<void>;
+  setThinkingEnabled: (enabled: boolean) => void;
+  getThinkingEnabled: () => boolean;
+
+  // 手动同步到后端
+  syncToBackendNow: () => Promise<boolean>;
+
+  // 从后端加载配置
+  loadFromBackend: () => Promise<void>;
 }
 
 const defaultConfig: Config = {
@@ -63,12 +82,35 @@ const loadModelConfigs = (): ModelConfigs => {
   };
 };
 
-// 保存到 localStorage
+// 保存到 localStorage（同步）
 const saveModelConfigs = (modelConfigs: ModelConfigs) => {
   try {
     localStorage.setItem('modelConfigs', JSON.stringify(modelConfigs));
   } catch (e) {
-    console.error('Failed to save model configs:', e);
+    console.error('Failed to save model configs to localStorage:', e);
+  }
+};
+
+// 同步到后端文件（异步）
+const syncToBackend = async (modelConfigs: ModelConfigs) => {
+  try {
+    if ((window as any).electronAPI?.config?.modelConfig?.sync) {
+      console.log('[ConfigStore] Syncing model configs to backend...', {
+        configsCount: modelConfigs?.configs?.length,
+        activeId: modelConfigs?.activeConfigId,
+        firstConfig: modelConfigs?.configs?.[0] ? {
+          name: modelConfigs.configs[0].name,
+          model: modelConfigs.configs[0].model,
+          hasApiKey: !!modelConfigs.configs[0].apiKey
+        } : null
+      });
+      const result = await (window as any).electronAPI.config.modelConfig.sync(modelConfigs);
+      console.log('[ConfigStore] Sync result:', result);
+    } else {
+      console.warn('[ConfigStore] electronAPI.config.modelConfig.sync not available');
+    }
+  } catch (e) {
+    console.error('Failed to sync model configs to backend:', e);
   }
 };
 
@@ -91,6 +133,7 @@ export const useConfigStore = create<ConfigState>((set, get) => {
 
     isConfigOpen: false,
     modelConfigs: initialModelConfigs,
+    appSettings: { enableThinking: false },
 
     // 单配置操作（兼容旧代码）
     setConfig: (config) => set((state) => ({ ...state, ...config })),
@@ -116,6 +159,8 @@ export const useConfigStore = create<ConfigState>((set, get) => {
           configs: [...state.modelConfigs.configs, newConfig],
         };
         saveModelConfigs(newModelConfigs);
+        // 异步同步到后端（不阻塞 UI）
+        syncToBackend(newModelConfigs);
         return { modelConfigs: newModelConfigs };
       });
 
@@ -129,6 +174,8 @@ export const useConfigStore = create<ConfigState>((set, get) => {
         );
         const newModelConfigs = { ...state.modelConfigs, configs: newConfigs };
         saveModelConfigs(newModelConfigs);
+        // 异步同步到后端（不阻塞 UI）
+        syncToBackend(newModelConfigs);
 
         // 如果更新的是当前激活的配置，同步更新顶层配置
         if (id === state.modelConfigs.activeConfigId) {
@@ -169,6 +216,8 @@ export const useConfigStore = create<ConfigState>((set, get) => {
           activeConfigId: newActiveId,
         };
         saveModelConfigs(newModelConfigs);
+        // 异步同步到后端（不阻塞 UI）
+        syncToBackend(newModelConfigs);
 
         // 同步更新顶层配置
         const activeConfig = newConfigs.find(c => c.id === newActiveId);
@@ -197,6 +246,8 @@ export const useConfigStore = create<ConfigState>((set, get) => {
           activeConfigId: id,
         };
         saveModelConfigs(newModelConfigs);
+        // 异步同步到后端（不阻塞 UI）
+        syncToBackend(newModelConfigs);
 
         return {
           modelConfigs: newModelConfigs,
@@ -231,6 +282,8 @@ export const useConfigStore = create<ConfigState>((set, get) => {
           configs: [...state.modelConfigs.configs, newConfig],
         };
         saveModelConfigs(newModelConfigs);
+        // 异步同步到后端（不阻塞 UI）
+        syncToBackend(newModelConfigs);
         return { modelConfigs: newModelConfigs };
       });
 
@@ -254,6 +307,8 @@ export const useConfigStore = create<ConfigState>((set, get) => {
           configs: mergedConfigs,
         };
         saveModelConfigs(newModelConfigs);
+        // 异步同步到后端（不阻塞 UI）
+        syncToBackend(newModelConfigs);
 
         return { modelConfigs: newModelConfigs };
       });
@@ -268,6 +323,84 @@ export const useConfigStore = create<ConfigState>((set, get) => {
       return state.modelConfigs.configs.find(
         c => c.id === state.modelConfigs.activeConfigId
       ) || null;
+    },
+
+    // 应用设置操作
+    loadAppSettings: async () => {
+      try {
+        const settings = await (window as any).electronAPI.config.appSettings.get();
+        set({ appSettings: settings });
+      } catch (e) {
+        console.error('Failed to load app settings:', e);
+      }
+    },
+
+    setThinkingEnabled: (enabled: boolean) => {
+      set((state) => {
+        const newSettings = { ...state.appSettings, enableThinking: enabled };
+        // 异步保存到后端
+        (window as any).electronAPI?.config?.appSettings?.setThinkingEnabled?.(enabled);
+        return { appSettings: newSettings };
+      });
+    },
+
+    getThinkingEnabled: () => {
+      return get().appSettings.enableThinking ?? false;
+    },
+
+    // 手动同步到后端
+    syncToBackendNow: async () => {
+      const state = get();
+      console.log('[ConfigStore] Manual sync triggered');
+      await syncToBackend(state.modelConfigs);
+      return true;
+    },
+
+    // 从后端加载配置
+    loadFromBackend: async () => {
+      try {
+        console.log('[ConfigStore] Loading model configs from backend...');
+        const backendConfigs = await (window as any).electronAPI?.config?.modelConfig?.getAll?.();
+
+        // 检查后端是否有真正有效的配置（有 API Key）
+        const hasValidBackendConfig = backendConfigs?.configs?.some((c: ModelConfig) => c.apiKey && c.apiKey.length > 0);
+
+        if (hasValidBackendConfig) {
+          // 后端有有效配置，使用后端数据
+          console.log('[ConfigStore] Backend has valid config with API key, using backend data');
+          const activeConfig = backendConfigs.configs.find(
+            (c: ModelConfig) => c.id === backendConfigs.activeConfigId
+          ) || backendConfigs.configs[0];
+
+          set({
+            modelConfigs: backendConfigs,
+            ...(activeConfig ? {
+              apiKey: activeConfig.apiKey,
+              baseUrl: activeConfig.baseUrl,
+              model: activeConfig.model,
+              temperature: activeConfig.temperature,
+              maxTokens: activeConfig.maxTokens,
+            } : {}),
+          });
+
+          // 同时更新 localStorage
+          localStorage.setItem('modelConfigs', JSON.stringify(backendConfigs));
+        } else {
+          // 后端没有有效配置，检查 localStorage 是否有有效配置
+          const state = get();
+          const hasValidLocalConfig = state.modelConfigs.configs.some(c => c.apiKey && c.apiKey.length > 0);
+
+          if (hasValidLocalConfig) {
+            // localStorage 有有效配置，同步到后端
+            console.log('[ConfigStore] Backend has no valid config, syncing localStorage to backend');
+            await syncToBackend(state.modelConfigs);
+          } else {
+            console.log('[ConfigStore] Neither backend nor localStorage has valid config');
+          }
+        }
+      } catch (e) {
+        console.error('[ConfigStore] Failed to load from backend:', e);
+      }
     },
   };
 });

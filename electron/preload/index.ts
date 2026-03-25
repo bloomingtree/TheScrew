@@ -120,6 +120,16 @@ const electronAPI = {
       sync: (modelConfigs: any) => ipcRenderer.invoke('modelConfig:sync', modelConfigs) as Promise<{ success: boolean }>,
       migrateFromLocalStorage: (data: string) => ipcRenderer.invoke('modelConfig:migrateFromLocalStorage', data) as Promise<{ success: boolean }>,
     },
+    // 应用设置 API
+    appSettings: {
+      get: () => ipcRenderer.invoke('appSettings:get') as Promise<{
+        enableThinking: boolean;
+        [key: string]: any;
+      }>,
+      save: (settings: any) => ipcRenderer.invoke('appSettings:save', settings) as Promise<{ success: boolean }>,
+      getThinkingEnabled: () => ipcRenderer.invoke('appSettings:getThinkingEnabled') as Promise<boolean>,
+      setThinkingEnabled: (enabled: boolean) => ipcRenderer.invoke('appSettings:setThinkingEnabled', enabled) as Promise<{ success: boolean }>,
+    },
   },
   file: {
     selectImage: () => ipcRenderer.invoke('file:select-image') as Promise<{ canceled: boolean; data?: string }>,

@@ -31,10 +31,19 @@ export interface ModelConfigs {
 }
 
 /**
+ * 应用设置接口（思考模式等）
+ */
+export interface AppSettings {
+  enableThinking: boolean;  // 是否启用思考模式
+  [key: string]: any;  // 允许扩展其他设置
+}
+
+/**
  * 应用配置数据结构
  */
 export interface AppConfig {
   modelConfigs: ModelConfigs;
+  settings?: AppSettings;
   version?: number;
 }
 
@@ -70,10 +79,13 @@ export class AppConfigStore {
 
   constructor() {
     const pathManager = getPathManager();
+    const configPath = pathManager.getConfigPath();
+    console.log('[AppConfigStore] Initializing with config path:', configPath);
     this.store = new Store<AppConfig>({
       name: 'config',
-      cwd: pathManager.getConfigPath(),
+      cwd: configPath,
     });
+    console.log('[AppConfigStore] Store file path:', this.store.path);
   }
 
   /**
@@ -81,11 +93,13 @@ export class AppConfigStore {
    */
   getModelConfigs(): ModelConfigs {
     const stored = this.store.get('modelConfigs');
+    console.log('[AppConfigStore] getModelConfigs - stored:', stored ? `has ${stored.configs?.length} configs` : 'null/undefined');
     if (stored && stored.configs && stored.configs.length > 0) {
       return stored;
     }
 
     // 返回默认配置
+    console.log('[AppConfigStore] No stored configs, returning default');
     const defaultModelConfig: ModelConfig = {
       id: generateId(),
       name: '默认配置',
@@ -105,7 +119,9 @@ export class AppConfigStore {
    * 保存模型配置
    */
   saveModelConfigs(modelConfigs: ModelConfigs): void {
+    console.log('[AppConfigStore] saveModelConfigs - saving', modelConfigs?.configs?.length, 'configs');
     this.store.set('modelConfigs', modelConfigs);
+    console.log('[AppConfigStore] Model configs saved to:', this.store.path);
   }
 
   /**
@@ -113,7 +129,9 @@ export class AppConfigStore {
    */
   getActiveConfig(): ModelConfig | null {
     const modelConfigs = this.getModelConfigs();
-    return modelConfigs.configs.find(c => c.id === modelConfigs.activeConfigId) || modelConfigs.configs[0] || null;
+    const activeConfig = modelConfigs.configs.find(c => c.id === modelConfigs.activeConfigId) || modelConfigs.configs[0] || null;
+    console.log('[AppConfigStore] getActiveConfig - found:', activeConfig ? `${activeConfig.name} (${activeConfig.model})` : 'null');
+    return activeConfig;
   }
 
   /**
@@ -271,6 +289,52 @@ export class AppConfigStore {
    */
   saveModelConfigsSync(modelConfigs: ModelConfigs): void {
     this.saveModelConfigs(modelConfigs);
+  }
+
+  // ==================== 应用设置 ====================
+
+  /**
+   * 获取应用设置
+   */
+  getSettings(): AppSettings {
+    const stored = this.store.get('settings');
+    if (stored) {
+      return stored;
+    }
+    // 返回默认设置
+    return {
+      enableThinking: false,
+    };
+  }
+
+  /**
+   * 保存应用设置
+   */
+  saveSettings(settings: AppSettings): void {
+    this.store.set('settings', settings);
+  }
+
+  /**
+   * 更新单个设置项
+   */
+  updateSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K]): void {
+    const settings = this.getSettings();
+    settings[key] = value;
+    this.saveSettings(settings);
+  }
+
+  /**
+   * 获取思考模式状态
+   */
+  getThinkingEnabled(): boolean {
+    return this.getSettings().enableThinking ?? false;
+  }
+
+  /**
+   * 设置思考模式状态
+   */
+  setThinkingEnabled(enabled: boolean): void {
+    this.updateSetting('enableThinking', enabled);
   }
 }
 

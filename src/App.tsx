@@ -7,24 +7,36 @@ import Toast from './components/Toast';
 import SplitPanel from './components/SplitPanel';
 
 function App() {
-  const { setConfigOpen, setConfig } = useConfigStore();
+  const { setConfigOpen, loadFromBackend, loadAppSettings, getActiveConfig } = useConfigStore();
   const { loadFromDatabase } = useConversationStore();
 
   useEffect(() => {
     const initializeApp = async () => {
-      // 加载配置
-      const config = await window.electronAPI.config.get();
-      setConfig(config);
-      if (!config.apiKey) {
+      console.log('[App] Initializing app...');
+
+      // 从后端加载模型配置（优先级最高）
+      await loadFromBackend();
+
+      // 加载应用设置
+      await loadAppSettings();
+
+      // 检查是否有有效配置
+      const activeConfig = getActiveConfig();
+      console.log('[App] Active config after load:', activeConfig ? activeConfig.name : 'null');
+
+      if (!activeConfig || !activeConfig.apiKey) {
+        console.log('[App] No API key configured, opening config dialog');
         setConfigOpen(true);
       }
 
       // 加载对话历史
       await loadFromDatabase();
+
+      console.log('[App] App initialization complete');
     };
 
     initializeApp();
-  }, [setConfigOpen, setConfig, loadFromDatabase]);
+  }, [setConfigOpen, loadFromBackend, loadAppSettings, getActiveConfig, loadFromDatabase]);
 
   return (
     <div className="relative h-screen overflow-hidden bg-workspace-50">

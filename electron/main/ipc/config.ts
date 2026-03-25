@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import Store from 'electron-store';
-import { getAppConfigStore, ModelConfig, ModelConfigs } from '../config/AppConfigStore';
+import { getAppConfigStore, ModelConfig, ModelConfigs, AppSettings } from '../config/AppConfigStore';
 
 export function registerConfigHandlers(store: Store) {
   const appConfigStore = getAppConfigStore();
@@ -132,7 +132,59 @@ export function registerConfigHandlers(store: Store) {
    */
   ipcMain.handle('modelConfig:sync', (_event, modelConfigs: ModelConfigs): { success: boolean } => {
     try {
+      console.log('[ConfigIPC] modelConfig:sync called with', modelConfigs?.configs?.length, 'configs');
+      console.log('[ConfigIPC] Active config ID:', modelConfigs?.activeConfigId);
+      if (modelConfigs?.configs?.[0]) {
+        console.log('[ConfigIPC] First config:', JSON.stringify({
+          id: modelConfigs.configs[0].id,
+          name: modelConfigs.configs[0].name,
+          model: modelConfigs.configs[0].model,
+          hasApiKey: !!modelConfigs.configs[0].apiKey
+        }));
+      }
       appConfigStore.saveModelConfigsSync(modelConfigs);
+      console.log('[ConfigIPC] Model configs saved successfully');
+      return { success: true };
+    } catch (e: any) {
+      console.error('[ConfigIPC] Failed to sync model configs:', e);
+      return { success: false };
+    }
+  });
+
+  // ========== 应用设置接口 ==========
+
+  /**
+   * 获取应用设置
+   */
+  ipcMain.handle('appSettings:get', (): AppSettings => {
+    return appConfigStore.getSettings();
+  });
+
+  /**
+   * 保存应用设置
+   */
+  ipcMain.handle('appSettings:save', (_event, settings: AppSettings): { success: boolean } => {
+    try {
+      appConfigStore.saveSettings(settings);
+      return { success: true };
+    } catch (e) {
+      return { success: false };
+    }
+  });
+
+  /**
+   * 获取思考模式状态
+   */
+  ipcMain.handle('appSettings:getThinkingEnabled', (): boolean => {
+    return appConfigStore.getThinkingEnabled();
+  });
+
+  /**
+   * 设置思考模式状态
+   */
+  ipcMain.handle('appSettings:setThinkingEnabled', (_event, enabled: boolean): { success: boolean } => {
+    try {
+      appConfigStore.setThinkingEnabled(enabled);
       return { success: true };
     } catch (e) {
       return { success: false };

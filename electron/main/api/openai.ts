@@ -17,6 +17,15 @@ export class OpenAIClient {
   private setupInterceptors() {
     this.axiosInstance.interceptors.request.use(
       (config: any) => {
+        // 打印请求详情用于调试
+        console.log('[Axios] Request:', {
+          url: config.url,
+          method: config.method,
+          model: config.data?.model,
+          messageCount: config.data?.messages?.length,
+          hasTools: config.data?.tools?.length > 0,
+          maxTokens: config.data?.max_tokens,
+        });
         return config;
       },
       (error: any) => {
@@ -35,14 +44,53 @@ export class OpenAIClient {
         console.error('Status:', status || 'No status');
         console.error('Message:', error.message);
 
+        // 详细打印响应错误数据
         if (error.response?.data) {
-          console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+          const errorData = error.response.data;
+          if (typeof errorData === 'object') {
+            console.error('Response Data:', JSON.stringify(errorData, null, 2));
+            // 特别提取错误信息
+            if (errorData.error) {
+              console.error('API Error Type:', errorData.error.type);
+              console.error('API Error Message:', errorData.error.message);
+              console.error('API Error Code:', errorData.error.code);
+            }
+          } else {
+            console.error('Response Data (raw):', errorData);
+          }
         }
         if (error.config?.url) {
           console.error('Request URL:', error.config.url);
         }
+        if (error.config?.data) {
+          // 打印请求体摘要（避免打印大量二进制数据）
+          try {
+            const requestData = typeof error.config.data === 'string'
+              ? JSON.parse(error.config.data)
+              : error.config.data;
+            console.error('Request Body Summary:', {
+              model: requestData.model,
+              messageCount: requestData.messages?.length,
+              hasTools: requestData.tools?.length > 0,
+              maxTokens: requestData.max_tokens,
+              temperature: requestData.temperature,
+            });
+          } catch (e) {
+            // 如果解析失败，只打印基本信息
+            console.error('Request Body: [unable to parse]');
+          }
+        }
         if (error.code) {
           console.error('Error Code:', error.code);
+        }
+
+        // 如果是 400 错误，特别提示模型名称问题
+        if (status === 400) {
+          console.error('\n>>> 400 Bad Request - 可能的原因:');
+          console.error('    1. 模型名称格式不正确（检查是否与 API 文档一致）');
+          console.error('    2. max_tokens 超出模型限制');
+          console.error('    3. 请求参数格式问题');
+          console.error('    请查看上方 "API Error Message" 获取具体错误原因\n');
         }
 
         console.error('==========================================\n');
@@ -60,6 +108,23 @@ export class OpenAIClient {
       });
 
       if (response.status >= 200 && response.status < 300) {
+        // 打印可用模型列表，帮助用户确认正确的模型名称
+        if (response.data?.data) {
+          const modelIds = response.data.data.map((m: any) => m.id).sort();
+          console.log('[OpenAIClient] Available models:', modelIds.join(', '));
+
+          // 检查当前配置的模型是否在列表中
+          if (this.model && !modelIds.includes(this.model)) {
+            console.warn(`[OpenAIClient] Warning: Model "${this.model}" not found in available models`);
+            // 尝试找到相似的模型名称
+            const similar = modelIds.filter((id: string) =>
+              id.toLowerCase().includes(this.model.toLowerCase().replace(/[-_]/g, ''))
+            );
+            if (similar.length > 0) {
+              console.log('[OpenAIClient] Similar models found:', similar.join(', '));
+            }
+          }
+        }
         return { valid: true };
       }
 
