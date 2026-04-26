@@ -330,8 +330,8 @@ export function registerChatHandlers(store: Store) {
 
       // 工具调用历史，用于检测重复调用
       const toolCallHistory: string[] = [];
-      const MAX_TOOL_ITERATIONS = 50;  // 安全上限，防止真正的无限循环
-      const MAX_SAME_TOOL_CALLS = 3;   // 相同工具调用次数限制
+      const toolFailureHistory: Map<string, number> = new Map(); // 追踪工具失败次数
+      const MAX_SAME_TOOL_FAILURES = 3; // 同参数同工具失败超过3次时提醒
       let iteration = 0;
 
       let roundChunks: string[] = [];  // 每轮的文本内容（循环外声明）
@@ -339,15 +339,9 @@ export function registerChatHandlers(store: Store) {
       while (true) {
         iteration++;
 
-        // 安全上限检查（只在异常情况触发）
-        if (iteration > MAX_TOOL_ITERATIONS) {
-          console.error(`[ERROR] Tool iteration limit reached (${MAX_TOOL_ITERATIONS}), breaking loop`);
-          messages.push({
-            id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            role: 'system',
-            content: `已达到最大工具调用轮次限制。请直接回答用户问题，不要继续调用工具。`,
-          });
-          break;
+        // 迭代计数日志（不限制调用次数）
+        if (iteration % 10 === 0) {
+          console.log(`[INFO] Tool iteration count: ${iteration}`);
         }
 
         // 计算 token 使用量
@@ -391,29 +385,16 @@ export function registerChatHandlers(store: Store) {
                 roundChunks = [];  // 清空，准备下一轮
               }
 
-              // 检测重复的工具调用
-              const duplicateToolCalls: string[] = [];
+              // 检测重复的工具调用（仅记录，不阻止）
               for (const toolCall of parsed.toolCalls) {
                 const callKey = `${toolCall.function.name}:${JSON.stringify(toolCall.function.arguments)}`;
                 const sameCallCount = toolCallHistory.filter(k => k === callKey).length;
 
-                if (sameCallCount >= MAX_SAME_TOOL_CALLS) {
-                  duplicateToolCalls.push(`${toolCall.function.name} (已调用 ${sameCallCount} 次)`);
-                  console.warn(`[WARN] Duplicate tool call detected: ${callKey}`);
+                if (sameCallCount >= 3 && sameCallCount % 3 === 0) {
+                  console.warn(`[WARN] Repeated tool call detected: ${callKey} (called ${sameCallCount} times)`);
                 }
 
                 toolCallHistory.push(callKey);
-              }
-
-              // 如果有重复调用，跳过执行并提示 AI
-              if (duplicateToolCalls.length > 0) {
-                console.error(`[ERROR] Blocking duplicate tool calls: ${duplicateToolCalls.join(', ')}`);
-                messages.push({
-                  id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                  role: 'system',
-                  content: `检测到重复的工具调用: ${duplicateToolCalls.join(', ')}。请停止重复调用，使用已有结果回答用户问题。`,
-                });
-                break;
               }
 
               event.sender.send('chat:tool_calls', parsed.toolCalls);
@@ -493,6 +474,27 @@ export function registerChatHandlers(store: Store) {
                 console.log('[chat:stream] Added assistant with tool_calls, count:', parsed.toolCalls.length);
 
                 for (const result of results) {
+                  // 追踪工具失败次数
+                  const callKey = `${result.name}:${JSON.stringify(parsed.toolCalls.find(tc => tc.id === result.toolCallId)?.function.arguments || '{}')}`;
+                  if (!result.success) {
+                    const failCount = (toolFailureHistory.get(callKey) || 0) + 1;
+                    toolFailureHistory.set(callKey, failCount);
+                    if (failCount >= MAX_SAME_TOOL_FAILURES) {
+                      console.warn(`[WARN] Tool ${result.name} has failed ${failCount} times with same arguments`);
+                      // 注入失败警告提示（不中断执行）
+                      messages.push({
+                        id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                        role: 'user',
+                        content: `[系统警告] 工具 ${result.name} 使用相同参数已失败 ${failCount} 次，请考虑更换参数或改用其他方法。`,
+                      });
+                      messages.push({
+                        id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                        role: 'assistant',
+                        content: `收到，我会尝试更换参数或改用其他方法。`,
+                      });
+                    }
+                  }
+
                   messages.push({
                     id: `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     role: 'tool',
@@ -582,7 +584,7 @@ export function registerChatHandlers(store: Store) {
 
       // 打印更详细的错误信息
       if (error.response?.data) {
-        console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+        console.error('Response Data:', safeStringify(error.response.data));
       }
       if (error.config?.url) {
         console.error('Request URL:', error.config.url);
@@ -597,7 +599,7 @@ export function registerChatHandlers(store: Store) {
       // 打印请求体大小（用于调试过大请求问题）
       if (error.config?.data) {
         const requestData = error.config.data;
-        const dataSize = typeof requestData === 'string' ? requestData.length : JSON.stringify(requestData).length;
+        const dataSize = typeof requestData === 'string' ? requestData.length : safeStringify(requestData).length;
         console.error('Request Body Size:', `${(dataSize / 1024).toFixed(2)} KB (${dataSize} chars)`);
       }
 
@@ -617,7 +619,7 @@ export function registerChatHandlers(store: Store) {
       if (error.response?.data?.error?.message) {
         errorMessage = error.response.data.error.message;
       } else if (error.response?.data?.error) {
-        errorMessage = JSON.stringify(error.response.data.error);
+        errorMessage = safeStringify(error.response.data.error);
       }
 
       // 添加状态码信息

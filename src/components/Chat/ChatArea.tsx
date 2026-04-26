@@ -59,9 +59,13 @@ const ChatArea: React.FC = () => {
     }
 
     // 如果消息没有真正变化（只是重新渲染），跳过同步
-    if (messages.length === lastSyncedMessagesRef.current.length &&
-        JSON.stringify(messages) === JSON.stringify(lastSyncedMessagesRef.current)) {
-      return;
+    // 使用消息 ID 和长度对比代替 JSON.stringify，避免循环引用崩溃
+    const prev = lastSyncedMessagesRef.current;
+    if (messages.length === prev.length && messages.length > 0) {
+      const sameContent = messages.every((msg, i) =>
+        msg.id === prev[i]?.id && msg.role === prev[i]?.role
+      );
+      if (sameContent) return;
     }
 
     // 只有当 messages 有内容时才同步

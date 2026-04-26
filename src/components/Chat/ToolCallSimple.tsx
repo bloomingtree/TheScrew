@@ -107,12 +107,9 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
           >
             {/* 主信息行 - 始终可见 */}
             <div
-              className={`flex items-center gap-3 px-3 py-2.5 border-b ${
+              className={`flex items-center gap-3 px-3 py-2.5 ${
                 (isSuccess || isError) ? 'cursor-pointer hover:bg-[#24283b]/50' : ''
               }`}
-              style={{
-                borderColor: 'rgba(65, 72, 104, 0.3)',
-              }}
               onClick={() => (isSuccess || isError) && toggleExpand(toolCall.id)}
             >
               {/* 状态图标 */}
@@ -128,9 +125,9 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                 )}
               </div>
 
-              {/* 工具名称和状态 - 终端命令风格 */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
+              {/* 工具名称 */}
+              <div className="flex-shrink-0">
+                <div className="flex items-center gap-1.5">
                   <span style={{ color: TERMINAL.green }} className="text-xs font-mono">$</span>
                   <span
                     className="text-xs font-medium font-mono"
@@ -138,31 +135,46 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                   >
                     {getToolNameCN(toolCall.function.name)}
                   </span>
-                  {isRunning && (
-                    <span
-                      className="text-xs font-mono animate-pulse"
-                      style={{ color: TERMINAL.orange }}
-                    >
-                      ⏳ 执行中...
-                    </span>
-                  )}
-                  {isSuccess && (
-                    <span
-                      className="text-xs font-mono"
-                      style={{ color: TERMINAL.green }}
-                    >
-                      ✓ 完成
-                    </span>
-                  )}
-                  {isError && (
-                    <span
-                      className="text-xs font-mono"
-                      style={{ color: TERMINAL.pink }}
-                    >
-                      ✗ 失败
-                    </span>
-                  )}
                 </div>
+              </div>
+
+              {/* 参数预览 - 直接显示在右侧，超长省略 */}
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <span
+                  className="text-xs font-mono block truncate"
+                  style={{ color: TERMINAL.textSecondary }}
+                  title={toolCall.function.arguments}
+                >
+                  {toolCall.function.arguments}
+                </span>
+              </div>
+
+              {/* 状态标签 */}
+              <div className="flex-shrink-0">
+                {isRunning && (
+                  <span
+                    className="text-xs font-mono animate-pulse"
+                    style={{ color: TERMINAL.orange }}
+                  >
+                    ⏳ 执行中...
+                  </span>
+                )}
+                {isSuccess && (
+                  <span
+                    className="text-xs font-mono"
+                    style={{ color: TERMINAL.green }}
+                  >
+                    ✓ 完成
+                  </span>
+                )}
+                {isError && (
+                  <span
+                    className="text-xs font-mono"
+                    style={{ color: TERMINAL.pink }}
+                  >
+                    ✗ 失败
+                  </span>
+                )}
               </div>
 
               {/* 时间信息 */}

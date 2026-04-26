@@ -8,41 +8,38 @@
   "files": [
     "dist-electron/**/*",
     "dist/**/*",
-    "package.json",
-    ".config/**/*",
-    "electron/main/python/**/*"
+    "package.json"
   ],
   "extraResources": [
     {
       "from": "electron/main/python",
       "to": "python",
       "filter": "**/*"
-    },
+    }
+  ],
+  "extraFiles": [
     {
       "from": ".config",
       "to": ".config",
-      "filter": "**/*"
+      "filter": [
+        "**/*",
+        "!data/conversations.json",
+        "!data/workspaces.json",
+        "!data/attachments/**",
+        "!data/scheduler/**",
+        "!credentials/**"
+      ]
     }
   ],
   "win": {
     "target": [
       {
-        "target": "nsis",
-        "arch": ["x64"]
-      },
-      {
-        "target": "portable",
+        "target": "dir",
         "arch": ["x64"]
       }
     ],
     "sign": null,
     "signAndEditExecutable": false
-  },
-  "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true
   },
   "extraMetadata": {
     "main": "dist-electron/main/index.js"

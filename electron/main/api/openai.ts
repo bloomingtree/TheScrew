@@ -1,5 +1,25 @@
 import axios from 'axios';
 
+/**
+ * 安全的 JSON.stringify，处理循环引用
+ */
+function safeStringify(obj: any, indent?: number | string): string {
+  const cache = new Set();
+  return JSON.stringify(
+    obj,
+    (_key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (cache.has(value)) {
+          return '[Circular]';
+        }
+        cache.add(value);
+      }
+      return value;
+    },
+    indent
+  );
+}
+
 export class OpenAIClient {
   private axiosInstance: any;
 
@@ -48,7 +68,7 @@ export class OpenAIClient {
         if (error.response?.data) {
           const errorData = error.response.data;
           if (typeof errorData === 'object') {
-            console.error('Response Data:', JSON.stringify(errorData, null, 2));
+            console.error('Response Data:', safeStringify(errorData, 2));
             // 特别提取错误信息
             if (errorData.error) {
               console.error('API Error Type:', errorData.error.type);
@@ -219,9 +239,9 @@ export class OpenAIClient {
   }
 
   async *streamChat(messages: any[], signal?: AbortSignal, tools?: any[]): AsyncGenerator<string> {
-    // 粗略估算请求体大小
-    const messagesStr = JSON.stringify(messages);
-    const toolsStr = tools ? JSON.stringify(tools) : '';
+    // 粗略估算请求体大小（使用 safeStringify 防止循环引用崩溃）
+    const messagesStr = safeStringify(messages);
+    const toolsStr = tools ? safeStringify(tools) : '';
     const estimatedSize = messagesStr.length + toolsStr.length;
 
     // 警告：请求体过大
@@ -290,7 +310,13 @@ export class OpenAIClient {
           
           const delta = parsed.choices?.[0]?.delta;
           const content = delta?.content;
+          const reasoningContent = delta?.reasoning_content;
           const newToolCalls = delta?.tool_calls;
+
+          // 处理思考内容（千问/QwQ 等模型的 reasoning_content）
+          if (reasoningContent) {
+            yield reasoningContent;
+          }
 
           if (content) {
             contentChunks.push(content);
@@ -302,7 +328,9 @@ export class OpenAIClient {
               if (toolCall.index !== undefined) {
                 if (!currentToolCall || currentToolCall.index !== toolCall.index) {
                   if (currentToolCall && currentToolCall.function && currentToolCall.function.arguments) {
-                    toolCalls.push(currentToolCall);
+                    // 清理流式传输中的临时字段（index），只保留 API 规范字段
+                    const { index: _, ...cleanCall } = currentToolCall;
+                    toolCalls.push(cleanCall);
                   }
                   currentToolCall = { ...toolCall, index: toolCall.index, function: { name: '', arguments: '' } };
                 }
@@ -325,7 +353,9 @@ export class OpenAIClient {
     }
     
     if (currentToolCall && currentToolCall.function && currentToolCall.function.arguments) {
-      toolCalls.push(currentToolCall);
+      // 清理流式传输中的临时字段（index），只保留 API 规范字段
+      const { index, ...cleanToolCall } = currentToolCall;
+      toolCalls.push(cleanToolCall);
     }
 
     if (toolCalls.length > 0) {
