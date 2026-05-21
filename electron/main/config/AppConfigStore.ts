@@ -7,6 +7,15 @@ import Store from 'electron-store';
 import { getPathManager } from './PathManager';
 
 /**
+ * 模型能力
+ */
+export interface ModelCapabilities {
+  vision: boolean;
+  toolUse: boolean;
+  streaming: boolean;
+}
+
+/**
  * 模型配置接口
  */
 export interface ModelConfig {
@@ -18,6 +27,7 @@ export interface ModelConfig {
   temperature: number;
   maxTokens: number;
   isDefault?: boolean;
+  capabilities?: ModelCapabilities;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -31,10 +41,21 @@ export interface ModelConfigs {
 }
 
 /**
+ * 思考模式类型
+ * - auto: 不干预，使用服务器默认设置
+ * - enabled: 强制开启思考（发送 chat_template_kwargs: { enable_thinking: true }）
+ * - disabled: 强制关闭思考（发送 chat_template_kwargs: { enable_thinking: false }）
+ */
+export type ThinkingMode = 'auto' | 'enabled' | 'disabled';
+
+/**
  * 应用设置接口（思考模式等）
  */
 export interface AppSettings {
-  enableThinking: boolean;  // 是否启用思考模式
+  thinkingMode?: ThinkingMode;  // 思考模式控制
+  hardwareAcceleration?: boolean; // 硬件加速（默认 true），设为 false 可解决虚拟机/远程桌面卡顿
+  /** @deprecated 使用 thinkingMode 替代 */
+  enableThinking?: boolean;
   [key: string]: any;  // 允许扩展其他设置
 }
 
@@ -295,15 +316,22 @@ export class AppConfigStore {
 
   /**
    * 获取应用设置
+   * 兼容旧的 enableThinking 布尔值，自动迁移为 thinkingMode
    */
   getSettings(): AppSettings {
     const stored = this.store.get('settings');
     if (stored) {
+      // 兼容迁移：enableThinking → thinkingMode
+      if (stored.thinkingMode === undefined && stored.enableThinking !== undefined) {
+        stored.thinkingMode = stored.enableThinking ? 'enabled' : 'disabled';
+        delete stored.enableThinking;
+        this.store.set('settings', stored);
+      }
       return stored;
     }
     // 返回默认设置
     return {
-      enableThinking: false,
+      thinkingMode: 'auto',
     };
   }
 
@@ -324,17 +352,17 @@ export class AppConfigStore {
   }
 
   /**
-   * 获取思考模式状态
+   * 获取思考模式
    */
-  getThinkingEnabled(): boolean {
-    return this.getSettings().enableThinking ?? false;
+  getThinkingMode(): ThinkingMode {
+    return this.getSettings().thinkingMode ?? 'auto';
   }
 
   /**
-   * 设置思考模式状态
+   * 设置思考模式
    */
-  setThinkingEnabled(enabled: boolean): void {
-    this.updateSetting('enableThinking', enabled);
+  setThinkingMode(mode: ThinkingMode): void {
+    this.updateSetting('thinkingMode', mode);
   }
 }
 

@@ -1,23 +1,8 @@
 import { ipcMain, dialog } from 'electron';
-import { readFile, stat, readdir, writeFile, mkdir } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import path from 'path';
-import { getFileEncoding } from '../utils/fileTypeDetector';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
-
-/**
- * Pyodide 文件系统桥接 - 工作空间文件接口
- *
- * 这些处理器允许 Pyodide（运行在 Renderer 进程）
- * 通过 IPC 访问工作空间文件系统
- */
-export interface WorkspaceFile {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  size?: number;
-  modified?: Date;
-}
 
 export function registerFileHandlers() {
   ipcMain.handle('file:select-image', async () => {
@@ -81,142 +66,38 @@ export function registerFileHandlers() {
     }
   });
 
-  // ============================================================================
-  // Pyodide 文件系统桥接 - IPC 处理器
-  // ============================================================================
-
-  /**
-   * 列出工作空间中的所有文件
-   * 用于 Pyodide 挂载工作空间到虚拟文件系统
-   */
-  ipcMain.handle('pyodide:list-files', async (_event, workspacePath: string) => {
+  // 通用文件选择 + 读取为 Buffer（用于附件上传按钮）
+  ipcMain.handle('file:select-and-read', async () => {
     try {
-      const files: WorkspaceFile[] = [];
+      const result = await dialog.showOpenDialog({
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          { name: 'Documents', extensions: ['docx', 'xlsx', 'pptx', 'pdf', 'txt', 'md', 'csv', 'json'] },
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
 
-      async function scanDir(dir: string, relativePath = '') {
-        const entries = await readdir(dir, { withFileTypes: true });
-
-        for (const entry of entries) {
-          // 跳过隐藏文件和 node_modules
-          if (entry.name.startsWith('.') || entry.name === 'node_modules') {
-            continue;
-          }
-
-          const fullPath = path.join(dir, entry.name);
-          const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
-
-          if (entry.isDirectory()) {
-            files.push({
-              name: entry.name,
-              path: relPath,
-              type: 'directory'
-            });
-            await scanDir(fullPath, relPath);
-          } else if (entry.isFile()) {
-            const stats = await stat(fullPath);
-            files.push({
-              name: entry.name,
-              path: relPath,
-              type: 'file',
-              size: stats.size,
-              modified: stats.mtime
-            });
-          }
-        }
+      if (result.canceled || result.filePaths.length === 0) {
+        return { canceled: true };
       }
 
-      await scanDir(workspacePath);
+      const files = [];
+      for (const filePath of result.filePaths) {
+        const buffer = await readFile(filePath);
+        files.push({
+          name: path.basename(filePath),
+          path: filePath,
+          buffer: buffer.buffer,
+          size: buffer.length,
+        });
+      }
 
-      return { success: true, files };
+      return { canceled: false, files };
     } catch (error: any) {
-      return { success: false, error: error.message };
+      return { canceled: true, error: error.message };
     }
   });
 
-  /**
-   * 读取工作空间文件内容 (支持二进制文件)
-   * 用于将文件加载到 Pyodide 的 MEMFS
-   */
-  ipcMain.handle('pyodide:read-file', async (_event, workspacePath: string, relativePath: string) => {
-    try {
-      // 安全检查：确保路径在工作空间内
-      const resolvedPath = path.resolve(workspacePath, relativePath);
-      if (!resolvedPath.startsWith(path.resolve(workspacePath))) {
-        return { success: false, error: '路径遍历检测：尝试访问工作空间外部的文件' };
-      }
-
-      // 检测文件类型以确定合适的编码
-      const encoding = getFileEncoding(relativePath);
-
-      let content: string;
-
-      if (encoding === 'base64') {
-        // 二进制文件：读取为 Buffer 并转换为 base64
-        const buffer = await readFile(resolvedPath);
-        content = buffer.toString('base64');
-      } else {
-        // 文本文件：读取为 UTF-8 字符串
-        content = await readFile(resolvedPath, 'utf-8');
-      }
-
-      return { success: true, content, path: relativePath, encoding };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  /**
-   * 写入文件到工作空间 (支持二进制文件)
-   * 用于将 Pyodide MEMFS 中的更改同步到本地文件系统
-   */
-  ipcMain.handle('pyodide:write-file', async (_event, workspacePath: string, relativePath: string, content: string, encoding?: string) => {
-    try {
-      // 安全检查：确保路径在工作空间内
-      const resolvedPath = path.resolve(workspacePath, relativePath);
-      if (!resolvedPath.startsWith(path.resolve(workspacePath))) {
-        return { success: false, error: '路径遍历检测：尝试访问工作空间外部的文件' };
-      }
-
-      // 确保目录存在
-      const dir = path.dirname(resolvedPath);
-      await mkdir(dir, { recursive: true });
-
-      // 根据编码写入文件
-      if (encoding === 'base64') {
-        // 二进制文件：从 base64 解码为 Buffer
-        const buffer = Buffer.from(content, 'base64');
-        await writeFile(resolvedPath, buffer);
-      } else {
-        // 文本文件：直接写入字符串
-        await writeFile(resolvedPath, content, 'utf-8');
-      }
-
-      return { success: true, path: relativePath };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  /**
-   * 删除工作空间文件
-   * 用于清理临时文件
-   */
-  ipcMain.handle('pyodide:delete-file', async (_event, workspacePath: string, relativePath: string) => {
-    try {
-      // 安全检查：确保路径在工作空间内
-      const resolvedPath = path.resolve(workspacePath, relativePath);
-      if (!resolvedPath.startsWith(path.resolve(workspacePath))) {
-        return { success: false, error: '路径遍历检测：尝试访问工作空间外部的文件' };
-      }
-
-      const { unlink } = await import('fs/promises');
-      await unlink(resolvedPath);
-
-      return { success: true, path: relativePath };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  console.log('[IPC] Pyodide file system bridge handlers registered');
+  console.log('[IPC] File handlers registered');
 }

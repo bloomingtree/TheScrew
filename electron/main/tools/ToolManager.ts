@@ -1,3 +1,5 @@
+import * as path from 'path';
+
 export interface Tool {
   name: string;
   description: string;
@@ -166,6 +168,7 @@ export class ToolManager {
   }
 
   async executeToolCall(toolCall: ToolCall, conversationId?: string): Promise<ToolResult> {
+    console.log(`[ToolManager] executeToolCall: ${toolCall.function.name}(${toolCall.function.arguments?.substring(0, 100)})`);
     const tool = this.tools.get(toolCall.function.name);
 
     if (!tool) {
@@ -183,6 +186,42 @@ export class ToolManager {
         args = JSON.parse(toolCall.function.arguments);
       } catch (e) {
         args = {};
+      }
+
+      // 清理路径参数中数字与中文之间的多余空格（模型常见错误）
+      if (args && typeof args === 'object') {
+        for (const key of ['path', 'filepath', 'filename', 'file_path', 'dir_path', 'directory', 'element_path', 'parent_path', 'target_path', 'path_a', 'path_b']) {
+          if (typeof args[key] === 'string') {
+            args[key] = args[key].replace(/(\d)\s+([\u4e00-\u9fa5])/g, '$1$2').replace(/([\u4e00-\u9fa5])\s+(\d)/g, '$1$2');
+          }
+        }
+      }
+
+      // 自动将相对路径解析为工作区绝对路径
+      if (args && typeof args === 'object') {
+        // 仅对这些明确是文件系统的参数做路径解析（跳过 element_path 等文档内部路径）
+        const filePathKeys = ['path', 'filepath', 'filename', 'file_path', 'dir_path', 'directory', 'template', 'output'];
+        // 直接通过 globalThis + Symbol.for 读取工作区路径
+        // 不能用 require('./FileTools')，因为 Vite 打包后不存在独立模块文件，require 会静默失败
+        const _workspaceKey = Symbol.for('zero-employee:getWorkspacePath()');
+        const workspacePath = (globalThis as any)[_workspaceKey] ?? null;
+        console.log(`[ToolManager] Path resolution check - workspace: ${workspacePath}, tool: ${toolCall.function.name}`);
+        for (const key of filePathKeys) {
+          if (typeof args[key] === 'string') {
+            const val = args[key];
+            // 跳过已经是绝对路径的值（Windows: C:\..., Unix: /...）
+            if (val.match(/^[A-Za-z]:[\\\/]/) || val.startsWith('/')) continue;
+            // 跳过 URL
+            if (val.startsWith('http://') || val.startsWith('https://')) continue;
+            // 相对路径 → 拼接工作区路径
+            if (workspacePath) {
+              args[key] = path.join(workspacePath, val);
+              console.log(`[ToolManager] Resolved relative path: ${val} → ${args[key]}`);
+            } else {
+              console.warn(`[ToolManager] WARNING: Relative path "${val}" but no workspace set.`);
+            }
+          }
+        }
       }
 
       // 将 toolCallId 传递给 handler（用于输出截断时的文件名）
@@ -205,14 +244,26 @@ export class ToolManager {
   }
 
   async executeToolCalls(toolCalls: ToolCall[], conversationId?: string): Promise<ToolResult[]> {
-    const results: ToolResult[] = [];
-
-    for (const toolCall of toolCalls) {
-      const result = await this.executeToolCall(toolCall, conversationId);
-      results.push(result);
+    // 如果只有一个工具调用，直接串行执行
+    if (toolCalls.length <= 1) {
+      const result = await this.executeToolCall(toolCalls[0], conversationId);
+      return [result];
     }
 
-    return results;
+    // 多个工具调用时并行执行（使用 allSettled 确保单个失败不影响其他）
+    const settled = await Promise.allSettled(
+      toolCalls.map(tc => this.executeToolCall(tc, conversationId))
+    );
+
+    return settled.map((r, i) => {
+      if (r.status === 'fulfilled') return r.value;
+      return {
+        toolCallId: toolCalls[i].id,
+        name: toolCalls[i].function.name,
+        success: false,
+        error: r.reason?.message || 'Unknown error',
+      };
+    });
   }
 
   /**

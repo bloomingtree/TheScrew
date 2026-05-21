@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Folder } from 'lucide-react';
 import { useConversationStore } from '../../store/conversationStore';
 import { useChatStore } from '../../store/chatStore';
 import MessageList from './MessageList';
 import InputArea from './InputArea';
 import WorkspaceSelector from '../Workspace/WorkspaceSelector';
+import DropZone from './DropZone';
+import UserQuestionDialog from './UserQuestionDialog';
 
 const ChatArea: React.FC = () => {
   const { currentConversationId, createConversation, updateConversationMessages } = useConversationStore();
@@ -12,8 +13,19 @@ const ChatArea: React.FC = () => {
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<{
+    questionId: string;
+    question: string;
+    options: Array<{ label: string; value: string; description?: string }>;
+    allow_custom: boolean;
+    custom_placeholder: string;
+  } | null>(null);
   const hasInitialized = useRef(false);
   const lastSyncedMessagesRef = useRef<any[]>([]);
+  const chatAreaRef = useRef<HTMLDivElement>(null);
+  const dragCounterRef = useRef(0);
+  const inputAreaRef = useRef<{ handleDroppedFiles: (files: File[]) => void } | null>(null);
 
   // 初始化时创建对话（使用 ref 确保只执行一次）
   useEffect(() => {
@@ -33,6 +45,14 @@ const ChatArea: React.FC = () => {
   // 切换对话时加载历史消息（只在 currentConversationId 变化时）
   useEffect(() => {
     if (!currentConversationId) return;
+
+    // 如果正在流式传输（比如用户切换了标签页又切回来），不要用 conversationStore 覆盖 chatStore
+    // 因为流式传输期间不同步到 conversationStore，conversationStore 数据是过时的
+    const chatState = useChatStore.getState();
+    if (chatState.isStreaming && chatState.messages.length > 0) {
+      console.log('[ChatArea] 流式传输中，跳过从 conversationStore 加载');
+      return;
+    }
 
     setIsLoadingConversation(true);
     // 重置同步 ref，防止新对话被错误跳过同步
@@ -91,6 +111,39 @@ const ChatArea: React.FC = () => {
     }
   };
 
+  // 监听工作空间路径变更（来自 Sidebar 或其他组件的选择）
+  useEffect(() => {
+    const unsub = window.electronAPI.workspace.onWorkspaceChanged((newPath: string) => {
+      setWorkspacePath(newPath);
+    });
+    return unsub;
+  }, []);
+
+  // 监听 AI 提问事件
+  useEffect(() => {
+    const cleanup = window.electronAPI.onUserQuestion((data) => {
+      setPendingQuestion(data);
+    });
+    return cleanup;
+  }, []);
+
+  const handleAnswerQuestion = async (questionId: string, answer: string) => {
+    try {
+      await window.electronAPI.answerQuestion(questionId, answer);
+    } catch (error) {
+      console.error('[ChatArea] Failed to send answer:', error);
+    }
+    setPendingQuestion(null);
+  };
+
+  const handleDismissQuestion = () => {
+    if (pendingQuestion) {
+      // 发送空回答表示用户跳过
+      window.electronAPI.answerQuestion(pendingQuestion.questionId, '').catch(() => {});
+    }
+    setPendingQuestion(null);
+  };
+
   const handleWorkspaceSelect = async (path: string) => {
     try {
       console.log('ChatArea: 设置工作空间路径:', path);
@@ -107,49 +160,80 @@ const ChatArea: React.FC = () => {
     await createConversation();
   };
 
+  // 整个聊天区域的拖拽事件
+  useEffect(() => {
+    const el = chatAreaRef.current;
+    if (!el) return;
+
+    const handleDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounterRef.current++;
+      if (e.dataTransfer?.types.includes('Files')) {
+        setIsDragOver(true);
+      }
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounterRef.current--;
+      if (dragCounterRef.current === 0) {
+        setIsDragOver(false);
+      }
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounterRef.current = 0;
+      setIsDragOver(false);
+
+      const files = Array.from(e.dataTransfer?.files || []);
+      if (files.length === 0) return;
+
+      // 转发给 InputArea 处理
+      inputAreaRef.current?.handleDroppedFiles(files);
+    };
+
+    el.addEventListener('dragenter', handleDragEnter);
+    el.addEventListener('dragover', handleDragOver);
+    el.addEventListener('dragleave', handleDragLeave);
+    el.addEventListener('drop', handleDrop);
+
+    return () => {
+      el.removeEventListener('dragenter', handleDragEnter);
+      el.removeEventListener('dragover', handleDragOver);
+      el.removeEventListener('dragleave', handleDragLeave);
+      el.removeEventListener('drop', handleDrop);
+    };
+  }, []);
+
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-[#F5F5F0]">
+    <div className="flex-1 flex flex-col min-h-0 bg-[#F5F5F0] relative" ref={chatAreaRef}>
+      {/* 全局拖拽覆盖层 */}
+      <DropZone isActive={isDragOver} />
+
       <div className="flex-1 overflow-hidden min-h-0">
         <MessageList />
       </div>
       <div className="flex-shrink-0">
-        <div className="bg-[#F5F5F0]/80 backdrop-blur border-t border-gray-200/50 px-2 sm:px-3 py-2 flex items-center flex-shrink-0 gap-2">
-          <button
-            onClick={() => setShowWorkspaceSelector(true)}
-            className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
-            title={workspacePath || '选择工作空间'}
-          >
-            <Folder size={14} className="shrink-0" />
-            <span className="truncate max-w-[100px]">
-              {workspacePath ? workspacePath.split(/[\\/]/).pop() : '工作空间'}
-            </span>
-          </button>
-          <button
-            onClick={() => setShowWorkspaceSelector(true)}
-            className="sm:hidden flex items-center justify-center w-8 h-8 rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
-            title={workspacePath || '选择工作空间'}
-          >
-            <Folder size={14} className="shrink-0" />
-          </button>
-          <button
-            onClick={handleNewChat}
-            className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg transition-all border border-gray-200 shadow-sm hover:shadow-md bg-white text-[#374151] shrink-0"
-            title="新建对话"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              <line x1="12" y1="9" x2="12" y2="15"/>
-              <line x1="9" y1="12" x2="15" y2="12"/>
-            </svg>
-            <span className="hidden sm:inline font-medium">新建对话</span>
-          </button>
-        </div>
-        <InputArea />
+        <InputArea ref={inputAreaRef} onNewChat={handleNewChat} />
       </div>
       <WorkspaceSelector
         isOpen={showWorkspaceSelector}
         onClose={() => setShowWorkspaceSelector(false)}
         onWorkspaceSelect={handleWorkspaceSelect}
+      />
+      <UserQuestionDialog
+        question={pendingQuestion}
+        onAnswer={handleAnswerQuestion}
+        onDismiss={handleDismissQuestion}
       />
     </div>
   );

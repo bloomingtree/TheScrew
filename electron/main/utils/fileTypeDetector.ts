@@ -2,7 +2,7 @@
  * File Type Detection Utility
  *
  * Determines whether a file is text or binary based on its extension.
- * Used by the Pyodide file system bridge to decide on the encoding method.
+ * Used by file operations to decide on the encoding method.
  */
 
 /**

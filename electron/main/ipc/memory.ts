@@ -1,11 +1,12 @@
 /**
  * Memory IPC Handlers
  *
- * IPC handlers for the memory system
+ * IPC handlers for the memory system + SessionSummarizer
  */
 
 import { ipcMain } from 'electron';
 import { getMemoryStore } from '../memory/MemoryStore';
+import { getSessionSummarizer } from '../memory/SessionSummarizer';
 
 /**
  * Register memory-related IPC handlers
@@ -212,5 +213,52 @@ export function registerMemoryHandlers(): void {
     }
   });
 
-  console.log('[IPC] Memory handlers registered');
+  // ========== SessionSummarizer 接口 ==========
+
+  const summarizer = getSessionSummarizer();
+
+  // 手动触发会话总结
+  ipcMain.handle('memory:summarizeSession', async (_event, sessionId: string, messages: any[], title?: string) => {
+    try {
+      const summary = await summarizer.summarizeSession(sessionId, messages, title);
+      if (summary) {
+        await summarizer.appendToDailyNote(summary);
+      }
+      return { success: true, summary };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 获取指定日期的总结
+  ipcMain.handle('memory:getDailySummary', async (_event, date: string) => {
+    try {
+      const summary = await summarizer.getDailySummary(date);
+      return { success: true, summary };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 获取近期总结列表
+  ipcMain.handle('memory:getRecentSummaries', async (_event, days?: number) => {
+    try {
+      const summaries = await summarizer.getRecentSummaries(days || 7);
+      return { success: true, summaries };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 手动触发长期记忆提炼
+  ipcMain.handle('memory:consolidate', async (_event, days?: number) => {
+    try {
+      const result = await summarizer.consolidateToLongTerm(days || 7);
+      return { success: true, ...result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  console.log('[IPC] Memory handlers registered (with SessionSummarizer)');
 }

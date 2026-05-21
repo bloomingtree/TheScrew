@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ThinkingMode } from '../config/AppConfigStore';
 
 /**
  * 安全的 JSON.stringify，处理循环引用
@@ -238,7 +239,7 @@ export class OpenAIClient {
     return 4096;
   }
 
-  async *streamChat(messages: any[], signal?: AbortSignal, tools?: any[]): AsyncGenerator<string> {
+  async *streamChat(messages: any[], signal?: AbortSignal, tools?: any[], thinkingMode?: ThinkingMode): AsyncGenerator<string> {
     // 粗略估算请求体大小（使用 safeStringify 防止循环引用崩溃）
     const messagesStr = safeStringify(messages);
     const toolsStr = tools ? safeStringify(tools) : '';
@@ -259,25 +260,56 @@ export class OpenAIClient {
       max_tokens: this.maxTokens,
     };
 
+    // 思考模式控制：通过 chat_template_kwargs 和顶层参数同时传递
+    // VLLM 使用 chat_template_kwargs.enable_thinking
+    // DashScope 使用顶层 enable_thinking
+    // auto 模式不发送任何参数，使用服务器默认设置
+    if (thinkingMode === 'enabled') {
+      requestBody.chat_template_kwargs = { enable_thinking: true };
+      requestBody.enable_thinking = true;
+    } else if (thinkingMode === 'disabled') {
+      requestBody.chat_template_kwargs = { enable_thinking: false };
+      requestBody.enable_thinking = false;
+    }
+
     if (tools && tools.length > 0) {
       requestBody.tools = tools;
     }
 
     console.log('[OpenAIClient] Sending request - model:', this.model, 'messages:', messages.length, 'tools:', tools?.length || 0);
 
-    const response = await this.axiosInstance.post(`${this.baseUrl}/chat/completions`, requestBody, {
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        // 禁止压缩，避免某些 API 的兼容性问题
-        'Accept-Encoding': 'gzip, deflate, identity',
-      },
-      responseType: 'stream',
-      signal,
-      // 禁用 axios 的自动解压，避免某些情况下的问题
-      decompress: true,
-      maxRedirects: 0,
-    });
+    // 带重试的请求发送
+    const MAX_RETRIES = 3;
+    const BASE_DELAY = 1000;
+    let response: any;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        response = await this.axiosInstance.post(`${this.baseUrl}/chat/completions`, requestBody, {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+            'Accept-Encoding': 'gzip, deflate, identity',
+          },
+          responseType: 'stream',
+          signal,
+          decompress: true,
+          maxRedirects: 0,
+        });
+        break; // 成功，跳出重试循环
+      } catch (error: any) {
+        const status = error.response?.status;
+        const isRetryable = status === 429 || status === 502 || status === 503 || status === 504;
+
+        if (!isRetryable || attempt === MAX_RETRIES) {
+          throw error;
+        }
+
+        const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 1000;
+        console.warn(`[OpenAIClient] Retriable error ${status}, attempt ${attempt + 1}/${MAX_RETRIES}, retrying in ${Math.round(delay)}ms`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
 
     const stream = response.data;
     let toolCalls: any[] = [];
@@ -313,9 +345,9 @@ export class OpenAIClient {
           const reasoningContent = delta?.reasoning_content;
           const newToolCalls = delta?.tool_calls;
 
-          // 处理思考内容（千问/QwQ 等模型的 reasoning_content）
+          // 处理思考内容（千问/QwQ/DeepSeek 等模型的 reasoning_content）
           if (reasoningContent) {
-            yield reasoningContent;
+            yield `\x01THINKING\x02${reasoningContent}`;
           }
 
           if (content) {

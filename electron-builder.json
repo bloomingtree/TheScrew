@@ -1,6 +1,6 @@
 {
   "appId": "com.luosiding.app",
-  "productName": "螺丝钉",
+  "productName": "螺丝帽",
   "directories": {
     "output": "release",
     "buildResources": "build"
@@ -32,9 +32,10 @@
     }
   ],
   "win": {
+    "icon": "build/icon.png",
     "target": [
       {
-        "target": "dir",
+        "target": "portable",
         "arch": ["x64"]
       }
     ],

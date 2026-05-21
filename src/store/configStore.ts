@@ -1,9 +1,14 @@
 import { create } from 'zustand';
 import { Config, ModelConfig, ModelConfigs } from '../types';
 
+// 思考模式类型
+type ThinkingMode = 'auto' | 'enabled' | 'disabled';
+
 // 应用设置接口
 interface AppSettings {
-  enableThinking: boolean;
+  thinkingMode?: ThinkingMode;
+  /** @deprecated */
+  enableThinking?: boolean;
   [key: string]: any;
 }
 
@@ -31,8 +36,9 @@ interface ConfigState extends Config {
 
   // 应用设置操作
   loadAppSettings: () => Promise<void>;
-  setThinkingEnabled: (enabled: boolean) => void;
-  getThinkingEnabled: () => boolean;
+  setThinkingMode: (mode: ThinkingMode) => void;
+  setHardwareAcceleration: (enabled: boolean) => void;
+  getThinkingMode: () => ThinkingMode;
 
   // 手动同步到后端
   syncToBackendNow: () => Promise<boolean>;
@@ -133,7 +139,7 @@ export const useConfigStore = create<ConfigState>((set, get) => {
 
     isConfigOpen: false,
     modelConfigs: initialModelConfigs,
-    appSettings: { enableThinking: false },
+    appSettings: { thinkingMode: 'auto' },
 
     // 单配置操作（兼容旧代码）
     setConfig: (config) => set((state) => ({ ...state, ...config })),
@@ -329,23 +335,35 @@ export const useConfigStore = create<ConfigState>((set, get) => {
     loadAppSettings: async () => {
       try {
         const settings = await (window as any).electronAPI.config.appSettings.get();
-        set({ appSettings: settings });
+        // 兼容旧的 enableThinking 布尔值
+        if (settings.thinkingMode === undefined && settings.enableThinking !== undefined) {
+          settings.thinkingMode = settings.enableThinking ? 'enabled' : 'disabled';
+        }
+        set({ appSettings: { thinkingMode: 'auto', ...settings } });
       } catch (e) {
         console.error('Failed to load app settings:', e);
       }
     },
 
-    setThinkingEnabled: (enabled: boolean) => {
+    setThinkingMode: (mode: ThinkingMode) => {
       set((state) => {
-        const newSettings = { ...state.appSettings, enableThinking: enabled };
+        const newSettings = { ...state.appSettings, thinkingMode: mode };
         // 异步保存到后端
-        (window as any).electronAPI?.config?.appSettings?.setThinkingEnabled?.(enabled);
+        (window as any).electronAPI?.config?.appSettings?.setThinkingMode?.(mode);
         return { appSettings: newSettings };
       });
     },
 
-    getThinkingEnabled: () => {
-      return get().appSettings.enableThinking ?? false;
+    setHardwareAcceleration: (enabled: boolean) => {
+      set((state) => {
+        const newSettings = { ...state.appSettings, hardwareAcceleration: enabled };
+        (window as any).electronAPI?.config?.appSettings?.save?.(newSettings);
+        return { appSettings: newSettings };
+      });
+    },
+
+    getThinkingMode: () => {
+      return get().appSettings.thinkingMode ?? 'auto';
     },
 
     // 手动同步到后端

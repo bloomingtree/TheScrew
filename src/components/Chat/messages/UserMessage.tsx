@@ -1,7 +1,8 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Image, Archive, Database, File } from 'lucide-react';
+import { FileText, Image, Archive, Database, File, FileCode, Table, Presentation } from 'lucide-react';
 import { extractTextFromContent } from '../../../utils/messageContent';
+import type { PendingFileInfo } from '../../../types';
 
 // 附件类型定义（避免跨模块引用问题）
 interface Attachment {
@@ -32,13 +33,14 @@ interface UserMessageProps {
     timestamp?: number;
     images?: string[];
     attachments?: Attachment[];
+    pendingFiles?: PendingFileInfo[];
   };
 }
 
 /**
  * 根据文件类型获取对应图标组件
  */
-function getFileIcon(fileType: Attachment['fileType']): React.ComponentType<any> {
+function getFileIcon(fileType: Attachment['fileType'] | PendingFileInfo['fileType']): React.ComponentType<any> {
   switch (fileType) {
     case 'image':
       return Image;
@@ -48,9 +50,23 @@ function getFileIcon(fileType: Attachment['fileType']): React.ComponentType<any>
       return Archive;
     case 'data':
       return Database;
+    case 'code':
+      return FileCode;
     default:
       return File;
   }
+}
+
+/**
+ * 从文本中剥离文件上下文（📎 表格），返回用户纯文本
+ */
+function stripFileContext(text: string): string {
+  // 匹配 📎 开头的文件上下文块（包含表格和路径信息）
+  const index = text.indexOf('\n\n📎');
+  if (index >= 0) {
+    return text.substring(0, index).trim();
+  }
+  return text;
 }
 
 /**
@@ -76,7 +92,12 @@ const UserMessage: React.FC<UserMessageProps> = ({ message }) => {
   };
 
   // 提取文本内容（处理多模态格式）
-  const textContent = extractTextFromContent(message.content);
+  const rawText = extractTextFromContent(message.content);
+  // 剥离文件上下文表格，只显示用户输入的文字
+  const displayText = stripFileContext(rawText);
+
+  // 是否有拖拽文件（pendingFiles 或从文本推断）
+  const hasPendingFiles = message.pendingFiles && message.pendingFiles.length > 0;
 
   return (
     <motion.div
@@ -103,7 +124,7 @@ const UserMessage: React.FC<UserMessageProps> = ({ message }) => {
               </div>
             )}
 
-            {/* 附件 */}
+            {/* 附件（老方式） */}
             {message.attachments && message.attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
                 {message.attachments.map((attachment) => {
@@ -124,12 +145,33 @@ const UserMessage: React.FC<UserMessageProps> = ({ message }) => {
               </div>
             )}
 
-            {/* 文本内容 */}
-            <div className="prose prose-sm max-w-none prose-p:max-w-none prose-headings:max-w-none">
-              <p className="my-1 leading-relaxed text-sm w-full">
-                {textContent}
-              </p>
-            </div>
+            {/* 拖拽文件 — 以附件图标展示 */}
+            {hasPendingFiles && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {message.pendingFiles!.map((file, idx) => {
+                  const Icon = getFileIcon(file.fileType);
+                  return (
+                    <div
+                      key={idx}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/80 border border-gray-200/60 shadow-sm"
+                    >
+                      <Icon size={12} className="text-gray-500 flex-shrink-0" />
+                      <span className="text-xs text-gray-700 truncate max-w-[120px]">{file.fileName}</span>
+                      <span className="text-[10px] text-gray-400 flex-shrink-0">({formatFileSize(file.fileSize)})</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 文本内容 — 仅显示用户输入，不含文件上下文 */}
+            {displayText && (
+              <div className="prose prose-sm max-w-none prose-p:max-w-none prose-headings:max-w-none">
+                <p className="my-1 leading-relaxed text-sm w-full">
+                  {displayText}
+                </p>
+              </div>
+            )}
           </div>
         </div>
         {/* 时间戳 */}

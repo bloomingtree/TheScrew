@@ -1,3 +1,10 @@
+export interface PendingFileInfo {
+  fileName: string;
+  fileSize: number;
+  fileType: 'image' | 'document' | 'code' | 'data' | 'other';
+  savedPath: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'tool';
@@ -5,8 +12,11 @@ export interface Message {
   timestamp: number;
   images?: string[];
   attachments?: Attachment[];
+  pendingFiles?: PendingFileInfo[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
+  /** 思考内容（模型 reasoning 输出） */
+  thinkingContent?: string;
 }
 
 export interface ToolCall {
@@ -49,6 +59,7 @@ export interface Conversation {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  _unsaved?: boolean;
 }
 
 export interface Config {
@@ -57,6 +68,18 @@ export interface Config {
   model: string;
   temperature: number;
   maxTokens: number;
+}
+
+/**
+ * 模型能力
+ */
+export interface ModelCapabilities {
+  /** 是否支持图片输入（多模态） */
+  vision: boolean;
+  /** 是否支持 function calling */
+  toolUse: boolean;
+  /** 是否支持流式输出 */
+  streaming: boolean;
 }
 
 /**
@@ -79,6 +102,8 @@ export interface ModelConfig {
   maxTokens: number;
   /** 是否为默认配置 */
   isDefault?: boolean;
+  /** 模型能力（可选，自动检测） */
+  capabilities?: ModelCapabilities;
   /** 创建时间 */
   createdAt?: number;
   /** 更新时间 */

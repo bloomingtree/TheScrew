@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import Store from 'electron-store';
 import { registerChatHandlers } from './ipc/chat';
 import { registerContextHandlers } from './ipc/chat';
@@ -12,10 +13,9 @@ import { registerMemoryHandlers } from './ipc/memory';
 import { registerSubagentHandlers } from './ipc/subagents';
 import { registerSkillsHandlers } from './ipc/skills';
 import { registerSchedulerHandlers } from './ipc/scheduler';
-import { registerPythonHandlers } from './ipc/python';
+
 import { initDatabase } from './db';
 import { getSkillManager, initializeCore } from './core';
-import { getToolRegistry } from './core/ToolRegistry';
 import { getToolManager } from './tools/ToolManager';
 import { getCronService, HeartbeatService, CronJob, setCronService, setHeartbeatService } from './scheduler';
 import { cronTools, heartbeatTools } from './tools/SchedulerTools';
@@ -26,22 +26,64 @@ import { registerToolSetMeta } from './tools/ToolManager';
 import { registerCredentialHandlers } from './ipc/credentials';
 import { registerWordHandlers } from './ipc/word';
 import { registerFilePreviewHandlers } from './ipc/filePreview';
+import { registerPptxHandlers } from './ipc/pptx';
+import { registerPdfHandlers } from './ipc/pdf';
 import { registerP2PHandlers } from './ipc/p2p';
 import { registerFileEditorHandlers } from './ipc/fileEditor';
 import { getTransferService } from './p2p/TransferService';
 import { registerAttachmentHandlers } from './ipc/attachments';
 import { attachmentTools } from './tools/AttachmentTools';
+import { officeCLITools, officeCLIToolGroup } from './tools/OfficeCLITools';
 
 const store = new Store();
+
+// 硬件加速配置：必须在 app.whenReady() 之前设置
+// 从 .config/config.json 读取（与 AppConfigStore 使用相同的存储位置）
+function loadHardwareAccelerationSetting(): boolean {
+  try {
+    let configDir: string;
+    if (app.isPackaged) {
+      configDir = path.join(path.dirname(app.getPath('exe')), '.config');
+    } else {
+      try {
+        configDir = path.join(app.getAppPath(), '.config');
+      } catch {
+        configDir = path.resolve(__dirname, '../../..', '.config');
+      }
+    }
+    const configPath = path.join(configDir, 'config.json');
+    if (fs.existsSync(configPath)) {
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      const config = JSON.parse(raw);
+      const hwAccel = config?.settings?.hardwareAcceleration;
+      console.log(`[Main] 硬件加速配置值: ${hwAccel} (来源: ${configPath})`);
+      return hwAccel !== false; // undefined 或 true 都表示启用
+    }
+    console.log('[Main] 配置文件不存在，硬件加速默认启用');
+    return true;
+  } catch (e) {
+    console.warn('[Main] 读取硬件加速配置失败，默认启用:', e);
+    return true;
+  }
+}
+
+const hwAccelEnabled = loadHardwareAccelerationSetting();
+if (!hwAccelEnabled) {
+  app.disableHardwareAcceleration();
+  console.log('[Main] 硬件加速已禁用（用户配置）');
+} else {
+  console.log('[Main] 硬件加速已启用');
+}
 
 let mainWindow: BrowserWindow | null = null;
 function createWindow() {
 mainWindow = new BrowserWindow({
-  title: '螺丝钉',
+  title: '螺丝帽',
   width: 1200,
   height: 800,
   minWidth: 800,
   minHeight: 600,
+  icon: path.join(__dirname, '../../build/icon.png'),
   webPreferences: {
     preload: path.join(__dirname, '../preload/index.js'),
     contextIsolation: true,
@@ -52,6 +94,14 @@ mainWindow = new BrowserWindow({
 
   // 设置主窗口实例，用于文件监听通知
   setMainWindow(mainWindow);
+
+  // 打印硬件加速运行时状态
+  console.log(`[Main] 窗口创建完成 - 硬件加速状态: GPU进程=${app.getAppPath().includes('gpu') ? '已启动' : '检查中'}`);
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow!.webContents.executeJavaScript(
+      'console.log("[Renderer] 硬件加速检查:", { gpu: navigator.gpu, webgl: !!document.createElement("canvas").getContext("webgl2") })'
+    );
+  });
 
   if (process.env.NODE_ENV === 'development') {
     // 支持动态端口（Vite 可能因为端口冲突使用其他端口）
@@ -79,22 +129,6 @@ app.whenReady().then(async () => {
   // 初始化技能管理器
   await getSkillManager().initialize();
 
-  // 将现有工具适配到新的 ToolRegistry
-  const toolManager = getToolManager();
-  const existingTools = toolManager.getAllTools();
-  const toolRegistry = getToolRegistry();
-  for (const tool of existingTools) {
-    toolRegistry.register({
-      name: () => tool.name,
-      description: () => tool.description,
-      parameters: () => tool.parameters,
-      execute: async (args) => {
-        const result = await tool.handler(args);
-        return JSON.stringify(result);
-      },
-    });
-  }
-
   // ============================================================================
   // 初始化定时任务系统 (CronService + HeartbeatService)
   // ============================================================================
@@ -120,6 +154,7 @@ app.whenReady().then(async () => {
 
   // 初始化 FileTools 的全局变量
   setWorkspacePath(workspacePath || null);
+  console.log('[Main] Workspace path restored from store:', workspacePath || '(not set)');
 
   if (workspacePath) {
     const heartbeatService = new HeartbeatService(
@@ -141,6 +176,7 @@ app.whenReady().then(async () => {
   }
 
   // 注册调度器工具到 ToolManager
+  const toolManager = getToolManager();
   for (const tool of [...cronTools, ...heartbeatTools]) {
     toolManager.registerTool(tool);
   }
@@ -155,6 +191,12 @@ app.whenReady().then(async () => {
     toolManager.registerTool(tool);
   }
 
+  // 注册 OfficeCLI 工具到 ToolManager
+  for (const tool of officeCLITools) {
+    toolManager.registerTool(tool);
+  }
+  toolManager.registerToolGroup(officeCLIToolGroup);
+
   // 注册工具集元数据
   registerToolSetMeta(bashToolSet);
   registerToolSetMeta({
@@ -163,6 +205,13 @@ app.whenReady().then(async () => {
     capabilities: ['列出附件', '获取附件内容', '保存附件到工作空间', '多文件工作流处理'],
     keywords: ['附件', '上传', '文件', '文档', '工作流'],
     estimatedTokens: 300,
+  });
+  registerToolSetMeta({
+    name: 'officecli',
+    description: 'Office 文档操作（Word/Excel/PowerPoint）',
+    capabilities: ['创建/查看/编辑文档', 'DOM 操作（增删改查）', '元素移动/交换', '批量操作', '原始 XML 操作'],
+    keywords: ['word', 'excel', 'powerpoint', 'docx', 'xlsx', 'pptx', 'office', '文档'],
+    estimatedTokens: 800,
   });
 
   // 注册 IPC 处理器
@@ -177,11 +226,12 @@ app.whenReady().then(async () => {
   registerSubagentHandlers();
   registerSkillsHandlers();
   registerSchedulerHandlers();
-  registerPythonHandlers();
   // Reports handlers removed
   registerCredentialHandlers();
   registerWordHandlers();
   registerFilePreviewHandlers();
+  registerPptxHandlers();
+  registerPdfHandlers();
   registerP2PHandlers();
   registerFileEditorHandlers();
   registerAttachmentHandlers();

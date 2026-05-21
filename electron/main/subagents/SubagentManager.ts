@@ -111,11 +111,11 @@ export class SubagentManager {
 
     try {
       // Import dependencies dynamically to avoid circular dependency
-      const { getToolRegistry } = await import('../core/ToolRegistry');
-      const toolRegistry = getToolRegistry();
+      const { getToolManager } = await import('../tools/ToolManager');
+      const toolManager = getToolManager();
 
       // Create LLM client (use existing or create new)
-      const { default: OpenAIClient } = await import('../api/openai');
+      const { OpenAIClient } = await import('../api/openai');
       const client = new OpenAIClient(
         config.baseUrl,
         config.apiKey,
@@ -135,7 +135,7 @@ export class SubagentManager {
         },
       ];
 
-      const tools = toolRegistry.getDefinitions();
+      const tools = toolManager.getOpenAIFunctionDefinitions();
       const maxIterations = options?.maxIterations || 5;
       let iteration = 0;
       let finalContent = '';
@@ -170,10 +170,13 @@ export class SubagentManager {
         if (hasToolCalls && toolCalls.length > 0) {
           // Execute tool calls
           for (const toolCall of toolCalls) {
-            const result = await toolRegistry.execute({
+            const result = await toolManager.executeToolCall({
               id: toolCall.id,
-              name: toolCall.function.name,
-              arguments: JSON.parse(toolCall.function.arguments),
+              type: 'function',
+              function: {
+                name: toolCall.function.name,
+                arguments: toolCall.function.arguments,
+              },
             });
 
             messages.push({
@@ -185,7 +188,9 @@ export class SubagentManager {
             messages.push({
               role: 'tool',
               tool_call_id: toolCall.id,
-              content: JSON.stringify(result),
+              content: result.success
+                ? JSON.stringify(result.result)
+                : `Error: ${result.error}`,
             });
           }
         } else {

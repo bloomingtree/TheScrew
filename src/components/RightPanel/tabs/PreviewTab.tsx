@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { FileText, RefreshCw, File } from 'lucide-react';
+import React from 'react';
+import { FileText, File } from 'lucide-react';
 import { useTabStore } from '@/store/tabStore';
-import { TextFilePreview, ExcelPreview, ImagePreview } from '@/components/FilePreview';
-import { WordPreviewContent } from '@/components/WordPreview';
+import { TextFilePreview, ExcelPreview, ImagePreview, WordPreview, PPTXPreview, PDFPreview } from '@/components/FilePreview';
 
 interface PreviewTabProps {
   panelId?: 'left' | 'right';
@@ -30,7 +29,7 @@ const PreviewTab: React.FC<PreviewTabProps> = ({ panelId = 'right' }) => {
   }
 
   // 根据文件扩展名判断文件类型
-  const getFileType = (filepath: string): 'text' | 'excel' | 'image' | 'word' | 'unknown' => {
+  const getFileType = (filepath: string): 'text' | 'excel' | 'image' | 'word' | 'pptx' | 'pdf' | 'unknown' => {
     const ext = filepath.split('.').pop()?.toLowerCase() || '';
 
     const textExtensions = ['txt', 'md', 'markdown', 'json', 'xml', 'html', 'htm', 'css', 'scss', 'sass',
@@ -43,11 +42,15 @@ const PreviewTab: React.FC<PreviewTabProps> = ({ panelId = 'right' }) => {
 
     const excelExtensions = ['xlsx', 'xls'];
     const wordExtensions = ['docx'];
+    const pptxExtensions = ['pptx'];
+    const pdfExtensions = ['pdf'];
 
     if (textExtensions.includes(ext)) return 'text';
     if (imageExtensions.includes(ext)) return 'image';
     if (excelExtensions.includes(ext)) return 'excel';
     if (wordExtensions.includes(ext)) return 'word';
+    if (pptxExtensions.includes(ext)) return 'pptx';
+    if (pdfExtensions.includes(ext)) return 'pdf';
 
     return 'unknown';
   };
@@ -64,7 +67,11 @@ const PreviewTab: React.FC<PreviewTabProps> = ({ panelId = 'right' }) => {
       case 'excel':
         return <ExcelPreview filepath={filepath} />;
       case 'word':
-        return <WordPreviewWrapper filepath={filepath} />;
+        return <WordPreview filepath={filepath} />;
+      case 'pptx':
+        return <PPTXPreview filepath={filepath} />;
+      case 'pdf':
+        return <PDFPreview filepath={filepath} />;
       default:
         return (
           <div className="h-full flex items-center justify-center text-gray-400">
@@ -79,70 +86,6 @@ const PreviewTab: React.FC<PreviewTabProps> = ({ panelId = 'right' }) => {
   };
 
   return renderPreview();
-};
-
-// Word 文档预览包装器
-const WordPreviewWrapper: React.FC<{ filepath: string }> = ({ filepath }) => {
-  const [previewData, setPreviewData] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadPreview();
-  }, [filepath]);
-
-  const loadPreview = async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const result = await window.electronAPI.word.preview(filepath);
-      if (result.success && result.data) {
-        setPreviewData(result.data);
-      } else {
-        setError(result.error || '加载预览失败');
-      }
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '加载预览失败');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="h-full flex items-center justify-center text-gray-400">
-        <div className="text-center">
-          <RefreshCw size={48} className="mx-auto mb-3 opacity-50 animate-spin" />
-          <p className="text-sm">加载中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="h-full flex items-center justify-center text-gray-400">
-        <div className="text-center">
-          <FileText size={48} className="mx-auto mb-3 opacity-50" />
-          <p className="text-sm text-red-500">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!previewData) {
-    return (
-      <div className="h-full flex items-center justify-center text-gray-400">
-        <div className="text-center">
-          <FileText size={48} className="mx-auto mb-3 opacity-50" />
-          <p className="text-sm">无法预览文件</p>
-        </div>
-      </div>
-    );
-  }
-
-  return <WordPreviewContent data={previewData} filepath={filepath} />;
 };
 
 export default PreviewTab;

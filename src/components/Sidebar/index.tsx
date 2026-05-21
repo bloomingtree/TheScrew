@@ -99,15 +99,18 @@ const Sidebar: React.FC<SidebarProps> = () => {
       }
     };
     getWorkspacePath();
+
+    // 监听工作空间路径变更（来自 ChatArea 或其他组件的选择）
+    const unsub = window.electronAPI.workspace.onWorkspaceChanged((newPath: string) => {
+      setWorkspacePath(newPath);
+      setWorkspaceNotSet(false);
+    });
+    return unsub;
   }, []);
 
-  // FileExplorer 文件点击处理 - 在 Monaco Editor 中打开
-  const handleFileClick = (filepath: string) => {
-    openTab({
-      type: 'editor',
-      title: filepath.split(/[/\\]/).pop() || '文件',
-      content: { filepath },
-    }, 'left');
+  // FileExplorer 文件点击 - FileExplorer 内部已调用 openTab，此处无需重复
+  const handleFileClick = (_filepath: string) => {
+    // FileExplorer.handleFileClick 已处理 openTab，不需要重复调用
   };
 
   const loadWorkspaceFiles = async () => {

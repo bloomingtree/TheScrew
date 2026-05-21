@@ -3,14 +3,10 @@
  * Based on nanobot architecture patterns
  *
  * This module exports all core system components:
- * - ToolRegistry: Centralized tool management
- * - MessageBus: Async message routing
  * - Type definitions: Core interfaces and types
- * - Adapters: Compatibility layer with existing tools
+ * - SkillManager: Progressive skill loading
+ * - ContextBuilder: System prompt construction
  */
-
-import { getToolRegistry, resetToolRegistry } from './ToolRegistry';
-import { getMessageBus, resetMessageBus } from './MessageBus';
 
 // ============================================================================
 // Type Exports
@@ -42,48 +38,6 @@ export type {
   IToolExecutionContext,
   MemoryEntryType,
 } from './types';
-
-// ============================================================================
-// Tool Registry
-// ============================================================================
-
-export {
-  ToolRegistry,
-  getToolRegistry,
-  resetToolRegistry,
-} from './ToolRegistry';
-
-// ============================================================================
-// Message Bus
-// ============================================================================
-
-export {
-  MessageBus,
-  getMessageBus,
-  resetMessageBus,
-} from './MessageBus';
-export type { MessageBusConfig } from './MessageBus';
-
-// ============================================================================
-// Adapters
-// ============================================================================
-
-export {
-  ToolAdapter,
-  adaptTool,
-  adaptTools,
-  createSimpleTool,
-  ToolGroupAdapter,
-  adaptToolGroup,
-  itoolToTool,
-  itoolsToTools,
-  ToolRegistryAdapter,
-  createToolRegistryAdapter,
-  ComposedTool,
-  createComposedTool,
-  FallbackTool,
-  createFallbackTool,
-} from './adapters';
 
 // ============================================================================
 // Skill Manager
@@ -119,17 +73,6 @@ export {
 export type { ContextBuilderOptions } from './ContextBuilder';
 
 // ============================================================================
-// Agent Loop
-// ============================================================================
-
-export {
-  AgentLoop,
-  getAgentLoop,
-  resetAgentLoop,
-} from './AgentLoop';
-export type { AgentLoopConfig } from './AgentLoop';
-
-// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -137,19 +80,11 @@ export type { AgentLoopConfig } from './AgentLoop';
  * Initialize core system components
  * Call this during application startup
  */
-export async function initializeCore(config?: {
-  messageBus?: {
-    maxQueueSize?: number;
-    processingInterval?: number;
+export async function initializeCore(_config?: {
+  skillManager?: {
+    workspacePath?: string;
   };
 }): Promise<void> {
-  const { messageBus: mbConfig } = config || {};
-
-  // Initialize message bus with config
-  if (mbConfig) {
-    getMessageBus(mbConfig);
-  }
-
   console.log('[Core] Core system initialized');
 }
 
@@ -158,34 +93,11 @@ export async function initializeCore(config?: {
  * Useful for testing
  */
 export function resetCore(): void {
-  resetToolRegistry();
-  resetMessageBus();
+  resetSkillManager();
   console.log('[Core] All core systems reset');
 }
 
-/**
- * Get core system statistics
- */
-export function getCoreStats(): {
-  toolRegistry: {
-    totalTools: number;
-    totalEstimatedTokens: number;
-    toolsByCategory: Record<string, number>;
-  };
-  messageBus: {
-    inboundQueueSize: number;
-    outboundQueueSize: number;
-    processing: boolean;
-  };
-} {
-  const toolRegistry = getToolRegistry();
-  const messageBus = getMessageBus();
-
-  return {
-    toolRegistry: toolRegistry.getStats(),
-    messageBus: messageBus.getStats(),
-  };
-}
+import { resetSkillManager } from './SkillManager';
 
 // ============================================================================
 // Version Info

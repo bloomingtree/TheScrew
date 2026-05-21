@@ -4,7 +4,16 @@ import { app } from 'electron';
 import { Tool } from './ToolManager';
 import { getPathManager, CONFIG_DIR_NAME } from '../config/PathManager';
 
-let workspacePath: string | null = null;
+// 使用 globalThis 确保跨 chunk 共享（Vite 内联模块会导致模块变量重复）
+const _workspaceKey = Symbol.for('zero-employee:getWorkspacePath()');
+
+export function setWorkspacePath(p: string | null) {
+  (globalThis as any)[_workspaceKey] = p;
+}
+
+export function getWorkspacePath(): string | null {
+  return (globalThis as any)[_workspaceKey] ?? null;
+}
 
 /**
  * 搜索配置常量
@@ -12,7 +21,6 @@ let workspacePath: string | null = null;
 const SEARCH_CONFIG = {
   /** 默认忽略的目录列表 */
   IGNORED_DIRS: new Set([
-    // Windows 系统目录
     'System Volume Information',
     '$RECYCLE.BIN',
     'Recovery',
@@ -20,42 +28,25 @@ const SEARCH_CONFIG = {
     'Program Files',
     'Program Files (x86)',
     'ProgramData',
-    // Node.js 项目
     'node_modules',
     '.yarn',
     '.pnpm-store',
-    // Git
     '.git',
-    // IDE
     '.idea',
     '.vscode',
     '.vs',
     'dist',
     'build',
     'out',
-    // macOS
     '.DS_Store',
     '.Spotlight-V100',
     '.Trashes',
-    // Linux
     '.cache',
     '.local',
   ]),
-
-  /** 最大搜索深度（防止无限递归） */
   MAX_DEPTH: 50,
-
-  /** 递归模式下的最大文件数量限制 */
   MAX_FILES: 5000,
 };
-
-export function setWorkspacePath(path: string | null) {
-  workspacePath = path;
-}
-
-export function getWorkspacePath(): string | null {
-  return workspacePath;
-}
 
 export const fileTools: Tool[] = [
   {
@@ -67,19 +58,19 @@ export const fileTools: Tool[] = [
     },
     handler: async () => {
       try {
-        if (!workspacePath) {
+        if (!getWorkspacePath()) {
           return { success: false, error: '工作空间未设置，请先让用户设置工作空间' };
         }
 
-        const files = await listFiles(workspacePath, false, workspacePath);
+        const files = await listFiles(getWorkspacePath(), false, getWorkspacePath());
 
         return {
           success: true,
-          path: workspacePath,
-          name: path.basename(workspacePath),
+          path: getWorkspacePath(),
+          name: path.basename(getWorkspacePath()),
           files: files.filter(f => f.type === 'file'),
           directories: files.filter(f => f.type === 'directory'),
-          description: `当前工作空间位于 ${workspacePath}，是一个项目目录，包含了 ${files.filter(f => f.type === 'file').length} 个文件和 ${files.filter(f => f.type === 'directory').length} 个目录。`,
+          description: `当前工作空间位于 ${getWorkspacePath()}，是一个项目目录，包含了 ${files.filter(f => f.type === 'file').length} 个文件和 ${files.filter(f => f.type === 'directory').length} 个目录。`,
         };
       } catch (error: any) {
         return { success: false, error: error.message };
@@ -133,7 +124,7 @@ export const fileTools: Tool[] = [
     },
     handler: async ({ directory, namespace = 'workspace', recursive = false }) => {
       try {
-        if (!workspacePath) {
+        if (!getWorkspacePath()) {
           return { success: false, error: '工作空间未设置' };
         }
 
@@ -141,7 +132,7 @@ export const fileTools: Tool[] = [
         if (namespace === 'config') {
           rootPath = getPathManager().getConfigPath();
         } else {
-          rootPath = workspacePath;
+          rootPath = getWorkspacePath();
         }
 
         const fullPath = path.resolve(rootPath, directory);
@@ -201,7 +192,7 @@ export const fileTools: Tool[] = [
     },
     handler: async ({ filepath, namespace = 'workspace', _toolCallId }) => {
       try {
-        if (!workspacePath) {
+        if (!getWorkspacePath()) {
           return { success: false, error: '工作空间未设置' };
         }
 
@@ -210,7 +201,7 @@ export const fileTools: Tool[] = [
         if (namespace === 'config') {
           rootPath = getPathManager().getConfigPath();
         } else {
-          rootPath = workspacePath;
+          rootPath = getWorkspacePath();
         }
 
         const fullPath = path.resolve(rootPath, filepath);
@@ -252,7 +243,7 @@ export const fileTools: Tool[] = [
     },
     handler: async ({ filepath, namespace = 'workspace' }) => {
       try {
-        if (!workspacePath) {
+        if (!getWorkspacePath()) {
           return { success: false, error: '工作空间未设置' };
         }
 
@@ -260,7 +251,7 @@ export const fileTools: Tool[] = [
         if (namespace === 'config') {
           rootPath = getPathManager().getConfigPath();
         } else {
-          rootPath = workspacePath;
+          rootPath = getWorkspacePath();
         }
 
         const fullPath = path.resolve(rootPath, filepath);
@@ -326,7 +317,7 @@ export const fileTools: Tool[] = [
     },
     handler: async ({ filepath, namespace = 'workspace', old_text, new_text }) => {
       try {
-        if (!workspacePath) {
+        if (!getWorkspacePath()) {
           return { success: false, error: '工作空间未设置' };
         }
 
@@ -334,7 +325,7 @@ export const fileTools: Tool[] = [
         if (namespace === 'config') {
           rootPath = getPathManager().getConfigPath();
         } else {
-          rootPath = workspacePath;
+          rootPath = getWorkspacePath();
         }
 
         const fullPath = path.resolve(rootPath, filepath);
@@ -419,7 +410,7 @@ export const fileTools: Tool[] = [
     },
     handler: async ({ filepath, namespace = 'workspace', content }) => {
       try {
-        if (!workspacePath) {
+        if (!getWorkspacePath()) {
           return { success: false, error: '工作空间未设置' };
         }
 
@@ -427,7 +418,7 @@ export const fileTools: Tool[] = [
         if (namespace === 'config') {
           rootPath = getPathManager().getConfigPath();
         } else {
-          rootPath = workspacePath;
+          rootPath = getWorkspacePath();
         }
 
         const fullPath = path.resolve(rootPath, filepath);

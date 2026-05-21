@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle, Clock, Eye, Terminal } from 'lucide-react';
 import { ToolCall, ToolResult } from '../../types';
 import { getToolNameCN } from '../../types/thread';
-import { WordPreviewDialog } from '../WordPreview';
 
 interface ToolCallSimpleProps {
   toolCalls: ToolCall[];
@@ -34,8 +33,6 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
   toolResults = [],
 }) => {
   const [expandedCalls, setExpandedCalls] = useState<Set<string>>(new Set());
-  const [previewFile, setPreviewFile] = useState<string | null>(null);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   // 检测是否是Word文档
   const isWordFile = (filepath?: string): boolean => {
@@ -63,16 +60,13 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
     });
   };
 
-  // 打开Word预览
-  const handleOpenPreview = (filepath: string) => {
-    setPreviewFile(filepath);
-    setIsPreviewOpen(true);
-  };
-
-  // 关闭Word预览
-  const handleClosePreview = () => {
-    setIsPreviewOpen(false);
-    setPreviewFile(null);
+  // 用系统默认程序打开文件
+  const handleOpenPreview = async (filepath: string) => {
+    try {
+      await window.electronAPI.fileEditor.openWithSystem(filepath);
+    } catch (e) {
+      console.error('Failed to open file:', e);
+    }
   };
 
   return (
@@ -231,7 +225,7 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                           </div>
                           {/* Word文档预览按钮 */}
                           {isWordFile(result.savedPath) && (
-                            <button
+                            <motion.button
                               onClick={() => result.savedPath && handleOpenPreview(result.savedPath)}
                               className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono transition-all border"
                               style={{
@@ -244,7 +238,7 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                             >
                               <Eye size={10} />
                               预览编辑
-                            </button>
+                            </motion.button>
                           )}
                         </div>
                         <div className="text-[10px] break-all font-mono" style={{ color: TERMINAL.textSecondary }}>
@@ -330,16 +324,8 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
       </div>
     </motion.div>
 
-    {/* Word预览对话框 */}
-    {previewFile && (
-      <WordPreviewDialog
-        isOpen={isPreviewOpen}
-        filepath={previewFile}
-        onClose={handleClosePreview}
-      />
-    )}
-  </>
-);
+    </>
+  );
 };
 
 export default ToolCallSimple;

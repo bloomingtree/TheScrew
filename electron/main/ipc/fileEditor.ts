@@ -26,12 +26,32 @@ const watchedFiles = new Set<string>();
  * 注册文件编辑器 IPC 处理器
  */
 export function registerFileEditorHandlers() {
+  // 二进制文件扩展名集合（不允许以文本方式读取）
+  const BINARY_EXTENSIONS = new Set([
+    '.docx', '.xlsx', '.xls', '.pptx', '.ppt', '.doc',
+    '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico',
+    '.zip', '.rar', '.7z', '.tar', '.gz',
+    '.exe', '.dll', '.so', '.dylib',
+    '.mp3', '.mp4', '.avi', '.mov', '.wav',
+    '.woff', '.woff2', '.ttf', '.eot',
+  ]);
+
   // 读取文件
   ipcMain.handle('fileEditor:readFile', async (_event, filepath: string) => {
     try {
       // 检查文件是否存在
       if (!fs.existsSync(filepath)) {
         return { success: false, error: '文件不存在' };
+      }
+
+      // 二进制文件防护：拒绝以文本方式读取
+      const ext = path.extname(filepath).toLowerCase();
+      if (BINARY_EXTENSIONS.has(ext)) {
+        return {
+          success: false,
+          error: `二进制文件（${ext}）不支持文本编辑，请使用预览功能查看`,
+          isBinary: true,
+        };
       }
 
       // 读取文件内容

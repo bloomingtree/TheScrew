@@ -1,11 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, FileText, HardDrive, History, Lightbulb } from 'lucide-react';
+import { X, FileText, HardDrive, History, Lightbulb, Clock } from 'lucide-react';
 import { useRightPanelStore, RightPanelTab } from '../../store/rightPanelStore';
 import PreviewTab from './tabs/PreviewTab';
 import FilesTab from './tabs/FilesTab';
 import HistoryTab from './tabs/HistoryTab';
 import SkillsTab from './tabs/SkillsTab';
+import SchedulerTab from './tabs/SchedulerTab';
 
 const RightPanel: React.FC = () => {
   const {
@@ -63,6 +64,7 @@ const RightPanel: React.FC = () => {
     { key: 'files', label: '工作空间', icon: HardDrive },
     { key: 'history', label: '工具历史', icon: History },
     { key: 'skills', label: '技能', icon: Lightbulb },
+    { key: 'scheduler', label: '定时任务', icon: Clock },
   ];
 
   // 渲染当前标签页内容
@@ -76,6 +78,8 @@ const RightPanel: React.FC = () => {
         return <HistoryTab />;
       case 'skills':
         return <SkillsTab />;
+      case 'scheduler':
+        return <SchedulerTab />;
       default:
         return null;
     }

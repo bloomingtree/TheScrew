@@ -155,14 +155,26 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     });
   };
 
+  // 预览模式的文件扩展名集合
+  const PREVIEW_EXTENSIONS = new Set([
+    'docx', 'xlsx', 'xls', 'pptx', 'ppt',
+    'pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'ico',
+  ]);
+
+  // 根据文件扩展名判断打开模式
+  const getFileOpenMode = (filename: string): 'editor' | 'preview' => {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    return PREVIEW_EXTENSIONS.has(ext) ? 'preview' : 'editor';
+  };
+
   // 处理文件点击
   const handleFileClick = async (entry: FileEntry) => {
     if (entry.type === 'directory') {
       toggleExpand(entry);
     } else {
-      // 打开编辑器标签
+      const openMode = getFileOpenMode(entry.name);
       openTab({
-        type: 'editor',
+        type: openMode,
         title: entry.name,
         content: { filepath: entry.path },
       });

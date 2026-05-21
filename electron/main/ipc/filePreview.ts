@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { readFile, writeFile, stat } from 'fs/promises';
 import path from 'path';
+import * as XLSX from 'xlsx';
 
 // ============================================================================
 // 文件预览 IPC 处理器
@@ -81,6 +82,30 @@ const IMAGE_FILE_EXTENSIONS = new Set([
 ]);
 
 /**
+ * 判断是否为 Word 文件
+ */
+function isWordFile(filepath: string): boolean {
+  const ext = path.extname(filepath).toLowerCase();
+  return ext === '.docx';
+}
+
+/**
+ * 判断是否为 PPTX 文件
+ */
+function isPptxFile(filepath: string): boolean {
+  const ext = path.extname(filepath).toLowerCase();
+  return ext === '.pptx';
+}
+
+/**
+ * 判断是否为 PDF 文件
+ */
+function isPdfFile(filepath: string): boolean {
+  const ext = path.extname(filepath).toLowerCase();
+  return ext === '.pdf';
+}
+
+/**
  * 判断是否为文本文件
  */
 function isTextFile(filepath: string): boolean {
@@ -159,62 +184,58 @@ async function previewImageFile(filepath: string): Promise<ImagePreviewData> {
 
 /**
  * 预览 Excel 文件
+ * 注意：Vite 打包后 XLSX.readFile() 依赖的 fs 不可用，需用手动读取 buffer + XLSX.read()
  */
 async function previewExcelFile(filepath: string): Promise<ExcelPreviewData> {
   try {
     const stats = await stat(filepath);
+    const buffer = await readFile(filepath);
 
-    // 尝试使用 xlsx 库解析
-    try {
-      const XLSX = await import('xlsx');
-      const workbook = XLSX.readFile(filepath);
+    // 用 XLSX.read(buffer) 替代 XLSX.readFile(path)，避免 ESM 环境中 fs 不可用的问题
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
 
-      const sheets: ExcelSheet[] = [];
+    const sheets: ExcelSheet[] = [];
 
-      workbook.SheetNames.forEach((sheetName, index) => {
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+    workbook.SheetNames.forEach((sheetName: string, index: number) => {
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
 
-        const rows: ExcelRow[] = [];
+      const rows: ExcelRow[] = [];
 
-        jsonData.forEach((rowData, rowIndex) => {
-          const cells: ExcelCell[] = [];
-          rowData.forEach((cellValue) => {
-            cells.push({
-              value: cellValue ?? '',
-            });
+      jsonData.forEach((rowData: any[], rowIndex: number) => {
+        const cells: ExcelCell[] = [];
+        rowData.forEach((cellValue: any) => {
+          cells.push({
+            value: cellValue ?? '',
           });
-
-          if (cells.length > 0) {
-            rows.push({
-              index: rowIndex,
-              cells,
-            });
-          }
         });
 
-        sheets.push({
-          name: sheetName,
-          index,
-          rows,
-        });
+        if (cells.length > 0) {
+          rows.push({
+            index: rowIndex,
+            cells,
+          });
+        }
       });
 
-      return {
-        filepath,
-        sheets,
-        activeSheet: 0,
-        metadata: {
-          path: filepath,
-          size: stats.size,
-          modified: stats.mtime.toISOString(),
-          sheetCount: sheets.length,
-        },
-      };
-    } catch (importError) {
-      // xlsx 库不可用，返回错误信息
-      throw new Error('Excel 预览功能需要安装 xlsx 库: npm install xlsx');
-    }
+      sheets.push({
+        name: sheetName,
+        index,
+        rows,
+      });
+    });
+
+    return {
+      filepath,
+      sheets,
+      activeSheet: 0,
+      metadata: {
+        path: filepath,
+        size: stats.size,
+        modified: stats.mtime.toISOString(),
+        sheetCount: sheets.length,
+      },
+    };
   } catch (error: any) {
     throw new Error(`解析 Excel 文件失败: ${error.message}`);
   }
@@ -272,6 +293,9 @@ function getFileType(filepath: string): string {
 
   if (isImageFile(filepath)) return 'image';
   if (isExcelFile(filepath)) return 'excel';
+  if (isWordFile(filepath)) return 'word';
+  if (isPptxFile(filepath)) return 'pptx';
+  if (isPdfFile(filepath)) return 'pdf';
   if (TEXT_FILE_EXTENSIONS.has(ext)) return 'text';
 
   return 'unknown';

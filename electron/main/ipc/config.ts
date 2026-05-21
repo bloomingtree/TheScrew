@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import Store from 'electron-store';
-import { getAppConfigStore, ModelConfig, ModelConfigs, AppSettings } from '../config/AppConfigStore';
+import { getAppConfigStore, ModelConfig, ModelConfigs, AppSettings, ModelCapabilities, ThinkingMode } from '../config/AppConfigStore';
+import { detectCapabilities } from '../utils/capabilityDetector';
 
 export function registerConfigHandlers(store: Store) {
   const appConfigStore = getAppConfigStore();
@@ -173,19 +174,40 @@ export function registerConfigHandlers(store: Store) {
   });
 
   /**
-   * 获取思考模式状态
+   * 获取思考模式
    */
-  ipcMain.handle('appSettings:getThinkingEnabled', (): boolean => {
-    return appConfigStore.getThinkingEnabled();
+  ipcMain.handle('appSettings:getThinkingMode', (): ThinkingMode => {
+    return appConfigStore.getThinkingMode();
   });
 
   /**
-   * 设置思考模式状态
+   * 设置思考模式
    */
-  ipcMain.handle('appSettings:setThinkingEnabled', (_event, enabled: boolean): { success: boolean } => {
+  ipcMain.handle('appSettings:setThinkingMode', (_event, mode: ThinkingMode): { success: boolean } => {
     try {
-      appConfigStore.setThinkingEnabled(enabled);
+      appConfigStore.setThinkingMode(mode);
       return { success: true };
+    } catch (e) {
+      return { success: false };
+    }
+  });
+
+  // ========== 模型能力检测接口 ==========
+
+  /**
+   * 根据模型名称检测能力
+   */
+  ipcMain.handle('modelConfig:detectCapabilities', (_event, modelName: string): ModelCapabilities => {
+    return detectCapabilities(modelName);
+  });
+
+  /**
+   * 更新模型能力配置
+   */
+  ipcMain.handle('modelConfig:updateCapabilities', (_event, id: string, capabilities: ModelCapabilities): { success: boolean; config?: ModelConfig } => {
+    try {
+      const config = appConfigStore.updateModelConfig(id, { capabilities });
+      return { success: true, config: config || undefined };
     } catch (e) {
       return { success: false };
     }

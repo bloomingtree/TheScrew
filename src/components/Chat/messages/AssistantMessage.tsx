@@ -1,9 +1,10 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { ChevronDown, ChevronRight, Brain } from 'lucide-react';
 import ToolCallSimple from '../ToolCallSimple';
 import { useChatStore } from '../../../store/chatStore';
 
@@ -13,11 +14,81 @@ interface AssistantMessageProps {
     content: string;
     tool_calls?: any[];
     timestamp?: number;
+    thinkingContent?: string;
   };
 }
 
+/** 从 content 中提取 <think >...</think > 标签内容（作为 fallback） */
+function extractThinkingFromContent(content: string): { thinking: string | null; cleanContent: string } {
+  const thinkRegex = /<think\s*>([\s\S]*?)<\/think\s*>/gi;
+  const matches: string[] = [];
+  let cleanContent = content.replace(thinkRegex, (_, inner) => {
+    matches.push(inner.trim());
+    return '';
+  });
+  // 清理首尾空白
+  cleanContent = cleanContent.replace(/^\s*\n/, '').replace(/\n\s*$/, '').trim();
+  if (matches.length > 0) {
+    return { thinking: matches.join('\n'), cleanContent };
+  }
+  return { thinking: null, cleanContent: content };
+}
+
+/** 思考折叠块组件 */
+const ThinkingBlock: React.FC<{ content: string }> = ({ content }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors hover:bg-gray-100"
+        style={{ color: '#7c3aed' }}
+      >
+        <Brain size={14} />
+        <span>思考过程</span>
+        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      </button>
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div
+              className="mt-1 px-3 py-2 rounded-lg text-xs leading-relaxed max-h-60 overflow-y-auto border"
+              style={{
+                backgroundColor: '#faf5ff',
+                borderColor: '#e9d5ff',
+                color: '#6b21a8',
+              }}
+            >
+              {content}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
   const { toolResults } = useChatStore();
+
+  // 提取思考内容：优先使用 thinkingContent 字段，其次从 content 中解析 <think > 标签
+  let thinkingContent = message.thinkingContent || null;
+  let displayContent = message.content;
+
+  if (!thinkingContent) {
+    const extracted = extractThinkingFromContent(message.content);
+    if (extracted.thinking) {
+      thinkingContent = extracted.thinking;
+      displayContent = extracted.cleanContent;
+    }
+  }
 
   const formatTime = (timestamp?: number) => {
     if (!timestamp) return '';
@@ -45,10 +116,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
   };
 
   const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
-  const hasContent = message.content && message.content.trim();
+  const hasContent = displayContent && displayContent.trim();
 
   return (
     <div className="mb-3">
+      {/* 思考内容折叠块 */}
+      {thinkingContent && (
+        <ThinkingBlock content={thinkingContent} />
+      )}
+
       {/* 如果有内容，显示回复 */}
       {hasContent && (
         <motion.div
@@ -59,7 +135,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
         >
           <div className="flex flex-col items-start max-w-[85%]">
             {/* 消息气泡 */}
-            <div className="rounded-xl overflow-hidden border bg-white border-gray-200 shadow-lg">
+            <div className="rounded-xl border bg-white border-gray-200 shadow-lg">
               <div className="px-3 py-2">
                 <div className="prose prose-sm max-w-none prose-p:max-w-none prose-headings:max-w-none">
                   <ReactMarkdown
@@ -92,10 +168,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
                         return <p className="my-1 text-[#374151] text-sm leading-relaxed">{children}</p>;
                       },
                       ul({ children }) {
-                        return <ul className="my-1 ml-4 list-disc text-sm text-[#374151]">{children}</ul>;
+                        return <ul className="my-1 pl-5 list-disc text-sm text-[#374151]" style={{ listStyleType: 'disc' }}>{children}</ul>;
                       },
                       ol({ children }) {
-                        return <ol className="my-1 ml-4 list-decimal text-sm text-[#374151]">{children}</ol>;
+                        return <ol className="my-1 pl-5 list-decimal text-sm text-[#374151]" style={{ listStyleType: 'decimal' }}>{children}</ol>;
                       },
                       li({ children }) {
                         return <li className="my-0.5">{children}</li>;
@@ -118,7 +194,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
                       },
                     }}
                   >
-                    {message.content}
+                    {displayContent}
                   </ReactMarkdown>
                 </div>
               </div>

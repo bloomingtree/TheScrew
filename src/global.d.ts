@@ -23,36 +23,6 @@ interface Attachment {
 }
 
 interface ElectronAPI {
-  pyodide: {
-    listFiles: (workspacePath: string) => Promise<{
-      success: boolean;
-      files?: Array<{
-        name: string;
-        path: string;
-        type: 'file' | 'directory';
-        size?: number;
-        modified?: Date;
-      }>;
-      error?: string;
-    }>;
-    readFile: (workspacePath: string, relativePath: string) => Promise<{
-      success: boolean;
-      content?: string;
-      path?: string;
-      encoding?: 'utf-8' | 'base64';
-      error?: string;
-    }>;
-    writeFile: (workspacePath: string, relativePath: string, content: string, encoding?: string) => Promise<{
-      success: boolean;
-      path?: string;
-      error?: string;
-    }>;
-    deleteFile: (workspacePath: string, relativePath: string) => Promise<{
-      success: boolean;
-      path?: string;
-      error?: string;
-    }>;
-  };
   chat: {
     stream: (messages: any[], conversationId?: string) => Promise<any>;
     stop: () => Promise<void>;
@@ -68,6 +38,7 @@ interface ElectronAPI {
     startWatching: () => Promise<{ success: boolean; error?: string }>;
     stopWatching: () => Promise<{ success: boolean; error?: string }>;
     onFileChanged: (callback: (data: { event: string; path: string }) => void) => () => void;
+    onWorkspaceChanged: (callback: (path: string) => void) => () => void;
   };
   tools: {
     getToolSetsOverview: (conversationId: string) => Promise<{
@@ -120,20 +91,58 @@ interface ElectronAPI {
       sync: (modelConfigs: any) => Promise<{ success: boolean }>;
       migrateFromLocalStorage: (data: string) => Promise<{ success: boolean }>;
     };
+    // 模型能力检测
+    detectCapabilities: (modelName: string) => Promise<{ vision: boolean; toolUse: boolean; streaming: boolean }>;
+    updateCapabilities: (id: string, capabilities: { vision: boolean; toolUse: boolean; streaming: boolean }) => Promise<{ success: boolean; config?: any }>;
     // 应用设置 API
     appSettings: {
       get: () => Promise<{
-        enableThinking: boolean;
+        thinkingMode?: 'auto' | 'enabled' | 'disabled';
         [key: string]: any;
       }>;
       save: (settings: any) => Promise<{ success: boolean }>;
-      getThinkingEnabled: () => Promise<boolean>;
-      setThinkingEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
+      getThinkingMode: () => Promise<'auto' | 'enabled' | 'disabled'>;
+      setThinkingMode: (mode: 'auto' | 'enabled' | 'disabled') => Promise<{ success: boolean }>;
     };
   };
   file: {
     selectImage: () => Promise<{ canceled: boolean; data?: string }>;
+    selectAndRead: () => Promise<{
+      canceled: boolean;
+      files?: Array<{ name: string; path: string; buffer: ArrayBuffer; size: number }>;
+    }>;
     saveFile: (content: string, filename: string) => Promise<void>;
+  };
+  // Session workspace API
+  sessionWorkspace: {
+    saveDroppedFile: (sessionId: string, fileName: string, buffer: ArrayBuffer) => Promise<{
+      success: boolean;
+      savedPath?: string;
+      size?: number;
+      error?: string;
+    }>;
+    getAccessibleFiles: (sessionId: string) => Promise<{
+      success: boolean;
+      files?: Array<{
+        name: string;
+        path: string;
+        size: number;
+        type: string;
+        category: string;
+        modifiedAt: number;
+      }>;
+      error?: string;
+    }>;
+    promoteToGlobal: (sessionId: string, filePath: string) => Promise<{
+      success: boolean;
+      path?: string;
+      error?: string;
+    }>;
+    cleanup: (maxAgeDays?: number) => Promise<{
+      success: boolean;
+      cleanedCount?: number;
+      error?: string;
+    }>;
   };
   attachment: {
     selectFiles: (options: { multiple?: boolean; messageId?: string }) => Promise<{
@@ -179,6 +188,48 @@ interface ElectronAPI {
     }>;
     saveText: (filepath: string, content: string) => Promise<{
       success: boolean;
+      error?: string;
+    }>;
+  };
+  // Word 文档 API
+  word: {
+    preview: (filepath: string) => Promise<{
+      success: boolean;
+      data?: {
+        buffer: string;
+        metadata: {
+          path: string;
+          size?: number;
+          modified?: string;
+        };
+      };
+      error?: string;
+    }>;
+    edit: (filepath: string, location: any, newContent: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+  };
+  // PPTX 文档 API
+  pptx: {
+    preview: (filepath: string) => Promise<{
+      success: boolean;
+      data?: any;
+      error?: string;
+    }>;
+  };
+  // PDF 文档 API
+  pdf: {
+    preview: (filepath: string) => Promise<{
+      success: boolean;
+      data?: {
+        buffer: string;
+        metadata: {
+          path: string;
+          size?: number;
+          modified?: string;
+        };
+      };
       error?: string;
     }>;
   };
@@ -236,6 +287,10 @@ interface ElectronAPI {
       error?: string;
     }>;
     onFileChanged: (callback: (data: { event: string; path: string }) => void) => () => void;
+    openWithSystem: (filepath: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
   };
   conversation: {
     getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>;
@@ -272,6 +327,11 @@ interface ElectronAPI {
     delete: (type: 'long_term' | 'daily_note', dateString?: string) => Promise<{ success: boolean; error?: string }>;
     getStats: () => Promise<{ success: boolean; stats?: any; error?: string }>;
     clearAll: () => Promise<{ success: boolean; error?: string }>;
+    // Session summarizer methods
+    summarizeSession: (sessionId: string, messages: any[]) => Promise<{ success: boolean; summary?: any; error?: string }>;
+    getDailySummary: (dateString: string) => Promise<{ success: boolean; summary?: any; error?: string }>;
+    getRecentSummaries: (days?: number) => Promise<{ success: boolean; summaries?: any[]; error?: string }>;
+    consolidate: () => Promise<{ success: boolean; extracted?: number; error?: string }>;
   };
   subagents: {
     spawn: (
@@ -372,35 +432,6 @@ interface ElectronAPI {
     trigger: () => Promise<{ success: boolean; result?: any; error?: string }>;
     isEmpty: () => Promise<{ success: boolean; isEmpty?: boolean; error?: string }>;
   };
-  python: {
-    execute: (code: string, options?: { timeout?: number }) => Promise<{
-      success: boolean;
-      output?: string;
-      error?: string;
-      timedOut?: boolean;
-      executionTime?: number;
-    }>;
-    validate: (code: string) => Promise<{
-      success: boolean;
-      validation?: {
-        valid: boolean;
-        errors: string[];
-        warnings: string[];
-      };
-      error?: string;
-    }>;
-    getStatus: () => Promise<{
-      success: boolean;
-      status?: {
-        backend: string;
-        ready: boolean;
-        version: string;
-        description?: string;
-      };
-      error?: string;
-    }>;
-    init: () => Promise<{ success: boolean; error?: string }>;
-  };
   getAppVersion: () => Promise<string>;
   onChatChunk: (callback: (chunk: string) => void) => () => void;
   onToolCalls: (callback: (toolCalls: any[]) => void) => () => void;
@@ -409,6 +440,18 @@ interface ElectronAPI {
   onToolComplete: (callback: (data: any) => void) => () => void;
   onTokenUsage: (callback: (usage: any) => void) => () => void;
   removeChatChunkListener: () => void;
+  // 用户提问工具
+  onUserQuestion: (callback: (data: {
+    questionId: string;
+    question: string;
+    options: Array<{ label: string; value: string; description?: string }>;
+    allow_custom: boolean;
+    custom_placeholder: string;
+  }) => void) => () => void;
+  answerQuestion: (questionId: string, answer: string) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
 }
 
 declare global {

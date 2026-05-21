@@ -3,6 +3,7 @@ import Store from 'electron-store';
 import { setWorkspacePath, getWorkspacePath } from '../tools/FileTools';
 import { getWorkspaceManager } from '../config/WorkspaceManager';
 import { getPathManager, CONFIG_DIR_NAME } from '../config/PathManager';
+import { getSessionWorkspaceManager } from '../config/SessionWorkspaceManager';
 import type {
   WorkspaceInfo,
   CreateWorkspaceOptions,
@@ -42,6 +43,8 @@ export function registerWorkspaceHandlers(store: Store) {
       const selectedPath = result.filePaths[0];
       setWorkspacePath(selectedPath);
       store.set('workspacePath', selectedPath);
+      // 通知所有窗口工作空间路径已变更
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('workspace:changed', selectedPath));
       return { path: selectedPath };
     } catch (error: any) {
       return { path: null, error: error.message };
@@ -49,13 +52,24 @@ export function registerWorkspaceHandlers(store: Store) {
   });
 
   ipcMain.handle('workspace:get_path', async () => {
-    const workspacePath = getWorkspacePath();
+    let workspacePath = getWorkspacePath();
+    // 如果内存中没有，尝试从持久化存储恢复
+    if (!workspacePath) {
+      const stored = store.get('workspacePath', null) as string | null;
+      if (stored) {
+        setWorkspacePath(stored);
+        workspacePath = stored;
+        console.log('[Workspace] Restored from store:', stored);
+      }
+    }
     return { path: workspacePath };
   });
 
   ipcMain.handle('workspace:set_path', async (_event, pathStr: string) => {
     setWorkspacePath(pathStr);
     store.set('workspacePath', pathStr);
+    // 通知所有窗口工作空间路径已变更
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('workspace:changed', pathStr));
     return { success: true, path: pathStr };
   });
 
@@ -274,6 +288,50 @@ export function registerWorkspaceHandlers(store: Store) {
         fileWatcher = null;
       }
       return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ========== 会话工作空间 API ==========
+
+  const sessionWorkspaceManager = getSessionWorkspaceManager();
+
+  // 保存拖拽文件到会话工作空间
+  ipcMain.handle('sessionWorkspace:saveDroppedFile', async (_event, sessionId: string, fileName: string, buffer: Buffer) => {
+    try {
+      const result = await sessionWorkspaceManager.saveDroppedFile(sessionId, fileName, Buffer.from(buffer));
+      return { success: true, ...result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 获取会话可访问文件列表
+  ipcMain.handle('sessionWorkspace:getAccessibleFiles', async (_event, sessionId: string) => {
+    try {
+      const files = await sessionWorkspaceManager.getAccessibleFiles(sessionId);
+      return { success: true, files };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 将文件提升到全局共享空间
+  ipcMain.handle('sessionWorkspace:promoteToGlobal', async (_event, sessionId: string, filePath: string) => {
+    try {
+      const globalPath = await sessionWorkspaceManager.promoteToGlobal(sessionId, filePath);
+      return { success: true, path: globalPath };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 清理过期会话空间
+  ipcMain.handle('sessionWorkspace:cleanup', async (_event, maxAgeDays?: number) => {
+    try {
+      const cleanedCount = await sessionWorkspaceManager.cleanupStaleSessions(maxAgeDays || 30);
+      return { success: true, cleanedCount };
     } catch (error: any) {
       return { success: false, error: error.message };
     }

@@ -45,6 +45,11 @@ const electronAPI = {
       ipcRenderer.on('workspace:fileChanged', listener);
       return () => ipcRenderer.removeListener('workspace:fileChanged', listener);
     },
+    onWorkspaceChanged: (callback: (path: string) => void) => {
+      const listener = (_event: any, path: string) => callback(path);
+      ipcRenderer.on('workspace:changed', listener);
+      return () => ipcRenderer.removeListener('workspace:changed', listener);
+    },
     // 新工作区管理 API
     listWorkspaces: () => ipcRenderer.invoke('workspace:listWorkspaces') as Promise<{
       success: boolean;
@@ -123,16 +128,28 @@ const electronAPI = {
     // 应用设置 API
     appSettings: {
       get: () => ipcRenderer.invoke('appSettings:get') as Promise<{
-        enableThinking: boolean;
+        thinkingMode?: 'auto' | 'enabled' | 'disabled';
         [key: string]: any;
       }>,
       save: (settings: any) => ipcRenderer.invoke('appSettings:save', settings) as Promise<{ success: boolean }>,
-      getThinkingEnabled: () => ipcRenderer.invoke('appSettings:getThinkingEnabled') as Promise<boolean>,
-      setThinkingEnabled: (enabled: boolean) => ipcRenderer.invoke('appSettings:setThinkingEnabled', enabled) as Promise<{ success: boolean }>,
+      getThinkingMode: () => ipcRenderer.invoke('appSettings:getThinkingMode') as Promise<'auto' | 'enabled' | 'disabled'>,
+      setThinkingMode: (mode: 'auto' | 'enabled' | 'disabled') => ipcRenderer.invoke('appSettings:setThinkingMode', mode) as Promise<{ success: boolean }>,
     },
+    // 模型能力检测
+    detectCapabilities: (modelName: string) => ipcRenderer.invoke('modelConfig:detectCapabilities', modelName) as Promise<{
+      vision: boolean;
+      toolUse: boolean;
+      streaming: boolean;
+    }>,
+    updateCapabilities: (id: string, capabilities: { vision: boolean; toolUse: boolean; streaming: boolean }) =>
+      ipcRenderer.invoke('modelConfig:updateCapabilities', id, capabilities) as Promise<{ success: boolean; config?: any }>,
   },
   file: {
     selectImage: () => ipcRenderer.invoke('file:select-image') as Promise<{ canceled: boolean; data?: string }>,
+    selectAndRead: () => ipcRenderer.invoke('file:select-and-read') as Promise<{
+      canceled: boolean;
+      files?: Array<{ name: string; path: string; buffer: ArrayBuffer; size: number }>;
+    }>,
     saveFile: (content: string, filename: string) => ipcRenderer.invoke('file:save', content, filename),
   },
   // Attachment API
@@ -166,36 +183,38 @@ const electronAPI = {
         error?: string;
       }>,
   },
-  pyodide: {
-    listFiles: (workspacePath: string) => ipcRenderer.invoke('pyodide:list-files', workspacePath) as Promise<{
-      success: boolean;
-      files?: Array<{
-        name: string;
-        path: string;
-        type: 'file' | 'directory';
+  // 会话工作空间 API
+  sessionWorkspace: {
+    saveDroppedFile: (sessionId: string, fileName: string, buffer: ArrayBuffer) =>
+      ipcRenderer.invoke('sessionWorkspace:saveDroppedFile', sessionId, fileName, buffer) as Promise<{
+        success: boolean;
+        savedPath?: string;
         size?: number;
-        modified?: Date;
-      }>;
-      error?: string;
-    }>,
-    readFile: (workspacePath: string, relativePath: string) =>
-      ipcRenderer.invoke('pyodide:read-file', workspacePath, relativePath) as Promise<{
-        success: boolean;
-        content?: string;
-        path?: string;
-        encoding?: 'utf-8' | 'base64';
         error?: string;
       }>,
-    writeFile: (workspacePath: string, relativePath: string, content: string, encoding?: string) =>
-      ipcRenderer.invoke('pyodide:write-file', workspacePath, relativePath, content, encoding) as Promise<{
+    getAccessibleFiles: (sessionId: string) =>
+      ipcRenderer.invoke('sessionWorkspace:getAccessibleFiles', sessionId) as Promise<{
+        success: boolean;
+        files?: Array<{
+          name: string;
+          path: string;
+          size: number;
+          type: string;
+          category: string;
+          modifiedAt: number;
+        }>;
+        error?: string;
+      }>,
+    promoteToGlobal: (sessionId: string, filePath: string) =>
+      ipcRenderer.invoke('sessionWorkspace:promoteToGlobal', sessionId, filePath) as Promise<{
         success: boolean;
         path?: string;
         error?: string;
       }>,
-    deleteFile: (workspacePath: string, relativePath: string) =>
-      ipcRenderer.invoke('pyodide:delete-file', workspacePath, relativePath) as Promise<{
+    cleanup: (maxAgeDays?: number) =>
+      ipcRenderer.invoke('sessionWorkspace:cleanup', maxAgeDays) as Promise<{
         success: boolean;
-        path?: string;
+        cleanedCount?: number;
         error?: string;
       }>,
   },
@@ -280,6 +299,22 @@ const electronAPI = {
         success: boolean;
         error?: string;
       }>,
+  },
+  // PPTX 文档 API
+  pptx: {
+    preview: (filepath: string) => ipcRenderer.invoke('pptx:preview', filepath) as Promise<{
+      success: boolean;
+      data?: any;
+      error?: string;
+    }>,
+  },
+  // PDF 文档 API
+  pdf: {
+    preview: (filepath: string) => ipcRenderer.invoke('pdf:preview', filepath) as Promise<{
+      success: boolean;
+      data?: any;
+      error?: string;
+    }>,
   },
   // Skills API
   skills: {
@@ -446,6 +481,33 @@ const electronAPI = {
       error?: string;
     }>,
   },
+  // Memory Summarizer API
+  memory: {
+    summarizeSession: (sessionId: string, messages: any[]) =>
+      ipcRenderer.invoke('memory:summarizeSession', sessionId, messages) as Promise<{
+        success: boolean;
+        summary?: any;
+        error?: string;
+      }>,
+    getDailySummary: (dateString: string) =>
+      ipcRenderer.invoke('memory:getDailySummary', dateString) as Promise<{
+        success: boolean;
+        summary?: any;
+        error?: string;
+      }>,
+    getRecentSummaries: (days?: number) =>
+      ipcRenderer.invoke('memory:getRecentSummaries', days) as Promise<{
+        success: boolean;
+        summaries?: any[];
+        error?: string;
+      }>,
+    consolidate: () =>
+      ipcRenderer.invoke('memory:consolidate') as Promise<{
+        success: boolean;
+        extracted?: number;
+        error?: string;
+      }>,
+  },
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   onChatChunk: (callback: (chunk: string) => void) => {
     const listener = (_event: any, chunk: string) => callback(chunk);
@@ -480,6 +542,23 @@ const electronAPI = {
   removeChatChunkListener: () => {
     ipcRenderer.removeAllListeners('chat:chunk');
   },
+  // 用户提问工具
+  onUserQuestion: (callback: (data: {
+    questionId: string;
+    question: string;
+    options: Array<{ label: string; value: string; description?: string }>;
+    allow_custom: boolean;
+    custom_placeholder: string;
+  }) => void) => {
+    const listener = (_event: any, data: any) => callback(data);
+    ipcRenderer.on('chat:user_question', listener);
+    return () => ipcRenderer.removeListener('chat:user_question', listener);
+  },
+  answerQuestion: (questionId: string, answer: string) =>
+    ipcRenderer.invoke('chat:answer_question', { questionId, answer }) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

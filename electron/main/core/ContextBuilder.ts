@@ -17,6 +17,7 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import { getSimpleSkillManager } from './SimpleSkillManager';
 import { getMemoryStore } from '../memory/MemoryStore';
+import { getSessionSummarizer } from '../memory/SessionSummarizer';
 import { getToolManager } from '../tools/ToolManager';
 import { CONFIG_DIR_NAME } from '../config/PathManager';
 
@@ -48,6 +49,7 @@ const BOOTSTRAP_FILES = {
 export class ContextBuilder {
   private skillManager = getSimpleSkillManager();
   private memoryStore = getMemoryStore();
+  private sessionSummarizer = getSessionSummarizer();
   private toolManager = getToolManager();
 
   /**
@@ -94,10 +96,16 @@ export class ContextBuilder {
   /**
    * 1. 核心身份部分
    */
-  private _buildIdentitySection(_options: ContextBuilderOptions): string {
+  private _buildIdentitySection(options: ContextBuilderOptions): string {
+    // 获取工作区路径
+    let workspaceInfo = '';
+    if (options.workspacePath) {
+      workspaceInfo = `\n\n## 当前工作目录\n\n工作目录路径：${options.workspacePath}\n- 创建文件时，filename 参数只需传文件名（如 report.docx），系统会自动解析到工作目录\n- 如果用户指定了其他路径，则使用完整路径`;
+    }
+
     return `# 核心身份
 
-你是一个强大的自主 AI Agent，名为"螺丝钉"，拥有一个 Python 环境。
+你是一个强大的自主 AI Agent，名为"螺丝帽"，拥有一个 Python 环境。
 
 ## 核心能力
 - 文件操作：读取、写入、编辑文件
@@ -115,7 +123,12 @@ export class ContextBuilder {
 1. **持续执行**：调用工具获取信息后，必须继续调用工具执行实际操作，直到任务完全完成。绝不能在读取文档后停下来只做文字描述。
 2. **行动优先**：不要花时间向用户描述你将要做什么，直接调用工具去做。用户需要的是最终结果，而不是你的工作计划。
 3. **禁止中途停止**：如果用户给了明确指令，你应该一直调用工具直到产出最终结果（文件、报告等）。不要在中间步骤停下来等待确认。
-4. **遇到问题继续**：如果某个工具调用失败，尝试其他方法继续完成任务，而不是停下来描述问题。`;
+4. **遇到问题继续**：如果某个工具调用失败，尝试其他方法继续完成任务，而不是停下来描述问题。
+
+## 路径处理规则（极其重要）
+1. **路径原样使用**：文件路径必须与用户提供的或工具返回的完全一致，禁止在路径中添加、删除或修改任何字符。
+2. **禁止加空格**：特别注意不要在数字和中文之间插入空格。例如 "2026数字人" 绝不能写成 "2026 数字人"，"第1章" 绝不能写成 "第 1 章"。
+3. **路径不加引号**：在工具参数中传递路径时，直接使用原始路径字符串，不需要额外添加引号或转义。${workspaceInfo}`;
   }
 
   /**
@@ -205,27 +218,45 @@ export class ContextBuilder {
   }
 
   /**
-   * 4. 内存部分
+   * 4. 内存部分（改进版：加入工作记忆）
    */
   private async _buildMemorySection(options: ContextBuilderOptions): Promise<string | null> {
     try {
-      const context = await this.memoryStore.buildMemoryContext();
-
-      if (!context || context.trim().length === 0) {
-        return null;
-      }
-
-      // Apply token limit if specified
+      const sections: string[] = [];
       const maxTokens = options.maxMemoryTokens || 2000;
-      const estimatedTokens = context.length / 2; // Rough estimate: 2 chars ≈ 1 token
+      let usedTokens = 0;
 
-      if (estimatedTokens > maxTokens) {
-        // Truncate with ellipsis
-        const truncatedLength = Math.floor(maxTokens * 2);
-        return `# 内存\n\n${context.slice(0, truncatedLength)}\n\n... (内容过长，已截断)`;
+      // 1. 长期记忆（始终加载，截断）
+      const longTerm = await this.memoryStore.getLongTermMemory();
+      if (longTerm && !longTerm.includes('No long-term memories')) {
+        const maxChars = Math.min(longTerm.length, 1000 * 2);
+        sections.push(`## 核心记忆\n${longTerm.slice(0, maxChars)}`);
+        usedTokens += maxChars / 2;
       }
 
-      return `# 内存\n\n${context}`;
+      // 2. 近7日工作记忆摘要
+      if (usedTokens < maxTokens) {
+        try {
+          const recentMemory = await this.sessionSummarizer.buildRecentMemoryText(maxTokens - usedTokens);
+          if (recentMemory) {
+            sections.push(recentMemory);
+          }
+        } catch {
+          // SessionSummarizer 可能初始化失败，忽略
+        }
+      }
+
+      // 3. 今日笔记
+      if (usedTokens < maxTokens) {
+        const todayNote = await this.memoryStore.getTodayNote();
+        if (todayNote && !todayNote.includes('No notes for today')) {
+          const remaining = (maxTokens - usedTokens) * 2;
+          sections.push(`## 今日笔记\n${todayNote.slice(0, remaining)}`);
+        }
+      }
+
+      if (sections.length === 0) return null;
+      return `# 内存\n\n${sections.join('\n\n---\n\n')}`;
     } catch (e) {
       console.warn('[ContextBuilder] Failed to build memory section:', e);
       return null;

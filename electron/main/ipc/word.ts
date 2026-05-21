@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { readFile, writeFile } from 'fs/promises';
 import path from 'path';
-const JSZip = require('jszip');
+import JSZip from 'jszip';
 
 // ============================================================================
 // Word 文档预览 IPC 处理器
@@ -289,7 +289,7 @@ async function saveDocxFile(filepath: string, paragraphIndex: number, newText: s
 }
 
 export function registerWordHandlers() {
-  // 预览 Word 文档
+  // 预览 Word 文档（高保真渲染：返回文件 Buffer）
   ipcMain.handle('word:preview', async (_event, filepath: string) => {
     try {
       console.log('[Word] Preview requested for:', filepath);
@@ -298,8 +298,21 @@ export function registerWordHandlers() {
         throw new Error('不支持的文件格式，仅支持 .docx 文件');
       }
 
-      const data = await parseDocxWithMammoth(filepath);
-      return { success: true, data };
+      const buffer = await readFile(filepath);
+      const { stat } = await import('fs/promises');
+      const stats = await stat(filepath);
+
+      return {
+        success: true,
+        data: {
+          buffer: buffer.toString('base64'),
+          metadata: {
+            path: filepath,
+            size: stats.size,
+            modified: stats.mtime.toISOString(),
+          },
+        },
+      };
     } catch (error: any) {
       console.error('[Word] Preview error:', error);
       return { success: false, error: error.message };

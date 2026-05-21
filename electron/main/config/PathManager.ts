@@ -76,6 +76,8 @@ export class PathManager {
       this.getMemoryPath(),
       this.getSchedulerPath(),
       this.getAttachmentsPath(),
+      this.getSessionWorkspacesPath(),
+      this.getGlobalWorkspacePath(),
     ];
 
     for (const dir of dirs) {
@@ -141,6 +143,62 @@ export class PathManager {
    */
   getSchedulerPath(): string {
     return path.join(this.configPath, 'data', 'scheduler');
+  }
+
+  /**
+   * 获取会话工作空间根目录 (.config/data/workspaces/sessions/)
+   */
+  getSessionWorkspacesPath(): string {
+    return path.join(this.configPath, 'data', 'workspaces', 'sessions');
+  }
+
+  /**
+   * 获取全局共享工作空间 (.config/data/workspaces/global/)
+   */
+  getGlobalWorkspacePath(): string {
+    return path.join(this.configPath, 'data', 'workspaces', 'global');
+  }
+
+  /**
+   * 获取指定会话的工作空间目录
+   */
+  getSessionWorkspacePath(sessionId: string): string {
+    return path.join(this.getSessionWorkspacesPath(), sessionId);
+  }
+
+  /**
+   * 获取会话附件目录
+   */
+  getSessionAttachmentsPath(sessionId: string): string {
+    return path.join(this.getSessionWorkspacePath(sessionId), 'attachments');
+  }
+
+  /**
+   * 获取会话输出目录
+   */
+  getSessionOutputsPath(sessionId: string): string {
+    return path.join(this.getSessionWorkspacePath(sessionId), 'outputs');
+  }
+
+  /**
+   * 获取记忆总结目录 (.config/memory/daily_summaries/)
+   */
+  getDailySummariesPath(): string {
+    return path.join(this.configPath, 'memory', 'daily_summaries');
+  }
+
+  /**
+   * 获取会话总结目录 (.config/memory/session_summaries/)
+   */
+  getSessionSummariesPath(): string {
+    return path.join(this.configPath, 'memory', 'session_summaries');
+  }
+
+  /**
+   * 获取定时任务执行日志目录 (.config/data/scheduler/execution_log/)
+   */
+  getExecutionLogPath(): string {
+    return path.join(this.configPath, 'data', 'scheduler', 'execution_log');
   }
 
   /**

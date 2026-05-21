@@ -50,7 +50,8 @@ const MessageList: React.FC = () => {
             transition={{ duration: 0.6 }}
             className="flex flex-col items-center pt-[20%]"
           >
-            <p className="text-2xl font-semibold mb-2 text-[#374151]">我是螺丝钉，有什么可以帮助您？</p>
+            <img src="./logo.png" alt="螺丝帽" className="w-16 h-16 rounded-2xl mb-4 shadow-md" />
+            <p className="text-2xl font-semibold mb-2 text-[#374151]">我是螺丝帽，有什么可以帮助您？</p>
             <p className="text-sm text-[#9CA3AF]">今天是{new Date().toLocaleDateString('zh-CN', { weekday: 'long' })}</p>
           </motion.div>
         )}
@@ -58,8 +59,12 @@ const MessageList: React.FC = () => {
         {/* 顺序渲染每条消息 */}
         {messages.map((message, index) => renderMessage(message, index))}
 
-        {/* 流式响应加载指示器 */}
-        {isStreaming && (
+        {/* 流式响应加载指示器：只在最后一条 assistant 消息完全为空时显示 */}
+        {isStreaming && (() => {
+          const lastMsg = messages[messages.length - 1];
+          const isEmpty = lastMsg?.role === 'assistant' && !lastMsg.content && (!lastMsg.tool_calls || lastMsg.tool_calls.length === 0);
+          return isEmpty;
+        })() && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

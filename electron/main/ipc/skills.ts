@@ -58,7 +58,7 @@ export function registerSkillsHandlers(): void {
   // Build skills summary (for system prompt)
   ipcMain.handle('skills:buildSummary', async (_event, activeSkills?: string[]) => {
     try {
-      const summary = await simpleSkillManager.buildSkillsSummary(activeSkills);
+      const summary = await simpleSkillManager.build_skills_summary();
       return {
         success: true,
         summary,

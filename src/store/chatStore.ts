@@ -28,6 +28,7 @@ interface ChatState {
   // 消息操作（保持顺序）
   addMessage: (message: any) => void;
   updateLastMessage: (content: string) => void;
+  updateLastMessageThinking: (thinking: string) => void;
   updateLastMessageToolCalls: (toolCalls: ToolCall[]) => void;
   setMessages: (messages: any[]) => void;
   clearMessages: () => void;
@@ -74,6 +75,22 @@ export const useChatStore = create<ChatState>((set) => ({
       updated[lastIdx] = {
         ...updated[lastIdx],
         content,
+      };
+    }
+
+    return { messages: updated };
+  }),
+
+  updateLastMessageThinking: (thinking) => set((state) => {
+    if (state.messages.length === 0) return state;
+
+    const updated = [...state.messages];
+    const lastIdx = updated.length - 1;
+
+    if (updated[lastIdx].role === 'assistant') {
+      updated[lastIdx] = {
+        ...updated[lastIdx],
+        thinkingContent: thinking,
       };
     }
 

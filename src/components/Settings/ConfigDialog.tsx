@@ -739,11 +739,61 @@ const ConfigDialog: React.FC = () => {
                   </button>
                 </div>
               </div>
+
+              {/* 高级设置区域 */}
+              <AdvancedSettings />
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
     </>
+  );
+};
+
+// 高级设置组件（硬件加速等）
+const AdvancedSettings: React.FC = () => {
+  const { appSettings, setHardwareAcceleration } = useConfigStore();
+  const hwAccel = appSettings.hardwareAcceleration ?? true;
+
+  return (
+    <div
+      className="px-4 py-3 border-t shrink-0"
+      style={{ borderColor: `${TERMINAL.bgTertiary}20` }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Zap size={14} style={{ color: TERMINAL.cyan }} />
+          <span className="text-xs font-mono" style={{ color: TERMINAL.textDark }}>
+            硬件加速（GPU）
+          </span>
+          <span className="text-[10px] font-mono" style={{ color: TERMINAL.textSecondary }}>
+            {hwAccel ? '已启用' : '已禁用 · 重启后生效'}
+          </span>
+        </div>
+        <button
+          onClick={() => {
+            const next = !hwAccel;
+            setHardwareAcceleration(next);
+          }}
+          className="relative w-9 h-5 rounded-full transition-all duration-200"
+          style={{
+            background: hwAccel ? TERMINAL.green : TERMINAL.bgTertiary,
+          }}
+        >
+          <div
+            className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+            style={{
+              left: hwAccel ? '18px' : '2px',
+            }}
+          />
+        </button>
+      </div>
+      {!hwAccel && (
+        <p className="text-[10px] font-mono mt-1 ml-6" style={{ color: TERMINAL.textSecondary }}>
+          适用于虚拟机/远程桌面卡顿场景，需重启应用生效
+        </p>
+      )}
+    </div>
   );
 };
 

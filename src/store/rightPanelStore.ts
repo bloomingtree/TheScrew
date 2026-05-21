@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type RightPanelTab = 'preview' | 'files' | 'history' | 'skills';
+export type RightPanelTab = 'preview' | 'files' | 'history' | 'skills' | 'scheduler';
 
 export interface PreviewFile {
   filepath: string;

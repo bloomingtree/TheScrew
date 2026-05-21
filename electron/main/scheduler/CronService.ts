@@ -148,7 +148,7 @@ function matchesCronComponent(value: number, allowed: Set<number> | null): boole
 
 export class CronService {
   private storePath: string;
-  private onJob: CronJobCallback | null;
+  public onJob: CronJobCallback | null;
   private store: CronStore | null = null;
   private timerHandle: NodeJS.Timeout | null = null;
   private running = false;

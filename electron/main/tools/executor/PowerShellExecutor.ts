@@ -5,6 +5,7 @@
  */
 
 import { spawn } from 'child_process';
+import crossSpawn from 'cross-spawn';
 import { app } from 'electron';
 import * as path from 'path';
 import { ExecuteOptions, InternalExecuteResult } from '../types';
@@ -79,7 +80,11 @@ export class PowerShellExecutor {
       delete enhancedEnv.PYTHONPATH;
 
       // 启动 PowerShell
-      const child = spawn('powershell.exe', psArgs, {
+      // 优先使用 cross-spawn（更好的 Windows 可执行文件解析）
+      // 如果失败，回退到完整路径
+      const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+      const psFullPath = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const child = crossSpawn(psFullPath, psArgs, {
         cwd,
         env: enhancedEnv,
         windowsHide: true,
