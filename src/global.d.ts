@@ -255,6 +255,10 @@ interface ElectronAPI {
       success: boolean;
       error?: string;
     }>;
+    deleteFileDirect: (filepath: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
     renameFile: (oldPath: string, newPath: string) => Promise<{
       success: boolean;
       error?: string;

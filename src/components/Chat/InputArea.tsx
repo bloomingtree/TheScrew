@@ -263,6 +263,7 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
     addMessage(initialAssistantMessage);
     let assistantMessageCreated = true;
     let accumulatedContent = '';
+    let accumulatedThinking = '';
 
     const ensureAssistantMessage = () => {
       if (!assistantMessageCreated) {
@@ -275,6 +276,7 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
         addMessage(assistantMessage);
         assistantMessageCreated = true;
         accumulatedContent = '';
+        accumulatedThinking = '';  // 重置思考累积（新消息不应继承前一轮的思考内容）
       }
     };
 
@@ -288,7 +290,6 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
       console.log('[InputArea] Sending', latestMessages.length, 'messages to backend');
 
       // 累积思考内容
-      let accumulatedThinking = '';
       const { updateLastMessageThinking } = useChatStore.getState();
 
       const handleChunk = (chunk: string) => {
@@ -366,24 +367,28 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
           const assistantCount = result.messages.filter((m: any) => m.role === 'assistant').length;
           const toolCount = result.messages.filter((m: any) => m.role === 'tool').length;
           console.log('[InputArea] Stream completed with', result.messages.length, `messages (user:${userCount}, assistant:${assistantCount}, tool:${toolCount})`);
-          // 保留前端累积的思考内容（后端消息不含 thinkingContent）
-          if (accumulatedThinking) {
-            const currentMessages = useChatStore.getState().messages;
-            let lastAssistantIdx = -1;
-            for (let i = result.messages.length - 1; i >= 0; i--) {
-              if (result.messages[i].role === 'assistant') { lastAssistantIdx = i; break; }
+          // 保留前端所有 assistant 消息的思考内容（后端消息不含 thinkingContent）
+          const currentMessages = useChatStore.getState().messages;
+
+          // 收集前端所有 assistant 消息的 thinkingContent（按顺序）
+          const frontendThinking: string[] = [];
+          for (const msg of currentMessages) {
+            if (msg.role === 'assistant') {
+              frontendThinking.push(msg.thinkingContent || '');
             }
-            if (lastAssistantIdx >= 0) {
-              let existingThinking: string | undefined;
-              for (let i = currentMessages.length - 1; i >= 0; i--) {
-                if (currentMessages[i].role === 'assistant') { existingThinking = currentMessages[i].thinkingContent; break; }
-              }
-              if (existingThinking) {
-                result.messages[lastAssistantIdx] = {
-                  ...result.messages[lastAssistantIdx],
-                  thinkingContent: existingThinking,
+          }
+
+          // 按顺序将思考内容应用到后端返回的消息
+          let fIdx = 0;
+          for (let i = 0; i < result.messages.length; i++) {
+            if (result.messages[i].role === 'assistant') {
+              if (fIdx < frontendThinking.length && frontendThinking[fIdx]) {
+                result.messages[i] = {
+                  ...result.messages[i],
+                  thinkingContent: frontendThinking[fIdx],
                 };
               }
+              fIdx++;
             }
           }
           // 使用后端返回的完整消息列表更新 chatStore

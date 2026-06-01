@@ -105,7 +105,7 @@ export class ContextBuilder {
 
     return `# 核心身份
 
-你是一个强大的自主 AI Agent，名为"螺丝帽"，拥有一个 Python 环境。
+你是一个强大的自主 AI Agent，名为"螺丝帽"，通过命令行工具执行任务。
 
 ## 核心能力
 - 文件操作：读取、写入、编辑文件

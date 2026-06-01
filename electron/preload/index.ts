@@ -398,6 +398,10 @@ const electronAPI = {
       success: boolean;
       error?: string;
     }>,
+    deleteFileDirect: (filepath: string) => ipcRenderer.invoke('fileEditor:deleteFileDirect', filepath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
     renameFile: (oldPath: string, newPath: string) => ipcRenderer.invoke('fileEditor:renameFile', oldPath, newPath) as Promise<{
       success: boolean;
       error?: string;

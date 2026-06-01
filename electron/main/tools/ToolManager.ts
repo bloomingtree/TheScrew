@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { outputTruncator } from '../utils/OutputTruncator';
 
 export interface Tool {
   name: string;
@@ -189,10 +190,17 @@ export class ToolManager {
       }
 
       // 清理路径参数中数字与中文之间的多余空格（模型常见错误）
+      // 注意：跳过带扩展名的文件名（如 "小红帽 0.docx"），只清理纯目录路径
       if (args && typeof args === 'object') {
         for (const key of ['path', 'filepath', 'filename', 'file_path', 'dir_path', 'directory', 'element_path', 'parent_path', 'target_path', 'path_a', 'path_b']) {
           if (typeof args[key] === 'string') {
-            args[key] = args[key].replace(/(\d)\s+([\u4e00-\u9fa5])/g, '$1$2').replace(/([\u4e00-\u9fa5])\s+(\d)/g, '$1$2');
+            const val = args[key];
+            // 如果值包含文件扩展名（如 .docx, .xlsx），跳过清理，避免破坏文件名中的空格
+            const basename = val.split(/[\\/]/).pop() || val;
+            if (/\.\w{1,5}$/.test(basename) && basename.includes(' ')) {
+              continue; // 文件名有空格且有扩展名，不做清理
+            }
+            args[key] = val.replace(/(\d)\s+([\u4e00-\u9fa5])/g, '$1$2').replace(/([\u4e00-\u9fa5])\s+(\d)/g, '$1$2');
           }
         }
       }
@@ -227,11 +235,19 @@ export class ToolManager {
       // 将 toolCallId 传递给 handler（用于输出截断时的文件名）
       const argsWithId = { ...args, _toolCallId: toolCall.id };
       const result = await tool.handler(argsWithId);
+
+      // 工具输出截断 - 防止大块输出撑爆上下文
+      const truncatedResult = await truncateToolOutput(
+        result,
+        toolCall.function.name,
+        toolCall.id,
+      );
+
       return {
         toolCallId: toolCall.id,
         name: toolCall.function.name,
         success: true,
-        result,
+        result: truncatedResult,
       };
     } catch (error: any) {
       return {
@@ -448,4 +464,127 @@ export const toolManager = new ToolManager();
  */
 export function getToolManager(): ToolManager {
   return toolManager;
+}
+
+// ==================== 工具输出截断 ====================
+
+const MAX_TOOL_OUTPUT_CHARS = 30000;   // 超过此大小触发截断
+const PREVIEW_CHARS = 6000;            // 截断后保留的预览大小
+const BASH_TAIL_CHARS = 30000;         // bash 工具保留尾部字符数
+
+/**
+ * 截断工具输出，防止大块内容撑爆上下文
+ * 参照 OpenCode 的 truncate.ts 实现
+ */
+async function truncateToolOutput(
+  result: any,
+  toolName: string,
+  toolCallId: string,
+): Promise<any> {
+  if (!result || !result.success) return result;
+
+  // 序列化结果来检查大小
+  const resultStr = safeStringify(result);
+  if (resultStr.length <= MAX_TOOL_OUTPUT_CHARS) return result;
+
+  console.log(`[ToolManager] Tool ${toolName} output too large (${(resultStr.length / 1024).toFixed(1)}KB), truncating...`);
+
+  // 对 bash 工具特殊处理：保留尾部（命令输出末尾通常最重要）
+  if (toolName === 'bash' && result.stdout !== undefined) {
+    return truncateBashOutput(result, toolCallId);
+  }
+
+  // 通用截断：调用 OutputTruncator 保存完整内容
+  try {
+    const truncated = await outputTruncator.truncate(resultStr, toolCallId, toolName);
+
+    // 在结果中添加截断标记
+    const hint = truncated.metadata.savedPath
+      ? `\n\n[输出已截断（原始大小 ${(resultStr.length / 1024).toFixed(1)}KB），完整内容已保存至: ${truncated.metadata.savedPath}，可用 read_file 查看]`
+      : `\n\n[输出已截断（原始大小 ${(resultStr.length / 1024).toFixed(1)}KB）]`;
+
+    // 对有 content 字段的结果，直接截断 content
+    if (typeof result.content === 'string' && result.content.length > PREVIEW_CHARS) {
+      return {
+        ...result,
+        content: result.content.substring(0, PREVIEW_CHARS) + hint,
+        _truncated: true,
+        _originalSize: resultStr.length,
+        _savedPath: truncated.metadata.savedPath,
+      };
+    }
+
+    // 其他情况：用截断后的 preview 替代整个 result 的字符串表示
+    return {
+      success: result.success,
+      _truncated: true,
+      _originalSize: resultStr.length,
+      _savedPath: truncated.metadata.savedPath,
+      _preview: truncated.displayContent + hint,
+    };
+  } catch (err) {
+    // 截断失败，返回原始结果（降级策略）
+    console.warn(`[ToolManager] Failed to truncate ${toolName} output:`, err);
+    return result;
+  }
+}
+
+/**
+ * bash 工具的输出截断 - 保留尾部
+ */
+async function truncateBashOutput(result: any, toolCallId: string): Promise<any> {
+  const stdout = result.stdout || '';
+  const stderr = result.stderr || '';
+
+  let truncatedStdout = stdout;
+  let truncatedStderr = stderr;
+  let savedPath: string | undefined;
+
+  // 保存完整输出到文件
+  const fullOutput = `=== STDOUT ===\n${stdout}\n\n=== STDERR ===\n${stderr}`;
+  try {
+    const truncated = await outputTruncator.truncate(fullOutput, toolCallId, 'bash');
+    savedPath = truncated.metadata.savedPath;
+  } catch (e) {
+    // 保存失败，继续截断
+  }
+
+  if (stdout.length > BASH_TAIL_CHARS) {
+    truncatedStdout = `... [前面已省略 ${(stdout.length - BASH_TAIL_CHARS).toLocaleString()} 字符]\n` +
+      stdout.slice(-BASH_TAIL_CHARS);
+  }
+  if (stderr.length > 5000) {
+    truncatedStderr = stderr.slice(-5000);
+  }
+
+  const hint = savedPath
+    ? `\n[命令输出已截断，完整内容已保存至: ${savedPath}]`
+    : '';
+
+  return {
+    ...result,
+    stdout: truncatedStdout + hint,
+    stderr: truncatedStderr,
+    _truncated: stdout.length > BASH_TAIL_CHARS || stderr.length > 5000,
+    _originalSize: fullOutput.length,
+    _savedPath: savedPath,
+  };
+}
+
+/**
+ * 安全 JSON 序列化（处理循环引用）
+ */
+function safeStringify(obj: any): string {
+  const seen = new WeakSet();
+  try {
+    return JSON.stringify(obj, (_, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) return '[Circular]';
+        seen.add(value);
+      }
+      return value;
+    });
+  } catch {
+    return String(obj);
+  }
 }

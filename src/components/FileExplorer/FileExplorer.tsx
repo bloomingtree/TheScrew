@@ -53,6 +53,8 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ entry: FileEntry; x: number; y: number } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { openTab } = useTabStore();
 
@@ -211,20 +213,33 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     }
   }, [contextMenu]);
 
-  // 删除文件/文件夹
-  const handleDelete = async (entry: FileEntry) => {
+  // 删除文件/文件夹 - 使用内联确认
+  const handleDelete = (entry: FileEntry) => {
+    setPendingDelete(entry.path);
+    closeContextMenu();
+    // 3 秒后自动取消
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    deleteTimerRef.current = setTimeout(() => setPendingDelete(null), 3000);
+  };
+
+  const confirmDelete = async (entryPath: string) => {
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    setPendingDelete(null);
     try {
-      const result = await (window as any).electronAPI.fileEditor.deleteFile(entry.path);
+      const result = await (window as any).electronAPI.fileEditor.deleteFileDirect(entryPath);
       if (result.success) {
-        // 刷新文件列表
         loadFiles();
-      } else if (result.error !== '用户取消') {
+      } else {
         console.error('删除失败:', result.error);
       }
     } catch (err) {
       console.error('删除失败:', err);
     }
-    closeContextMenu();
+  };
+
+  const cancelDelete = () => {
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    setPendingDelete(null);
   };
 
   // 使用系统默认程序打开文件（双击效果）
@@ -254,6 +269,28 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
 
     return (
       <div key={entry.path}>
+        {/* 内联删除确认条 */}
+        {pendingDelete === entry.path && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border-l-2 border-red-400"
+            style={{ paddingLeft: `${depth * 16 + 12}px` }}
+          >
+            <span className="text-xs text-red-600 flex-1">删除 "{entry.name}"？</span>
+            <button
+              onClick={() => confirmDelete(entry.path)}
+              className="px-2 py-0.5 text-xs font-medium bg-red-500 text-white rounded hover:bg-red-600"
+            >
+              删除
+            </button>
+            <button
+              onClick={cancelDelete}
+              className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+            >
+              取消
+            </button>
+          </div>
+        )}
+
         {/* 文件/文件夹项 */}
         <div
           className={`flex items-center gap-2 px-2 py-1 hover:bg-gray-100 cursor-pointer select-none ${

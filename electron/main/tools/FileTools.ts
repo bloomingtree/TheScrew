@@ -1,8 +1,27 @@
-import { readdir, readFile, stat, writeFile } from 'fs/promises';
+import { readdir, readFile, stat, writeFile, open } from 'fs/promises';
+import { createReadStream } from 'fs';
+import readline from 'readline';
 import path from 'path';
 import { app } from 'electron';
 import { Tool } from './ToolManager';
 import { getPathManager, CONFIG_DIR_NAME } from '../config/PathManager';
+
+// ==================== read_file 常量 ====================
+const READ_FILE_DEFAULT_LIMIT = 2000;   // 默认读取行数
+const READ_FILE_MAX_LINE_LENGTH = 2000; // 单行最大字符数
+const READ_FILE_MAX_BYTES = 50 * 1024;  // 最大读取 50KB
+const READ_FILE_LINE_SUFFIX = `... (line truncated to ${READ_FILE_MAX_LINE_LENGTH} chars)`;
+
+// 二进制文件扩展名
+const BINARY_EXTENSIONS = new Set([
+  '.zip', '.exe', '.dll', '.so', '.dylib', '.bin', '.obj', '.o', '.a',
+  '.lib', '.pdb', '.dSYM', '.woff', '.woff2', '.ttf', '.eot', '.ico',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg',
+  '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm',
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.7z', '.tar', '.gz', '.bz2', '.xz', '.rar', '.iso', '.dmg',
+  '.sqlite', '.db', '.mdb', '.class', '.jar', '.war', '.pyc',
+]);
 
 // 使用 globalThis 确保跨 chunk 共享（Vite 内联模块会导致模块变量重复）
 const _workspaceKey = Symbol.for('zero-employee:getWorkspacePath()');
@@ -18,7 +37,7 @@ export function getWorkspacePath(): string | null {
 /**
  * 搜索配置常量
  */
-const SEARCH_CONFIG = {
+export const SEARCH_CONFIG = {
   /** 默认忽略的目录列表 */
   IGNORED_DIRS: new Set([
     'System Volume Information',
@@ -159,17 +178,27 @@ export const fileTools: Tool[] = [
 
   {
     name: 'read_file',
-    description: `读取文件内容。支持从工作空间或配置目录（${CONFIG_DIR_NAME}）读取文件。
+    description: `读取文件内容，支持分页读取大文件。支持从工作空间或配置目录（${CONFIG_DIR_NAME}）读取文件。
 
 **必需参数**：
 - filepath: 文件路径（如 "README.md" 或 "skills/docx/SKILL.md"）
 
 **可选参数**：
+- offset: 起始行号（从 1 开始，默认 1）
+- limit: 最大读取行数（默认 ${READ_FILE_DEFAULT_LIMIT}）
 - namespace: 命名空间，workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录，默认 workspace）
 
 使用示例：
-- 读取工作空间文件：filepath="README.md"
-- 读取技能文件：filepath="skills/docx/SKILL.md", namespace="config"
+- 读取整个小文件：filepath="README.md"
+- 分页读取大文件：filepath="large.log", offset=1, limit=100
+- 读取第 200-300 行：filepath="src/index.ts", offset=200, limit=100
+- 读取配置文件：filepath="skills/docx/SKILL.md", namespace="config"
+
+**限制**：
+- 单次最多读取 ${READ_FILE_DEFAULT_LIMIT} 行
+- 总读取大小不超过 ${READ_FILE_MAX_BYTES / 1024}KB
+- 单行超过 ${READ_FILE_MAX_LINE_LENGTH} 字符会被截断
+- 二进制文件无法读取
 
 **返回值说明**：
 - 返回结果包含 \`path\`（相对路径）、\`namespace\` 和 \`fullPath\`（绝对路径）
@@ -187,16 +216,23 @@ export const fileTools: Tool[] = [
           enum: ['workspace', 'config'],
           default: 'workspace',
         },
+        offset: {
+          type: 'number',
+          description: `起始行号（从 1 开始，默认 1）`,
+        },
+        limit: {
+          type: 'number',
+          description: `最大读取行数（默认 ${READ_FILE_DEFAULT_LIMIT}）`,
+        },
       },
       required: ['filepath'],
     },
-    handler: async ({ filepath, namespace = 'workspace', _toolCallId }) => {
+    handler: async ({ filepath, namespace = 'workspace', offset, limit, _toolCallId }) => {
       try {
         if (!getWorkspacePath()) {
           return { success: false, error: '工作空间未设置' };
         }
 
-        // 根据 namespace 决定根目录
         let rootPath: string;
         if (namespace === 'config') {
           rootPath = getPathManager().getConfigPath();
@@ -205,18 +241,57 @@ export const fileTools: Tool[] = [
         }
 
         const fullPath = path.resolve(rootPath, filepath);
-        const content = await readFile(fullPath, 'utf-8');
         const stats = await stat(fullPath);
+
+        if (stats.isDirectory()) {
+          return { success: false, error: `"${filepath}" 是目录，不是文件。请使用 list_directory 列出目录内容。` };
+        }
+
+        // 二进制文件检测
+        const ext = path.extname(filepath).toLowerCase();
+        if (BINARY_EXTENSIONS.has(ext)) {
+          return {
+            success: false,
+            error: `无法读取二进制文件 "${filepath}"（${ext} 格式）`,
+            hint: '二进制文件请使用对应的工具处理，或通过 bash 命令操作',
+          };
+        }
+
+        // 文件大小检查
+        if (stats.size > 10 * READ_FILE_MAX_BYTES) {
+          // 超过 500KB，必须使用分页读取
+          if (!offset || !limit) {
+            return {
+              success: false,
+              error: `文件过大 (${(stats.size / 1024).toFixed(1)}KB)，请使用 offset 和 limit 参数分页读取`,
+              hint: `建议：先使用 offset=1, limit=${READ_FILE_DEFAULT_LIMIT} 读取前 ${READ_FILE_DEFAULT_LIMIT} 行`,
+              fileSize: stats.size,
+            };
+          }
+        }
+
+        // 参数校验
+        const startLine = Math.max(1, Math.floor(offset ?? 1));
+        const maxLines = Math.min(READ_FILE_DEFAULT_LIMIT, Math.floor(limit ?? READ_FILE_DEFAULT_LIMIT));
+
+        // 流式行读取
+        const result = await readLines(fullPath, startLine, maxLines);
 
         return {
           success: true,
-          content: content,
+          content: result.content,
           path: filepath,
           namespace,
           fullPath,
           size: stats.size,
+          lineRange: `${result.startLine}-${result.endLine}`,
+          totalLines: result.totalLines,
+          truncated: result.truncated,
         };
       } catch (error: any) {
+        if (error.code === 'EISDIR') {
+          return { success: false, error: `"${filepath}" 是目录，不是文件。请使用 list_directory 列出目录内容。` };
+        }
         return { success: false, error: error.message };
       }
     },
@@ -448,6 +523,96 @@ export const fileTools: Tool[] = [
  */
 function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 流式行读取 - 内存友好
+ * 参照 OpenCode 的 read 工具实现
+ */
+async function readLines(
+  filePath: string,
+  startLine: number,
+  maxLines: number,
+): Promise<{
+  content: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  truncated: boolean;
+}> {
+  return new Promise((resolve, reject) => {
+    const lines: string[] = [];
+    let currentLine = 0;
+    let totalLines = 0;
+    let totalBytes = 0;
+    let reachedEnd = false;
+    let truncated = false;
+
+    const rl = readline.createInterface({
+      input: createReadStream(filePath, { encoding: 'utf-8' }),
+      crlfDelay: Infinity,
+    });
+
+    rl.on('line', (line: string) => {
+      currentLine++;
+      totalBytes += Buffer.byteLength(line, 'utf-8');
+
+      // 先统计总行数（即使还没到 startLine）
+      if (currentLine < startLine) {
+        return;
+      }
+
+      // 检查是否已读完需要的行数
+      const linesRead = currentLine - startLine + 1;
+      if (linesRead > maxLines) {
+        // 继续计数但不再收集
+        return;
+      }
+
+      // 检查字节限制
+      if (totalBytes > READ_FILE_MAX_BYTES) {
+        truncated = true;
+        rl.close();
+        return;
+      }
+
+      // 截断超长行
+      if (line.length > READ_FILE_MAX_LINE_LENGTH) {
+        line = line.substring(0, READ_FILE_MAX_LINE_LENGTH) + READ_FILE_LINE_SUFFIX;
+      }
+
+      lines.push(`${currentLine}│ ${line}`);
+    });
+
+    rl.on('close', () => {
+      reachedEnd = true;
+      totalLines = currentLine;
+
+      const endLine = Math.min(startLine + maxLines - 1, totalLines);
+      const hasMore = totalLines > endLine;
+
+      let content = lines.join('\n');
+
+      // 添加尾部信息
+      if (truncated) {
+        content += `\n\n[文件过大，已截断。文件共 ${totalLines} 行，已读取至第 ${endLine} 行。请使用 offset=${endLine + 1} 继续读取]`;
+      } else if (hasMore) {
+        content += `\n\n[显示第 ${startLine}-${endLine} 行，共 ${totalLines} 行。使用 offset=${endLine + 1} 读取后续内容]`;
+      }
+
+      resolve({
+        content,
+        startLine,
+        endLine,
+        totalLines,
+        truncated: truncated || hasMore,
+      });
+    });
+
+    rl.on('error', (err) => {
+      reject(err);
+    });
+  });
 }
 
 async function listFiles(

@@ -121,7 +121,28 @@ export function registerFileEditorHandlers() {
     }
   });
 
-  // 删除文件或目录
+  // 直接删除文件或目录（无确认弹窗，由前端自行处理确认）
+  ipcMain.handle('fileEditor:deleteFileDirect', async (_event, filepath: string) => {
+    try {
+      if (!fs.existsSync(filepath)) {
+        return { success: false, error: '文件或目录不存在' };
+      }
+
+      const stats = fs.statSync(filepath);
+      if (stats.isDirectory()) {
+        fs.rmSync(filepath, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(filepath);
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Failed to delete file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 删除文件或目录（带 Electron 原生确认弹窗，保留兼容）
   ipcMain.handle('fileEditor:deleteFile', async (_event, filepath: string) => {
     try {
       // 检查路径是否存在

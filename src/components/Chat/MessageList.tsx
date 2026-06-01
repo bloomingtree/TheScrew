@@ -90,7 +90,7 @@ const MessageList: React.FC = () => {
           </motion.div>
         )}
 
-        <div ref={messagesEndRef} />
+        <div ref={messagesEndRef} className="h-5" />
       </div>
     </div>
   );

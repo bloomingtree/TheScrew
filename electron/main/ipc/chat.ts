@@ -6,9 +6,10 @@ import { fileTools } from '../tools/FileTools';
 import { bashTools } from '../tools/BashTools';
 import { officeCLITools, isAvailable as isOfficeCLIAvailable, officeCLIToolGroup } from '../tools/OfficeCLITools';
 import { askUserTools, registerAskUserIpc } from '../tools/AskUserTools';
+import { searchTools } from '../tools/SearchTools';
 import { getWorkspacePath } from '../tools/FileTools';
 import { getContextBuilder } from '../core/ContextBuilder';
-import { countContextTokens } from '../utils/tokenCounter';
+import { countContextTokens, compressContext, estimateTokens } from '../utils/tokenCounter';
 import type { Attachment, Message } from '../../../src/types';
 import { getAppConfigStore, ModelCapabilities, ThinkingMode } from '../config/AppConfigStore';
 import { detectCapabilities } from '../utils/capabilityDetector';
@@ -16,84 +17,6 @@ import { detectCapabilities } from '../utils/capabilityDetector';
 let currentClient: OpenAIClient | null = null;
 let currentAbortController: AbortController | null = null;
 
-// ==================== 任务续跑机制 ====================
-
-/** 最大续跑轮次（防止死循环） */
-const MAX_CONTINUATION_ROUNDS = 5;
-
-/**
- * 意图模式：模型说了要做但还没做的关键词
- * 注意：只匹配第一人称主动意图（"我将..."、"让我..."），不匹配对用户的建议
- */
-const INTENT_PATTERNS = [
-  /我将[要会][^\。，；！？\n]{2,30}/,
-  /让我来[^\。，；！？\n]{2,30}/,
-  /我现在(?:就|马上)?(?:来|去|为你)?[^\。，；！？\n]{2,30}/,
-  /还需要先[^\。，；！？\n]{2,30}/,
-];
-
-/**
- * 非意图模式：匹配到这些说明模型是在总结/建议，而非承诺要继续做
- * 这些模式出现时，即使有 INTENT_PATTERNS 匹配也不应该触发续跑
- */
-const NOT_INTENT_PATTERNS = [
-  /接下来你(?:可以|可以|只需|尝试|可)/,
-  /接下来(?:我)?(?:们)?(?:可以)?(?:查看|检查|确认|验证|测试)/,
-  /然后你(?:可以|只需|尝试)/,
-  /希望(?:这|对|能)/,
-  /如果需要.*可以/,
-  /你(?:可以|也可|随时)/,
-  /建议你?/,
-  /以上就是/,
-];
-
-/** 完成模式：模型确实已经完成了任务的关键词 */
-const COMPLETION_PATTERNS = [
-  /已经完成/,
-  /已[经]?(?:完成|处理|修改|更新|创建|生成|添加|删除|保存)/,
-  /任务已完成/,
-  /操作成功/,
-  /文档已[创生]成/,
-  /文件已[保创生]/,
-  /生成完毕/,
-  /成功[地了]/,
-  /已完成/,
-  /结果(?:如下|就是)/,
-  /这就是/,
-  /以上就是/,
-  /已经(?:为您)?(?:完成|处理|做好)/,
-];
-
-/**
- * 检测文本中是否包含"说了要做但还没做"的意图
- * 保守策略：只在最后一句仍有明确的第一人称主动意图时才触发
- *
- * @param text 模型的回复文本
- * @returns 检测到的意图描述，如果没有则返回 null
- */
-function detectUnfinishedIntent(text: string): string | null {
-  if (!text || text.trim().length === 0) return null;
-
-  // 如果全文包含完成标记，认为任务已完成
-  if (COMPLETION_PATTERNS.some(p => p.test(text))) return null;
-
-  // 如果包含"非意图"模式（对用户的建议、总结），不触发
-  if (NOT_INTENT_PATTERNS.some(p => p.test(text))) return null;
-
-  // 只检查最后一句（按句号、感叹号、问号分割）
-  const sentences = text.split(/[。！？\n]+/).filter(s => s.trim().length > 0);
-  const lastSentence = sentences.length > 0 ? sentences[sentences.length - 1] : text;
-
-  // 只在最后一句中检测意图关键词
-  for (const pattern of INTENT_PATTERNS) {
-    const match = lastSentence.match(pattern);
-    if (match) {
-      return match[0];
-    }
-  }
-
-  return null;
-}
 
 /**
  * 处理消息中的附件，将附件内容注入到消息中供 LLM 理解
@@ -269,12 +192,83 @@ function processAttachmentsInMessages(messages: any[], capabilities: ModelCapabi
     }
   }
 
+/**
+ * 格式化工具结果为发送给 LLM 的 content 字符串
+ * 处理 OutputTruncator 截断后的 _preview 字段
+ */
+function formatToolResultContent(result: any): string {
+  if (!result.success) {
+    return `Error: ${result.error || 'Unknown error'}`;
+  }
+
+  const r = result.result;
+
+  // 如果 ToolManager 已截断，使用截断后的 preview
+  if (r?._truncated && r._preview) {
+    return r._preview;
+  }
+
+  // 常规结果序列化（确保永远返回 string，safeStringify(undefined) 会返回 undefined）
+  const serialized = safeStringify(r);
+  return typeof serialized === 'string' ? serialized : JSON.stringify(r ?? 'done');
+}
+
+/**
+ * 修剪旧的工具输出 - 上下文压缩策略
+ * 参照 OpenCode 的 compaction.ts prune 策略
+ *
+ * 从最旧的消息开始，将超过阈值的 tool 角色消息内容替换为简短摘要。
+ * 保留最近 PROTECT_RECENT_TURNS 轮对话的完整内容。
+ */
+const TOOL_OUTPUT_PRUNE_THRESHOLD = 2000; // 超过 2000 字符的工具输出可被修剪
+const PROTECT_RECENT_TURNS = 4;           // 保留最近 4 条非 system 消息
+
+function pruneToolOutputs(
+  messages: any[],
+  _currentTokens: number,
+  _maxTokens: number,
+): number {
+  let pruned = 0;
+
+  // 找到需要保护的范围（最后 PROTECT_RECENT_TURNS 条非 system 消息）
+  let nonSystemCount = 0;
+  let protectStartIndex = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'system') {
+      nonSystemCount++;
+      if (nonSystemCount >= PROTECT_RECENT_TURNS) {
+        protectStartIndex = i;
+        break;
+      }
+    }
+  }
+
+  // 从最旧的消息开始修剪
+  for (let i = 0; i < protectStartIndex; i++) {
+    const msg = messages[i];
+    if (msg.role !== 'tool') continue;
+
+    const content = typeof msg.content === 'string' ? msg.content : '';
+    if (content.length <= TOOL_OUTPUT_PRUNE_THRESHOLD) continue;
+
+    // 已经被修剪过（包含压缩标记）
+    if (content.includes('[已压缩')) continue;
+
+    // 替换为简短摘要
+    const originalSize = (content.length / 1024).toFixed(1);
+    msg.content = `[已压缩: 工具输出 ${originalSize}KB，原始内容已省略以节省上下文空间]`;
+    pruned++;
+  }
+
+  return pruned;
+}
+
 export function registerChatHandlers(store: Store) {
   // 注册 ask_user 的 IPC handler（用户回答问题时触发）
   registerAskUserIpc();
 
   // 注册基础工具组（包含文件操作工具、Bash 工具、ask_user 工具）
-  const baseTools: any[] = [...fileTools, ...bashTools, ...askUserTools];
+  const baseTools: any[] = [...fileTools, ...bashTools, ...searchTools, ...askUserTools];
 
   // 如果 OfficeCLI 已安装，注册 Office 工具
   if (isOfficeCLIAvailable()) {
@@ -451,11 +445,8 @@ export function registerChatHandlers(store: Store) {
 
       // 工具调用历史，用于检测重复调用
       const toolCallHistory: string[] = [];
-      const toolFailureHistory: Map<string, number> = new Map(); // 追踪工具失败次数
-      const MAX_SAME_TOOL_FAILURES = 3; // 同参数同工具失败超过3次时提醒
-      let iteration = 0;
-      let continuationCount = 0; // 任务续跑计数器
       let totalToolCalls = 0; // 本轮对话中工具调用总次数
+      let iteration = 0;
 
       let roundChunks: string[] = [];  // 每轮的文本内容（循环外声明）
 
@@ -468,15 +459,33 @@ export function registerChatHandlers(store: Store) {
         }
 
         // 计算 token 使用量
-        const currentTokens = countContextTokens(messages, systemPromptContent, tools);
+        let currentTokens = countContextTokens(messages, systemPromptContent, tools);
         const maxTokens = config.maxTokens || 128000;
         const tokenPercentage = (currentTokens / maxTokens) * 100;
+
+        // ==================== 上下文自动压缩 ====================
+        // 当 token 使用超过 85% 时，修剪旧的工具输出
+        if (tokenPercentage > 85) {
+          console.log(`[Context] Token usage at ${tokenPercentage.toFixed(1)}%, pruning old tool outputs...`);
+          const pruned = pruneToolOutputs(messages, currentTokens, maxTokens);
+          if (pruned > 0) {
+            // 重新计算 token
+            currentTokens = countContextTokens(messages, systemPromptContent, tools);
+            const newPercentage = (currentTokens / maxTokens) * 100;
+            console.log(`[Context] Pruned ${pruned} tool outputs, ${tokenPercentage.toFixed(1)}% → ${newPercentage.toFixed(1)}%`);
+            event.sender.send('chat:context_compressed', {
+              pruned,
+              oldPercentage: tokenPercentage,
+              newPercentage,
+            });
+          }
+        }
 
         // 发送 token 使用情况给前端
         event.sender.send('chat:token_usage', {
           current: currentTokens,
           max: maxTokens,
-          percentage: tokenPercentage,
+          percentage: tokenPercentage > 85 ? (currentTokens / maxTokens) * 100 : tokenPercentage,
           compressedCount: 0,
         });
 
@@ -487,7 +496,17 @@ export function registerChatHandlers(store: Store) {
         const roundNumber = iteration;
 
         let chunkCount = 0;
-        for await (const chunk of client.streamChat(messages, currentAbortController.signal, tools, thinkingMode)) {
+
+        // 清理消息中的 thinkingContent（不发送给 LLM，节省上下文 token）
+        const cleanedMessages = messages.map(m => {
+          if ((m as any).thinkingContent) {
+            const { thinkingContent, ...rest } = m as any;
+            return rest;
+          }
+          return m;
+        });
+
+        for await (const chunk of client.streamChat(cleanedMessages, currentAbortController.signal, tools, thinkingMode)) {
           chunkCount++;
 
           // 区分工具调用和普通内容：
@@ -501,17 +520,13 @@ export function registerChatHandlers(store: Store) {
               hasToolCalls = true;
               totalToolCalls += parsed.toolCalls.length;
 
-              // 如果这一轮有文本内容，先添加到 messages
-              if (roundChunks.length > 0) {
-                const content = roundChunks.join('');
-                console.log('[chat:stream] Adding assistant message with content:', content.substring(0, 50) + '...');
-                messages.push({
-                  id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                  role: 'assistant',
-                  content: content,
-                });
-                roundChunks = [];  // 清空，准备下一轮
+              // OpenAI 规范：文本内容 + tool_calls 必须在同一条 assistant 消息中
+              // 不能拆成两条连续的 assistant 消息，否则 DashScope 等严格 API 会混乱
+              const textContent = roundChunks.length > 0 ? roundChunks.join('') : '';
+              if (textContent) {
+                console.log('[chat:stream] Assistant message has both content and tool_calls:', textContent.substring(0, 50) + '...');
               }
+              roundChunks = [];  // 清空，准备下一轮
 
               // 检测重复的工具调用（仅记录，不阻止）
               for (const toolCall of parsed.toolCalls) {
@@ -593,40 +608,27 @@ export function registerChatHandlers(store: Store) {
 
                 event.sender.send('chat:tool_results', results);
 
+                // 单条 assistant 消息：文本内容 + tool_calls 合并（OpenAI 规范）
                 messages.push({
                   id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                   role: 'assistant',
-                  content: '',
+                  content: textContent || null,
                   tool_calls: parsed.toolCalls,
                 });
-                console.log('[chat:stream] Added assistant with tool_calls, count:', parsed.toolCalls.length);
+                console.log('[chat:stream] Added assistant with tool_calls, count:', parsed.toolCalls.length, 'hasText:', !!textContent);
 
                 for (const result of results) {
-                  // 追踪工具失败次数
+                  // 检测重复工具调用（仅记录日志，不注入消息）
                   const callKey = `${result.name}:${JSON.stringify(parsed.toolCalls.find(tc => tc.id === result.toolCallId)?.function.arguments || '{}')}`;
-                  if (!result.success) {
-                    const failCount = (toolFailureHistory.get(callKey) || 0) + 1;
-                    toolFailureHistory.set(callKey, failCount);
-                    if (failCount >= MAX_SAME_TOOL_FAILURES) {
-                      console.warn(`[WARN] Tool ${result.name} has failed ${failCount} times with same arguments`);
-                      // 使用 system 消息注入失败警告（避免伪造 user/assistant 消息污染对话历史）
-                      messages.push({
-                        role: 'system',
-                        content: `[系统警告] 工具 ${result.name} 使用相同参数已失败 ${failCount} 次，请考虑更换参数或改用其他方法。`,
-                      });
-                    }
-                  }
 
                   messages.push({
                     role: 'tool',
                     tool_call_id: result.toolCallId,
-                    content: result.success
-                      ? safeStringify(result.result)
-                      : `Error: ${result.error}`,
+                    content: formatToolResultContent(result),
                   });
                 }
                 console.log('[chat:stream] Added', results.length, 'tool results, messages now:', messages.length);
-                
+
                 break;
               } catch (toolError: any) {
                 console.error('\n>>> ERROR during tool execution:', toolError);
@@ -663,45 +665,6 @@ export function registerChatHandlers(store: Store) {
         }
 
         if (!hasToolCalls) {
-          // ==================== 任务续跑检测 ====================
-          const lastContent = roundChunks.join('');
-          const unfinishedIntent = detectUnfinishedIntent(lastContent);
-
-          if (totalToolCalls > 0 && continuationCount < MAX_CONTINUATION_ROUNDS && unfinishedIntent) {
-            continuationCount++;
-            console.log(`[Continuation] Round ${roundNumber}: 检测到未完成意图「${unfinishedIntent}」，强制续跑 (${continuationCount}/${MAX_CONTINUATION_ROUNDS})`);
-
-            // 1. 将当前内容作为 assistant 消息保存
-            if (lastContent) {
-              messages.push({
-                id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                role: 'assistant',
-                content: lastContent,
-              });
-            }
-            roundChunks = [];
-
-            // 2. 发送当前文本给前端（用户能看到模型的中间回复）
-            event.sender.send('chat:chunk', lastContent);
-
-            // 3. 注入续跑提醒，强制模型继续执行
-            const continuationPrompt = `[系统提醒] 你提到了「${unfinishedIntent}」但本轮未调用工具。如果该操作仍需执行，请直接调用工具；如果已完成或不需要执行，请忽略此提醒。`;
-            messages.push({
-              role: 'user',
-              content: continuationPrompt,
-            });
-
-            // 发送续跑事件给前端（可选：显示"继续执行中..."提示）
-            event.sender.send('chat:continuation', {
-              round: continuationCount,
-              intent: unfinishedIntent,
-            });
-
-            // 强制继续循环
-            continue;
-          }
-
-          console.log(`[DEBUG] Round ${roundNumber}: No tool calls, breaking loop. totalToolCalls=${totalToolCalls}, continuationCount=${continuationCount}`);
           break;
         }
       }

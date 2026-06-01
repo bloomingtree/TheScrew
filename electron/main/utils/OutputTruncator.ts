@@ -30,8 +30,8 @@ class OutputTruncator {
 
   constructor(config?: Partial<TruncationConfig>) {
     this.config = {
-      maxPreviewSize: config?.maxPreviewSize ?? 2048,
-      saveThreshold: config?.saveThreshold ?? 8192,
+      maxPreviewSize: config?.maxPreviewSize ?? 6000,
+      saveThreshold: config?.saveThreshold ?? 30000,
     };
     this.outputDir = this.getOutputDir();
   }

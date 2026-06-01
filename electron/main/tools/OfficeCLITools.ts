@@ -37,6 +37,26 @@ function isAvailable(): boolean {
   return fs.existsSync(binaryPath);
 }
 
+// ==================== 输出截断常量 ====================
+const OFFICE_MAX_OUTPUT_CHARS = 30000;
+
+/**
+ * 截断 office 输出，防止撑爆上下文
+ */
+function truncateOfficeOutput(output: string, toolName: string): string {
+  if (output.length <= OFFICE_MAX_OUTPUT_CHARS) return output;
+
+  const headSize = 6000;
+  const tailSize = 2000;
+  const totalSize = output.length;
+  const omitted = totalSize - headSize - tailSize;
+
+  const head = output.substring(0, headSize);
+  const tail = output.substring(totalSize - tailSize);
+
+  return `${head}\n\n... [${toolName} 输出已截断，省略 ${omitted.toLocaleString()} 字符（共 ${(totalSize / 1024).toFixed(1)}KB）。请使用 office_get 获取具体元素的详细内容] ...\n\n${tail}`;
+}
+
 // 执行 officecli 命令
 function execOfficeCLI(args: string[], timeout: number = 30000, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -97,7 +117,14 @@ const officeCreateTool: Tool = {
 
 const officeViewTool: Tool = {
   name: 'office_view',
-  description: '查看文档内容。支持 outline（大纲）、text（文本）、stats（统计）等视图',
+  description: `查看文档内容。支持 outline（大纲）、text（文本）、stats（统计）等视图。
+
+**推荐用法**：
+1. 先用 view=outline 查看文档整体结构（大纲、标题、页数）
+2. 再用 office_get 获取感兴趣的特定元素内容
+3. 避免直接用 view=text 查看大文档（输出会很长）
+
+**注意**：大文档的输出会被截断，请优先使用 outline 视图了解结构后再按需获取。`,
   parameters: {
     type: 'object',
     properties: {
@@ -111,7 +138,7 @@ const officeViewTool: Tool = {
     const cmdArgs = ['view', args.filename, args.view || 'outline'];
     if (args.json !== false) cmdArgs.push('--json');
     const result = await execOfficeCLI(cmdArgs);
-    return { success: true, output: result };
+    return { success: true, output: truncateOfficeOutput(result, 'office_view') };
   },
 };
 
@@ -131,7 +158,7 @@ const officeGetTool: Tool = {
     const cmdArgs = ['get', args.filename, args.element_path];
     if (args.json !== false) cmdArgs.push('--json');
     const result = await execOfficeCLI(cmdArgs);
-    return { success: true, output: result };
+    return { success: true, output: truncateOfficeOutput(result, 'office_get') };
   },
 };
 
@@ -216,7 +243,7 @@ const officeQueryTool: Tool = {
     const cmdArgs = ['query', args.filename, args.selector];
     if (args.json !== false) cmdArgs.push('--json');
     const result = await execOfficeCLI(cmdArgs);
-    return { success: true, output: result };
+    return { success: true, output: truncateOfficeOutput(result, 'office_query') };
   },
 };
 
@@ -327,7 +354,7 @@ const officeRawTool: Tool = {
     const cmdArgs = ['raw', args.filename, '--xpath', args.xpath];
     if (args.part) cmdArgs.push('--part', args.part);
     const result = await execOfficeCLI(cmdArgs);
-    return { success: true, output: result };
+    return { success: true, output: truncateOfficeOutput(result, 'office_raw') };
   },
 };
 
