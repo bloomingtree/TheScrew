@@ -1,0 +1,25 @@
+{
+  "name": "officecli-lite",
+  "version": "1.0.0",
+  "description": "Lightweight Office document CLI - memory optimized for Win7/8GB",
+  "main": "dist/cli.js",
+  "bin": {
+    "officecli-lite": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "commander": "^9.5.0",
+    "pizzip": "^3.1.0",
+    "saxes": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pizzip": "^3.0.0",
+    "@yao-pkg/pkg": "^6.20.0",
+    "nexe": "^5.0.0-beta.4",
+    "typescript": "^5.0.0"
+  }
+}

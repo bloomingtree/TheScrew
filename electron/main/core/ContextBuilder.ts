@@ -334,6 +334,10 @@ export class ContextBuilder {
           category = '模板';
         } else if (tool.name.startsWith('cron_') || tool.name.startsWith('heartbeat_')) {
           category = '定时任务';
+        } else if (tool.name.startsWith('kb_')) {
+          category = '知识库';
+        } else if (tool.name.startsWith('task_')) {
+          category = '任务管理';
         }
 
         if (!toolGroups.has(category)) {
@@ -361,7 +365,7 @@ export class ContextBuilder {
       }
 
       // Other categories
-      const otherCategories = ['批量操作', '模板', '定时任务'];
+      const otherCategories = ['批量操作', '模板', '定时任务', '知识库', '任务管理'];
       for (const cat of otherCategories) {
         if (toolGroups.has(cat)) {
           const tools = toolGroups.get(cat)!;

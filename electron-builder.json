@@ -27,7 +27,10 @@
         "!data/workspaces.json",
         "!data/attachments/**",
         "!data/scheduler/**",
-        "!credentials/**"
+        "!credentials/**",
+        "!bin/officecli.exe",
+        "!bin/officecli.exe.old",
+        "!bin/officecli.exe.old2"
       ]
     }
   ],

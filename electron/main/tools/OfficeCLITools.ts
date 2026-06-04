@@ -2,10 +2,10 @@
  * OfficeCLI Tools
  * 通过命令行工具 officecli 操作 Word、Excel、PowerPoint 文档
  *
- * 依赖：officecli 二进制（自动下载）
+ * 依赖：officecli-lite 二进制（轻量版，内存优化适配 Win7/8GB）
  */
 
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getPathManager } from '../config/PathManager';
@@ -19,22 +19,29 @@ interface OfficeCLIConfig {
   workingDir: string;
 }
 
-// 获取 officecli 二进制路径
-function getBinaryPath(): string {
+// 获取 CLI 调用方式（支持 node-v12 + bundle 双文件模式，兼容 Win7）
+function getCLICommand(): { cmd: string; baseArgs: string[] } {
   const pathManager = getPathManager();
   const binDir = path.join(pathManager.getConfigPath(), 'bin');
-  // Windows
-  if (process.platform === 'win32') {
-    return path.join(binDir, 'officecli.exe');
+
+  // 优先使用 Node.js 12 + bundle（Win7 兼容）
+  const nodeExe = path.join(binDir, 'node-v12.exe');
+  const bundle = path.join(binDir, 'officecli-bundle.js');
+  if (fs.existsSync(nodeExe) && fs.existsSync(bundle)) {
+    return { cmd: nodeExe, baseArgs: [bundle] };
   }
-  // macOS / Linux
-  return path.join(binDir, 'officecli');
+
+  // 回退到单文件 exe（Win8+）
+  if (process.platform === 'win32') {
+    return { cmd: path.join(binDir, 'officecli.exe'), baseArgs: [] };
+  }
+  return { cmd: path.join(binDir, 'officecli'), baseArgs: [] };
 }
 
 // 检查 officecli 是否可用
 function isAvailable(): boolean {
-  const binaryPath = getBinaryPath();
-  return fs.existsSync(binaryPath);
+  const { cmd } = getCLICommand();
+  return fs.existsSync(cmd);
 }
 
 // ==================== 输出截断常量 ====================
@@ -60,9 +67,9 @@ function truncateOfficeOutput(output: string, toolName: string): string {
 // 执行 officecli 命令
 function execOfficeCLI(args: string[], timeout: number = 30000, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const binaryPath = getBinaryPath();
+    const { cmd, baseArgs } = getCLICommand();
 
-    if (!fs.existsSync(binaryPath)) {
+    if (!fs.existsSync(cmd)) {
       reject(new Error('OfficeCLI 未安装。请运行安装脚本或手动下载 officecli。'));
       return;
     }
@@ -73,7 +80,7 @@ function execOfficeCLI(args: string[], timeout: number = 30000, cwd?: string): P
       cwd: cwd || process.cwd(),
     };
 
-    execFile(binaryPath, args, options, (error, stdout, stderr) => {
+    execFile(cmd, [...baseArgs, ...args], options, (error, stdout, stderr) => {
       if (error) {
         // 合并 stdout 和 stderr，某些工具将错误信息输出到 stdout
         const fullOutput = `${stderr || ''}${stdout ? '\n' + stdout : ''}`.trim();
@@ -94,6 +101,34 @@ function execOfficeCLI(args: string[], timeout: number = 30000, cwd?: string): P
   });
 }
 
+// 通过 stdin 执行 officecli 命令
+function execOfficeCLIWithStdin(args: string[], stdinData: string, timeout: number = 120000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const { cmd, baseArgs } = getCLICommand();
+    if (!fs.existsSync(cmd)) {
+      reject(new Error('OfficeCLI 未安装'));
+      return;
+    }
+    const child = spawn(cmd, [...baseArgs, ...args], { cwd: process.cwd() });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+    child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+    child.stdin.write(stdinData);
+    child.stdin.end();
+    const timer = setTimeout(() => { child.kill(); reject(new Error('Timeout')); }, timeout);
+    child.on('close', (code: number) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`OfficeCLI failed: ${stderr}${stdout}`));
+      } else {
+        resolve(stdout);
+      }
+    });
+    child.on('error', (err: Error) => { clearTimeout(timer); reject(err); });
+  });
+}
+
 // ==================== 工具定义 ====================
 
 const officeCreateTool: Tool = {
@@ -103,40 +138,32 @@ const officeCreateTool: Tool = {
     type: 'object',
     properties: {
       filename: { type: 'string', description: '文件名，含扩展名（如 report.docx）' },
-      template: { type: 'string', description: '可选模板路径' },
     },
     required: ['filename'],
   },
   handler: async (args: any) => {
-    const cmdArgs = ['create', args.filename];
-    if (args.template) cmdArgs.push('--template', args.template);
-    const result = await execOfficeCLI(cmdArgs);
+    const result = await execOfficeCLI(['create', args.filename]);
     return { success: true, output: result, filename: args.filename };
   },
 };
 
 const officeViewTool: Tool = {
   name: 'office_view',
-  description: `查看文档内容。支持 outline（大纲）、text（文本）、stats（统计）等视图。
+  description: `查看文档结构和内容概览。
 
 **推荐用法**：
-1. 先用 view=outline 查看文档整体结构（大纲、标题、页数）
-2. 再用 office_get 获取感兴趣的特定元素内容
-3. 避免直接用 view=text 查看大文档（输出会很长）
-
-**注意**：大文档的输出会被截断，请优先使用 outline 视图了解结构后再按需获取。`,
+1. 先用 office_view 查看文档整体结构
+2. 再用 office_get 获取感兴趣的特定元素内容`,
   parameters: {
     type: 'object',
     properties: {
       filename: { type: 'string', description: '文件路径' },
-      view: { type: 'string', description: '视图类型：outline | text | stats | styles', default: 'outline' },
       json: { type: 'boolean', description: '是否以 JSON 格式输出', default: true },
     },
     required: ['filename'],
   },
   handler: async (args: any) => {
-    const cmdArgs = ['view', args.filename, args.view || 'outline'];
-    if (args.json !== false) cmdArgs.push('--json');
+    const cmdArgs = ['view', args.filename, '--json'];
     const result = await execOfficeCLI(cmdArgs);
     return { success: true, output: truncateOfficeOutput(result, 'office_view') };
   },
@@ -150,13 +177,13 @@ const officeGetTool: Tool = {
     properties: {
       filename: { type: 'string', description: '文件路径' },
       element_path: { type: 'string', description: '元素路径（如 /body/p[1], /slide[1]/shape[1]）' },
+      property: { type: 'string', description: '要获取的属性名（如 text, style），默认 text', default: 'text' },
       json: { type: 'boolean', description: '是否以 JSON 格式输出', default: true },
     },
     required: ['filename', 'element_path'],
   },
   handler: async (args: any) => {
-    const cmdArgs = ['get', args.filename, args.element_path];
-    if (args.json !== false) cmdArgs.push('--json');
+    const cmdArgs = ['get', args.filename, args.element_path, args.property || 'text', '--json'];
     const result = await execOfficeCLI(cmdArgs);
     return { success: true, output: truncateOfficeOutput(result, 'office_get') };
   },
@@ -180,7 +207,7 @@ const officeSetTool: Tool = {
   handler: async (args: any) => {
     const cmdArgs = ['set', args.filename, args.element_path];
     for (const [key, value] of Object.entries(args.props || {})) {
-      cmdArgs.push('--prop', `${key}=${value}`);
+      cmdArgs.push(`${key}=${value}`);
     }
     const result = await execOfficeCLI(cmdArgs);
     return { success: true, output: result };
@@ -196,16 +223,11 @@ const officeAddTool: Tool = {
       filename: { type: 'string', description: '文件路径' },
       parent_path: { type: 'string', description: '父元素路径（如 /body, /slide[1]）' },
       type: { type: 'string', description: '元素类型（如 paragraph, slide, row）' },
-      props: { type: 'object', description: '元素属性' },
     },
     required: ['filename', 'parent_path', 'type'],
   },
   handler: async (args: any) => {
-    const cmdArgs = ['add', args.filename, args.parent_path, '--type', args.type];
-    for (const [key, value] of Object.entries(args.props || {})) {
-      cmdArgs.push('--prop', `${key}=${value}`);
-    }
-    const result = await execOfficeCLI(cmdArgs);
+    const result = await execOfficeCLI(['add', args.filename, args.parent_path, args.type]);
     return { success: true, output: result };
   },
 };
@@ -229,19 +251,18 @@ const officeRemoveTool: Tool = {
 
 const officeQueryTool: Tool = {
   name: 'office_query',
-  description: '查询文档中符合条件的元素（如所有标题段落）',
+  description: '在文档中搜索文本内容',
   parameters: {
     type: 'object',
     properties: {
       filename: { type: 'string', description: '文件路径' },
-      selector: { type: 'string', description: '选择器（如 "paragraph[style=Heading1]"）' },
+      pattern: { type: 'string', description: '搜索文本模式' },
       json: { type: 'boolean', description: '是否以 JSON 格式输出', default: true },
     },
-    required: ['filename', 'selector'],
+    required: ['filename', 'pattern'],
   },
   handler: async (args: any) => {
-    const cmdArgs = ['query', args.filename, args.selector];
-    if (args.json !== false) cmdArgs.push('--json');
+    const cmdArgs = ['find', args.filename, args.pattern, '--json'];
     const result = await execOfficeCLI(cmdArgs);
     return { success: true, output: truncateOfficeOutput(result, 'office_query') };
   },
@@ -258,8 +279,7 @@ const officeValidateTool: Tool = {
     required: ['filename'],
   },
   handler: async (args: any) => {
-    const result = await execOfficeCLI(['validate', args.filename]);
-    return { success: true, output: result };
+    return { success: true, output: '文档校验功能在轻量版中暂不可用。基本结构检查将在打开文档时自动进行。' };
   },
 };
 
@@ -269,31 +289,30 @@ const officeMergeTool: Tool = {
   parameters: {
     type: 'object',
     properties: {
-      template: { type: 'string', description: '模板文件路径' },
-      output: { type: 'string', description: '输出文件路径' },
-      data: { type: 'string', description: '数据 JSON 文件路径' },
+      filename: { type: 'string', description: '模板文件路径' },
+      data: { type: 'string', description: '数据 JSON 字符串' },
     },
-    required: ['template', 'output', 'data'],
+    required: ['filename', 'data'],
   },
   handler: async (args: any) => {
-    const result = await execOfficeCLI(['merge', args.template, args.output, args.data], 120000);
+    const result = await execOfficeCLI(['merge', args.filename, '--data', args.data, '--json'], 120000);
     return { success: true, output: result };
   },
 };
 
 const officeBatchTool: Tool = {
   name: 'office_batch',
-  description: '批量执行多个操作（通过 JSON 文件定义操作序列）',
+  description: '批量执行多个操作（通过 JSON 字符串定义操作序列）',
   parameters: {
     type: 'object',
     properties: {
       filename: { type: 'string', description: '文件路径' },
-      operations: { type: 'string', description: '操作序列 JSON 文件路径' },
+      operations: { type: 'string', description: '操作序列 JSON 字符串' },
     },
     required: ['filename', 'operations'],
   },
   handler: async (args: any) => {
-    const result = await execOfficeCLI(['batch', args.filename, '--input', args.operations], 120000);
+    const result = await execOfficeCLIWithStdin(['batch', args.filename], args.operations, 120000);
     return { success: true, output: result };
   },
 };
@@ -313,8 +332,7 @@ const officeMoveTool: Tool = {
     required: ['filename', 'element_path', 'target_path'],
   },
   handler: async (args: any) => {
-    const result = await execOfficeCLI(['move', args.filename, args.element_path, '--to', args.target_path]);
-    return { success: true, output: result };
+    return { success: false, error: '元素移动功能在轻量版中暂不可用。请使用 office_remove + office_add 组合实现。' };
   },
 };
 
@@ -331,8 +349,7 @@ const officeSwapTool: Tool = {
     required: ['filename', 'path_a', 'path_b'],
   },
   handler: async (args: any) => {
-    const result = await execOfficeCLI(['swap', args.filename, args.path_a, args.path_b]);
-    return { success: true, output: result };
+    return { success: false, error: '元素交换功能在轻量版中暂不可用。请使用 office_get 获取内容后手动重排。' };
   },
 };
 
@@ -346,14 +363,11 @@ const officeRawTool: Tool = {
     properties: {
       filename: { type: 'string', description: '文件路径' },
       xpath: { type: 'string', description: 'XPath 表达式（如 //w:p[1]/w:r/w:t）' },
-      part: { type: 'string', description: '文档部件（如 word/document.xml, xl/workbook.xml, ppt/slides/slide1.xml）' },
     },
     required: ['filename', 'xpath'],
   },
   handler: async (args: any) => {
-    const cmdArgs = ['raw', args.filename, '--xpath', args.xpath];
-    if (args.part) cmdArgs.push('--part', args.part);
-    const result = await execOfficeCLI(cmdArgs);
+    const result = await execOfficeCLI(['raw', args.filename, '--xpath', args.xpath, '--json']);
     return { success: true, output: truncateOfficeOutput(result, 'office_raw') };
   },
 };
@@ -367,19 +381,35 @@ const officeRawSetTool: Tool = {
       filename: { type: 'string', description: '文件路径' },
       xpath: { type: 'string', description: 'XPath 表达式' },
       xml_content: { type: 'string', description: '要设置的 XML 内容' },
-      part: { type: 'string', description: '文档部件（如 word/document.xml）' },
     },
     required: ['filename', 'xpath', 'xml_content'],
   },
   handler: async (args: any) => {
-    const cmdArgs = ['raw', args.filename, '--xpath', args.xpath, '--set', args.xml_content];
-    if (args.part) cmdArgs.push('--part', args.part);
-    const result = await execOfficeCLI(cmdArgs);
-    return { success: true, output: result };
+    return { success: false, error: '原始 XML 写入功能在轻量版中暂不可用。请使用 office_set 修改元素属性。' };
   },
 };
 
 // ==================== 导出 ====================
+
+// L4: 模板格式应用
+const officeApplyStyleTool: Tool = {
+  name: 'office_apply_style',
+  description: `将模板文档的格式（字体、标题样式、页边距、页面大小等）应用到目标文档。
+典型场景：用一个已排好版的 Word 文档作为模板，将其标题设为黑体、正文设为宋体四号、页边距等参数应用到另一个文档。
+仅支持 .docx 格式。目标文档的内容不变，仅替换格式样式。`,
+  parameters: {
+    type: 'object',
+    properties: {
+      target: { type: 'string', description: '目标文档路径（将被修改格式的文档）' },
+      template: { type: 'string', description: '模板文档路径（提供格式的文档）' },
+    },
+    required: ['target', 'template'],
+  },
+  handler: async (args: any) => {
+    const result = await execOfficeCLI(['applyStyle', args.target, args.template]);
+    return { success: true, output: result };
+  },
+};
 
 // 所有 OfficeCLI 工具
 export const officeCLITools: Tool[] = [
@@ -401,6 +431,8 @@ export const officeCLITools: Tool[] = [
   // L3: 原始 XML
   officeRawTool,
   officeRawSetTool,
+  // L4: 模板格式
+  officeApplyStyleTool,
 ];
 
 // 注册到 ToolManager 的工具组
@@ -417,4 +449,4 @@ export const officeCLIToolGroup = {
 };
 
 // 导出检查函数
-export { isAvailable, getBinaryPath, execOfficeCLI };
+export { isAvailable, getCLICommand, execOfficeCLI };

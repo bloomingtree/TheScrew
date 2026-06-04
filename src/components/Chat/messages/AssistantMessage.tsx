@@ -18,19 +18,38 @@ interface AssistantMessageProps {
   };
 }
 
-/** 从 content 中提取 <think >...</think > 标签内容（作为 fallback） */
+/** 从 content 中提取思考内容（作为 fallback）
+ *  支持三种格式：
+ *  1. <think >...</think > 标签（QwQ/DeepSeek 等模型）
+ *  2. --- 分隔符（模型在 content 中用 --- 分割思考与正式回答）
+ *  3. reasoning_content 字段（由 OpenAI client 在流式层处理）
+ */
 function extractThinkingFromContent(content: string): { thinking: string | null; cleanContent: string } {
+  // 1. 先尝试 <think > 标签
   const thinkRegex = /<think\s*>([\s\S]*?)<\/think\s*>/gi;
   const matches: string[] = [];
   let cleanContent = content.replace(thinkRegex, (_, inner) => {
     matches.push(inner.trim());
     return '';
   });
-  // 清理首尾空白
   cleanContent = cleanContent.replace(/^\s*\n/, '').replace(/\n\s*$/, '').trim();
   if (matches.length > 0) {
     return { thinking: matches.join('\n'), cleanContent };
   }
+
+  // 2. 尝试 --- 分隔符（第一个独立行的 --- 作为分界线）
+  const separatorRegex = /^[ \t]*---[ \t]*$/m;
+  const separatorIdx = content.search(separatorRegex);
+  if (separatorIdx > 0) {
+    // 分隔符之前的内容作为思考，之后的内容作为正式回答
+    const before = content.substring(0, separatorIdx).trim();
+    const after = content.substring(separatorIdx).replace(separatorRegex, '').trim();
+    // 只有当分隔符前有实质内容时才视为思考内容
+    if (before.length > 0 && after.length > 0) {
+      return { thinking: before, cleanContent: after };
+    }
+  }
+
   return { thinking: null, cleanContent: content };
 }
 

@@ -1,63 +1,118 @@
 /**
- * SearchTools - grep 和 glob 搜索工具
- * 参照 OpenCode 的 grep.ts 和 glob.ts 实现
- * 提供有限制的搜索结果，防止撑爆上下文
+ * SearchTools - 纯 Node.js 实现的 grep/glob/search_content 搜索工具
+ * 不依赖外部命令（findstr/grep），原生支持 Unicode/中文
+ * 提供上下文行、大小写控制、排除模式等高级功能
  */
 
-import { execFile } from 'child_process';
-import { readdir, stat } from 'fs/promises';
-import path from 'path';
+import { createReadStream } from 'fs';
+import { opendir, stat as statAsync } from 'fs/promises';
+import * as readline from 'readline';
+import * as path from 'path';
 import { Tool } from './ToolManager';
-import { getWorkspacePath } from './FileTools';
-import { SEARCH_CONFIG } from './FileTools';
+import { getWorkspacePath, SEARCH_CONFIG } from './FileTools';
 
 // ==================== 常量 ====================
 
 const MAX_GREP_RESULTS = 100;
 const MAX_GREP_LINE_LENGTH = 2000;
-const MAX_GLOB_RESULTS = 100;
+const MAX_GLOB_RESULTS = 200;
+const MAX_SEARCH_CONTENT_RESULTS = 20;
+const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024; // 1MB
+const MAX_CONCURRENT_FILE_READS = 5;
+const MAX_TRAVERSAL_DEPTH = 30;
+
 const GREP_LINE_SUFFIX = `... (truncated to ${MAX_GREP_LINE_LENGTH} chars)`;
 
-// ==================== grep 工具 ====================
+/** 二进制文件扩展名 - 跳过内容搜索 */
+const SKIP_EXTENSIONS = new Set([
+  '.zip', '.exe', '.dll', '.so', '.dylib', '.bin', '.obj', '.o', '.a',
+  '.lib', '.pdb', '.dSYM', '.woff', '.woff2', '.ttf', '.eot', '.ico',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg',
+  '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm',
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.7z', '.tar', '.gz', '.bz2', '.xz', '.rar', '.iso', '.dmg',
+  '.sqlite', '.db', '.mdb', '.class', '.jar', '.war', '.pyc',
+  '.lock', '.map', '.wasm',
+]);
+
+// ==================== 辅助类型 ====================
+
+interface GrepMatch {
+  file: string;
+  line: number;
+  content: string;
+  context: {
+    before: string[];
+    after: string[];
+  };
+}
+
+interface GlobEntry {
+  path: string;
+  name: string;
+  size: number;
+  modified: number;
+}
+
+// ==================== grep 工具（Node.js 原生实现） ====================
 
 const grepTool: Tool = {
   name: 'grep',
-  description: `在文件中搜索匹配的文本内容（类似 grep -rn）
+  description: `在文件中搜索匹配的文本内容（纯 Node.js 实现，完美支持中文和正则表达式）
 
 **必需参数**：
 - pattern: 搜索模式（正则表达式或纯文本）
 
 **可选参数**：
-- path: 搜索的目录路径（默认为工作空间根目录）
+- path: 搜索的目录路径（相对于工作空间，默认为根目录）
 - include: 文件过滤模式（如 "*.ts"、"*.py"、"*.md"）
+- contextLines: 上下文行数（显示匹配行前后各 N 行，默认 2）
+- maxResults: 最大返回结果数（默认 ${MAX_GREP_RESULTS}）
+- caseSensitive: 是否区分大小写（默认 false）
 
-**结果限制**：
-- 最多返回 ${MAX_GREP_RESULTS} 条匹配
-- 每行截断到 ${MAX_GREP_LINE_LENGTH} 字符
+**结果格式**：
+- 每个匹配包含文件路径、行号、匹配内容和上下文行
+- 自动跳过二进制文件和超过 1MB 的大文件
+- 自动忽略 node_modules、.git、dist 等目录
 
 **使用示例**：
 - 搜索函数定义：pattern="function\\s+\\w+", include="*.ts"
-- 搜索配置项：pattern="port.*=", include="*.json"
-- 全局搜索：pattern="TODO|FIXME"`,
+- 搜索中文字符串：pattern="用户配置", include="*.ts"
+- 带上下文搜索：pattern="TODO|FIXME", contextLines=3
+- 区分大小写：pattern="MyClass", caseSensitive=true`,
+
   parameters: {
     type: 'object',
     properties: {
       pattern: {
         type: 'string',
-        description: '搜索模式（支持正则表达式）',
+        description: '搜索模式（支持正则表达式，也支持纯文本）',
       },
       include: {
         type: 'string',
-        description: '文件过滤模式（如 "*.ts"、"*.py"、"*.md"）',
+        description: '文件过滤模式（如 "*.ts"、"*.py"、"*.md"），支持逗号分隔多个模式',
       },
       path: {
         type: 'string',
-        description: '搜索的目录路径（默认为工作空间根目录）',
+        description: '搜索的目录路径（相对于工作空间根目录，默认为根目录）',
+      },
+      contextLines: {
+        type: 'number',
+        description: '匹配行前后显示的上下文行数（默认 2）',
+      },
+      maxResults: {
+        type: 'number',
+        description: `最大返回结果数（默认 ${MAX_GREP_RESULTS}）`,
+      },
+      caseSensitive: {
+        type: 'boolean',
+        description: '是否区分大小写（默认 false）',
       },
     },
     required: ['pattern'],
   },
-  handler: async ({ pattern, include, path: searchPath }) => {
+
+  handler: async ({ pattern, include, path: searchPath, contextLines, maxResults, caseSensitive }) => {
     try {
       const workspace = getWorkspacePath();
       if (!workspace) {
@@ -68,106 +123,107 @@ const grepTool: Tool = {
         ? path.resolve(workspace, searchPath)
         : workspace;
 
-      // Windows: 使用 findstr，其他: 使用 grep
-      const isWindows = process.platform === 'win32';
-      let command: string;
-      let args: string[];
+      const ctxLines = contextLines ?? 2;
+      const maxRes = maxResults ?? MAX_GREP_RESULTS;
+      const caseSens = caseSensitive ?? false;
 
-      if (isWindows) {
-        // findstr /n /s /r /c:"pattern" include path
-        const includePattern = include
-          ? include.replace(/\*/g, '.*').replace(/\./g, '\\.')
-          : '.*';
-        command = 'findstr';
-        args = ['/n', '/s', '/r', `/c:${pattern}`, include || '*', searchDir];
-      } else {
-        command = 'grep';
-        args = ['-rn', '--extended-regexp'];
-        if (include) {
-          args.push(`--include=${include}`);
-        }
-        args.push(pattern, searchDir);
+      // 构建正则表达式（安全处理无效正则）
+      const regex = buildSearchRegex(pattern, caseSens);
+      if (!regex) {
+        return { success: false, error: `无效的搜索模式: "${pattern}"` };
       }
 
-      const result = await execCommand(command, args, 30000);
+      // 构建文件过滤正则
+      const includeRegex = include ? buildIncludeRegex(include) : null;
 
-      if (!result.stdout) {
+      // 收集所有可搜索的文件
+      const files: string[] = [];
+      await collectFiles(searchDir, searchDir, files, includeRegex, 0);
+
+      // 搜索文件内容
+      const results: GrepMatch[] = [];
+      let truncated = false;
+
+      // 限制并发读取
+      const batches = batchArray(files, MAX_CONCURRENT_FILE_READS);
+
+      for (const batch of batches) {
+        if (results.length >= maxRes) {
+          truncated = true;
+          break;
+        }
+
+        const batchResults = await Promise.all(
+          batch.map(filePath => searchFileContent(filePath, searchDir, regex, ctxLines, maxRes - results.length))
+        );
+
+        for (const batchResult of batchResults) {
+          if (results.length >= maxRes) {
+            truncated = true;
+            break;
+          }
+          if (!batchResult) continue;
+
+          const remaining = maxRes - results.length;
+          const toAdd = batchResult.slice(0, remaining);
+          results.push(...toAdd);
+
+          if (batchResult.length > remaining) {
+            truncated = true;
+            break;
+          }
+        }
+      }
+
+      if (results.length === 0) {
         return {
           success: true,
-          matches: [],
-          count: 0,
+          results: [],
+          totalMatches: 0,
+          filesSearched: files.length,
+          truncated: false,
           message: '未找到匹配的内容',
         };
       }
-
-      // 解析结果
-      const lines = result.stdout.split('\n').filter(Boolean);
-      const matches: string[] = [];
-      const seen = new Set<string>();
-
-      for (const line of lines) {
-        if (matches.length >= MAX_GREP_RESULTS) break;
-
-        // 去重（同一文件同一行）
-        const dedupeKey = line.substring(0, 200);
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-
-        // 截断超长行
-        let displayLine = line;
-        if (displayLine.length > MAX_GREP_LINE_LENGTH) {
-          displayLine = displayLine.substring(0, MAX_GREP_LINE_LENGTH) + GREP_LINE_SUFFIX;
-        }
-
-        matches.push(displayLine);
-      }
-
-      const truncated = lines.length > MAX_GREP_RESULTS;
 
       return {
         success: true,
-        matches,
-        count: matches.length,
-        totalMatches: lines.length,
+        results,
+        totalMatches: results.length,
+        filesSearched: files.length,
         truncated,
-        ...(truncated ? { hint: `共 ${lines.length} 条匹配，仅显示前 ${MAX_GREP_RESULTS} 条。请缩小搜索范围获取更精确的结果。` } : {}),
+        ...(truncated ? { hint: `结果已截断，仅显示前 ${maxRes} 条匹配。请缩小搜索范围获取更精确的结果。` } : {}),
       };
     } catch (error: any) {
-      // grep 返回 exit code 1 表示没有匹配，不算错误
-      if (error.code === 1 || (error.message && error.message.includes('no match'))) {
-        return {
-          success: true,
-          matches: [],
-          count: 0,
-          message: '未找到匹配的内容',
-        };
-      }
       return { success: false, error: error.message };
     }
   },
 };
 
-// ==================== glob 工具 ====================
+// ==================== glob 工具（改进版） ====================
 
 const globTool: Tool = {
   name: 'glob',
-  description: `按文件名模式搜索文件（类似 glob 匹配）
+  description: `按文件名模式搜索文件（改进的 glob 匹配）
 
 **必需参数**：
 - pattern: Glob 模式（如 "**/*.ts"、"src/**/*.py"、"docs/*.md"）
 
 **可选参数**：
-- path: 搜索的目录路径（默认为工作空间根目录）
+- path: 搜索的目录路径（相对于工作空间根目录，默认为根目录）
+- exclude: 排除模式（逗号分隔，如 "node_modules,.git,dist"）
+- maxResults: 最大返回文件数（默认 ${MAX_GLOB_RESULTS}）
 
 **结果限制**：
-- 最多返回 ${MAX_GLOB_RESULTS} 个文件
 - 按修改时间排序（最近的在前）
-- 自动忽略 node_modules、.git、dist 等目录
+- 自动忽略常见的无关目录
 
 **使用示例**：
 - 查找所有 TS 文件：pattern="**/*.ts"
-- 查找某个目录下的文件：pattern="src/components/**/*.tsx"
-- 查找配置文件：pattern="**/*.config.{js,ts,json}"`,
+- 查找并排除测试文件：pattern="**/*.ts", exclude="*.test.ts,*.spec.ts"
+- 查找配置文件：pattern="**/*.config.{js,ts,json}"
+- 限制结果数：pattern="**/*", maxResults=50`,
+
   parameters: {
     type: 'object',
     properties: {
@@ -177,12 +233,21 @@ const globTool: Tool = {
       },
       path: {
         type: 'string',
-        description: '搜索的目录路径（默认为工作空间根目录）',
+        description: '搜索的目录路径（相对于工作空间根目录，默认为根目录）',
+      },
+      exclude: {
+        type: 'string',
+        description: '排除模式（逗号分隔，如 "node_modules,.git,*.test.ts"）',
+      },
+      maxResults: {
+        type: 'number',
+        description: `最大返回文件数（默认 ${MAX_GLOB_RESULTS}）`,
       },
     },
     required: ['pattern'],
   },
-  handler: async ({ pattern, path: searchPath }) => {
+
+  handler: async ({ pattern, path: searchPath, exclude, maxResults }) => {
     try {
       const workspace = getWorkspacePath();
       if (!workspace) {
@@ -193,20 +258,27 @@ const globTool: Tool = {
         ? path.resolve(workspace, searchPath)
         : workspace;
 
-      // 将 glob 模式转换为正则
+      const maxRes = maxResults ?? MAX_GLOB_RESULTS;
+
+      // 构建 glob 正则
       const globRegex = globToRegex(pattern);
       const regex = new RegExp(globRegex, 'i');
 
+      // 构建排除正则
+      const excludeRegexes = exclude
+        ? exclude.split(',').map((p: string) => p.trim()).filter(Boolean).map((p: string) => new RegExp(globToRegex(p), 'i'))
+        : [];
+
       // 递归查找匹配的文件
-      const matches: Array<{ path: string; name: string; size: number; modified: number }> = [];
-      await globSearch(searchDir, searchDir, regex, matches, 0);
+      const matches: GlobEntry[] = [];
+      await globSearch(searchDir, searchDir, regex, excludeRegexes, matches, 0, maxRes * 2);
 
       // 按修改时间排序（最近的在前）
       matches.sort((a, b) => b.modified - a.modified);
 
       // 截断结果
-      const truncated = matches.length > MAX_GLOB_RESULTS;
-      const results = matches.slice(0, MAX_GLOB_RESULTS);
+      const truncated = matches.length > maxRes;
+      const results = matches.slice(0, maxRes);
 
       return {
         success: true,
@@ -214,7 +286,7 @@ const globTool: Tool = {
         count: results.length,
         totalMatches: matches.length,
         truncated,
-        ...(truncated ? { hint: `共 ${matches.length} 个文件匹配，仅显示前 ${MAX_GLOB_RESULTS} 个（按修改时间排序）。` } : {}),
+        ...(truncated ? { hint: `共 ${matches.length} 个文件匹配，仅显示前 ${maxRes} 个（按修改时间排序）。` } : {}),
       };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -222,84 +294,506 @@ const globTool: Tool = {
   },
 };
 
-// ==================== 辅助函数 ====================
+// ==================== search_content 工具（组合搜索） ====================
+
+const searchContentTool: Tool = {
+  name: 'search_content',
+  description: `组合文件搜索 + 内容搜索，快速定位包含指定文本的文件
+
+**必需参数**：
+- query: 搜索查询文本
+
+**可选参数**：
+- fileTypes: 文件类型过滤（如 ["ts", "js", "md"]）
+- path: 搜索的目录路径（相对于工作空间根目录，默认为根目录）
+- maxResults: 最多返回多少个包含匹配的文件（默认 ${MAX_SEARCH_CONTENT_RESULTS}）
+
+**与 grep 的区别**：
+- grep 返回每个匹配行的详细信息，适合精确搜索
+- search_content 返回每个匹配文件的摘要，适合快速浏览哪些文件包含目标文本
+
+**使用示例**：
+- 搜索所有代码中的某个函数：query="handleSubmit", fileTypes=["ts","tsx"]
+- 搜索文档中的关键词：query="部署指南", fileTypes=["md"]
+- 全局搜索：query="deprecated"`,
+
+  parameters: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: '搜索查询文本',
+      },
+      fileTypes: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '文件扩展名列表（不含点号），如 ["ts", "js", "md"]',
+      },
+      path: {
+        type: 'string',
+        description: '搜索的目录路径（相对于工作空间根目录，默认为根目录）',
+      },
+      maxResults: {
+        type: 'number',
+        description: `最多返回多少个包含匹配的文件（默认 ${MAX_SEARCH_CONTENT_RESULTS}）`,
+      },
+    },
+    required: ['query'],
+  },
+
+  handler: async ({ query, fileTypes, path: searchPath, maxResults }) => {
+    try {
+      const workspace = getWorkspacePath();
+      if (!workspace) {
+        return { success: false, error: '工作空间未设置' };
+      }
+
+      const searchDir = searchPath
+        ? path.resolve(workspace, searchPath)
+        : workspace;
+
+      const maxRes = maxResults ?? MAX_SEARCH_CONTENT_RESULTS;
+
+      // 构建搜索正则（默认不区分大小写）
+      const regex = buildSearchRegex(query, false);
+      if (!regex) {
+        return { success: false, error: `无效的搜索查询: "${query}"` };
+      }
+
+      // 构建文件类型过滤
+      const typeSet: Set<string> | null = fileTypes
+        ? new Set(fileTypes.map((t: string) => t.startsWith('.') ? t : `.${t}`))
+        : null;
+
+      // 收集文件
+      const files: string[] = [];
+      await collectFiles(searchDir, searchDir, files, null, 0, typeSet);
+
+      // 搜索每个文件，收集有匹配的文件摘要
+      const matchedFiles: Array<{
+        file: string;
+        matchCount: number;
+        snippets: string[];
+      }> = [];
+
+      const batches = batchArray(files, MAX_CONCURRENT_FILE_READS);
+
+      for (const batch of batches) {
+        if (matchedFiles.length >= maxRes) break;
+
+        const batchResults = await Promise.all(
+          batch.map(filePath => searchFileForSnippets(filePath, searchDir, regex, 3))
+        );
+
+        for (const result of batchResults) {
+          if (!result) continue;
+          matchedFiles.push(result);
+          if (matchedFiles.length >= maxRes) break;
+        }
+      }
+
+      if (matchedFiles.length === 0) {
+        return {
+          success: true,
+          files: [],
+          totalFiles: files.length,
+          message: '未找到包含指定文本的文件',
+        };
+      }
+
+      return {
+        success: true,
+        files: matchedFiles,
+        totalFiles: files.length,
+        matchedFileCount: matchedFiles.length,
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  },
+};
+
+// ==================== 核心辅助函数 ====================
 
 /**
- * 执行命令并返回 stdout
+ * 构建搜索正则表达式，安全处理无效正则
+ * 如果输入不是有效的正则，则退回到纯文本 includes() 匹配
  */
-function execCommand(command: string, args: string[], timeout: number): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    execFile(command, args, {
-      timeout,
-      maxBuffer: 5 * 1024 * 1024, // 5MB
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      if (error && error.code !== 1) {
-        reject(error);
-      } else {
-        resolve({ stdout: stdout || '', stderr: stderr || '' });
+function buildSearchRegex(pattern: string, caseSensitive: boolean): RegExp | null {
+  try {
+    // 尝试作为正则表达式解析
+    return new RegExp(pattern, caseSensitive ? 'u' : 'ui');
+  } catch {
+    // 无效正则，转义为纯文本搜索
+    try {
+      const escaped = escapeRegExp(pattern);
+      return new RegExp(escaped, caseSensitive ? 'u' : 'ui');
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * 构建文件名过滤正则
+ * 支持逗号分隔的多个模式，如 "*.ts,*.tsx"
+ */
+function buildIncludeRegex(include: string): RegExp {
+  const patterns = include.split(',').map(p => p.trim()).filter(Boolean);
+  const regexParts = patterns.map(p => {
+    const globStr = globToRegex(p);
+    return `(${globStr})`;
+  });
+  return new RegExp(regexParts.join('|'), 'i');
+}
+
+/**
+ * 递归收集可搜索的文件路径
+ * 使用 opendir 替代 readdir 以提升内存效率
+ */
+async function collectFiles(
+  currentDir: string,
+  basePath: string,
+  results: string[],
+  includeRegex: RegExp | null,
+  depth: number,
+  typeFilter: Set<string> | null = null,
+): Promise<void> {
+  if (depth > MAX_TRAVERSAL_DEPTH) return;
+
+  let dir;
+  try {
+    dir = await opendir(currentDir);
+  } catch {
+    return;
+  }
+
+  try {
+    for await (const entry of dir) {
+      const fullPath = path.join(currentDir, entry.name);
+
+      if (entry.isDirectory()) {
+        // 跳过忽略的目录
+        if (SEARCH_CONFIG.IGNORED_DIRS.has(entry.name)) continue;
+        await collectFiles(fullPath, basePath, results, includeRegex, depth + 1, typeFilter);
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+
+        // 跳过二进制文件
+        if (SKIP_EXTENSIONS.has(ext)) continue;
+
+        // 文件类型过滤
+        if (typeFilter && !typeFilter.has(ext)) continue;
+
+        // include 模式过滤
+        if (includeRegex) {
+          const relativePath = path.relative(basePath, fullPath).replace(/\\/g, '/');
+          if (!includeRegex.test(relativePath) && !includeRegex.test(entry.name)) continue;
+        }
+
+        // 大小检查（快速跳过大文件）
+        try {
+          const stats = await statAsync(fullPath);
+          if (stats.size > MAX_FILE_SIZE_FOR_SEARCH) continue;
+        } catch {
+          continue;
+        }
+
+        results.push(fullPath);
       }
+    }
+  } finally {
+    await dir.close();
+  }
+}
+
+/**
+ * 搜索单个文件的内容，返回匹配行（带上下文）
+ */
+async function searchFileContent(
+  filePath: string,
+  basePath: string,
+  regex: RegExp,
+  contextLines: number,
+  maxMatches: number,
+): Promise<GrepMatch[] | null> {
+  const matches: GrepMatch[] = [];
+  const lines: string[] = []; // 缓存已读行用于提供上下文
+
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: createReadStream(filePath, { encoding: 'utf-8' }),
+      crlfDelay: Infinity,
+    });
+
+    let currentLine = 0;
+
+    rl.on('line', (line: string) => {
+      currentLine++;
+
+      // 截断超长行
+      const truncatedLine = line.length > MAX_GREP_LINE_LENGTH
+        ? line.substring(0, MAX_GREP_LINE_LENGTH) + GREP_LINE_SUFFIX
+        : line;
+
+      lines.push(truncatedLine);
+
+      // 清理旧的缓存行（保留上下文窗口），防止大文件内存膨胀
+      const keepWindow = contextLines + 10;
+      if (lines.length > keepWindow * 2) {
+        lines.splice(0, lines.length - keepWindow);
+      }
+
+      // 重置正则 lastIndex（防止粘性匹配问题）
+      regex.lastIndex = 0;
+
+      if (regex.test(line)) {
+        const relativePath = path.relative(basePath, filePath).replace(/\\/g, '/');
+
+        // 提取上下文行
+        const currentIdx = lines.length - 1;
+        const beforeStart = Math.max(0, currentIdx - contextLines);
+        const beforeLines = lines.slice(beforeStart, currentIdx).map(l => l);
+
+        matches.push({
+          file: relativePath,
+          line: currentLine,
+          content: truncatedLine,
+          context: {
+            before: beforeLines,
+            after: [], // after 行在后续 line 事件中填充
+          },
+        });
+
+        // 达到最大匹配数，关闭流
+        if (matches.length >= maxMatches) {
+          rl.close();
+        }
+      } else if (matches.length > 0) {
+        // 填充最近一个匹配的 after 上下文
+        const lastMatch = matches[matches.length - 1];
+        const linesAfter = currentLine - lastMatch.line;
+        if (linesAfter > 0 && linesAfter <= contextLines) {
+          lastMatch.context.after.push(truncatedLine);
+        }
+      }
+    });
+
+    rl.on('close', () => {
+      resolve(matches.length > 0 ? matches : null);
+    });
+
+    rl.on('error', () => {
+      resolve(null);
     });
   });
 }
 
 /**
+ * 搜索文件内容，提取匹配片段摘要（用于 search_content 工具）
+ */
+async function searchFileForSnippets(
+  filePath: string,
+  basePath: string,
+  regex: RegExp,
+  maxSnippets: number,
+): Promise<{ file: string; matchCount: number; snippets: string[] } | null> {
+  const snippets: string[] = [];
+  let matchCount = 0;
+
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: createReadStream(filePath, { encoding: 'utf-8' }),
+      crlfDelay: Infinity,
+    });
+
+    rl.on('line', (line: string) => {
+      regex.lastIndex = 0;
+      if (regex.test(line)) {
+        matchCount++;
+        if (snippets.length < maxSnippets) {
+          const trimmed = line.trim();
+          snippets.push(
+            trimmed.length > MAX_GREP_LINE_LENGTH
+              ? trimmed.substring(0, MAX_GREP_LINE_LENGTH) + GREP_LINE_SUFFIX
+              : trimmed
+          );
+        }
+      }
+    });
+
+    rl.on('close', () => {
+      if (matchCount === 0) {
+        resolve(null);
+        return;
+      }
+      resolve({
+        file: path.relative(basePath, filePath).replace(/\\/g, '/'),
+        matchCount,
+        snippets,
+      });
+    });
+
+    rl.on('error', () => {
+      resolve(null);
+    });
+  });
+}
+
+// ==================== glob 辅助函数 ====================
+
+/**
  * 将 glob 模式转换为正则表达式
+ * 支持: ** (跨目录匹配), * (单级匹配), ? (单字符匹配), {} (分组)
  */
 function globToRegex(pattern: string): string {
-  return pattern
-    .replace(/\*\*/g, '§§')  // 临时替换 **
-    .replace(/\*/g, '[^/\\\\]*')  // * 匹配非路径分隔符
-    .replace(/§§/g, '.*')    // ** 匹配任意
-    .replace(/\?/g, '[^/\\\\]')   // ? 匹配单个非路径分隔符
-    .replace(/\.(?![\*])/g, '\\.'); // 转义 .
+  let result = '';
+  let i = 0;
+
+  while (i < pattern.length) {
+    const ch = pattern[i];
+
+    if (ch === '*') {
+      if (pattern[i + 1] === '*') {
+        // ** - 匹配任意路径（包括路径分隔符）
+        result += '.*';
+        i += 2;
+        // 跳过紧跟的路径分隔符（**/ 或 **\）
+        if (pattern[i] === '/' || pattern[i] === '\\') {
+          i++;
+        }
+      } else {
+        // * - 匹配除路径分隔符外的任意字符
+        result += '[^/\\\\]*';
+        i++;
+      }
+    } else if (ch === '?') {
+      // ? - 匹配单个非路径分隔符字符
+      result += '[^/\\\\]';
+      i++;
+    } else if (ch === '{') {
+      // {a,b,c} - 分组匹配
+      const closeIdx = pattern.indexOf('}', i);
+      if (closeIdx !== -1) {
+        const group = pattern.substring(i + 1, closeIdx);
+        const options = group.split(',').map(opt => escapeRegExp(opt));
+        result += `(${options.join('|')})`;
+        i = closeIdx + 1;
+      } else {
+        result += '\\{';
+        i++;
+      }
+    } else if (ch === '[') {
+      // 字符类 - 透传给正则
+      const closeIdx = pattern.indexOf(']', i);
+      if (closeIdx !== -1) {
+        result += pattern.substring(i, closeIdx + 1);
+        i = closeIdx + 1;
+      } else {
+        result += '\\[';
+        i++;
+      }
+    } else if (isRegExpSpecialChar(ch)) {
+      result += '\\' + ch;
+      i++;
+    } else {
+      result += ch;
+      i++;
+    }
+  }
+
+  // 确保完整匹配
+  return `^${result}$`;
 }
 
 /**
- * 递归搜索匹配的文件
+ * 判断字符是否是正则特殊字符
+ */
+function isRegExpSpecialChar(ch: string): boolean {
+  return '.+^${}()|[]\\'.includes(ch);
+}
+
+/**
+ * 转义正则表达式特殊字符
+ */
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 递归搜索匹配 glob 模式的文件
+ * 使用 opendir 实现更高效的目录遍历
  */
 async function globSearch(
   currentDir: string,
   basePath: string,
   regex: RegExp,
-  results: Array<{ path: string; name: string; size: number; modified: number }>,
+  excludeRegexes: RegExp[],
+  results: GlobEntry[],
   depth: number,
+  maxCollect: number,
 ): Promise<void> {
-  if (results.length >= MAX_GLOB_RESULTS * 2) return; // 多收集一些用于排序后截断
-  if (depth > 30) return;
+  if (results.length >= maxCollect) return;
+  if (depth > MAX_TRAVERSAL_DEPTH) return;
 
-  let entries;
+  let dir;
   try {
-    entries = await readdir(currentDir, { withFileTypes: true });
+    dir = await opendir(currentDir);
   } catch {
     return;
   }
 
-  for (const entry of entries) {
-    if (results.length >= MAX_GLOB_RESULTS * 2) break;
+  try {
+    for await (const entry of dir) {
+      if (results.length >= maxCollect) break;
 
-    // 跳过忽略的目录
-    if (entry.isDirectory() && SEARCH_CONFIG.IGNORED_DIRS.has(entry.name)) continue;
+      const fullPath = path.join(currentDir, entry.name);
+      const relativePath = path.relative(basePath, fullPath).replace(/\\/g, '/');
 
-    const fullPath = path.join(currentDir, entry.name);
-    const relativePath = path.relative(basePath, fullPath).replace(/\\/g, '/');
+      if (entry.isDirectory()) {
+        // 跳过忽略的目录
+        if (SEARCH_CONFIG.IGNORED_DIRS.has(entry.name)) continue;
 
-    if (entry.isDirectory()) {
-      await globSearch(fullPath, basePath, regex, results, depth + 1);
-    } else if (regex.test(relativePath) || regex.test(entry.name)) {
-      try {
-        const stats = await stat(fullPath);
-        results.push({
-          path: relativePath,
-          name: entry.name,
-          size: stats.size,
-          modified: stats.mtimeMs,
-        });
-      } catch {
-        // 跳过无法访问的文件
+        // 检查排除模式
+        if (excludeRegexes.some(re => re.test(relativePath) || re.test(entry.name))) continue;
+
+        await globSearch(fullPath, basePath, regex, excludeRegexes, results, depth + 1, maxCollect);
+      } else if (entry.isFile()) {
+        // 检查排除模式
+        if (excludeRegexes.some(re => re.test(relativePath) || re.test(entry.name))) continue;
+
+        // 检查匹配
+        if (regex.test(relativePath) || regex.test(entry.name)) {
+          try {
+            const stats = await statAsync(fullPath);
+            results.push({
+              path: relativePath,
+              name: entry.name,
+              size: stats.size,
+              modified: stats.mtimeMs,
+            });
+          } catch {
+            // 跳过无法访问的文件
+          }
+        }
       }
     }
+  } finally {
+    await dir.close();
   }
 }
 
-export const searchTools: Tool[] = [grepTool, globTool];
+/**
+ * 将数组拆分为指定大小的批次
+ */
+function batchArray<T>(arr: T[], batchSize: number): T[][] {
+  const batches: T[][] = [];
+  for (let i = 0; i < arr.length; i += batchSize) {
+    batches.push(arr.slice(i, i + batchSize));
+  }
+  return batches;
+}
+
+// ==================== 导出 ====================
+
+export const searchTools: Tool[] = [grepTool, globTool, searchContentTool];

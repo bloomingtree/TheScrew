@@ -34,6 +34,8 @@ import { getTransferService } from './p2p/TransferService';
 import { registerAttachmentHandlers } from './ipc/attachments';
 import { attachmentTools } from './tools/AttachmentTools';
 import { officeCLITools, officeCLIToolGroup } from './tools/OfficeCLITools';
+import { knowledgeTools, knowledgeToolGroup } from './tools/KnowledgeTools';
+import { taskTools } from './tools/TaskTools';
 
 const store = new Store();
 
@@ -212,6 +214,30 @@ app.whenReady().then(async () => {
     capabilities: ['创建/查看/编辑文档', 'DOM 操作（增删改查）', '元素移动/交换', '批量操作', '原始 XML 操作'],
     keywords: ['word', 'excel', 'powerpoint', 'docx', 'xlsx', 'pptx', 'office', '文档'],
     estimatedTokens: 800,
+  });
+
+  // 注册知识库工具到 ToolManager
+  for (const tool of knowledgeTools) {
+    toolManager.registerTool(tool);
+  }
+  registerToolSetMeta({
+    name: knowledgeToolGroup.name,
+    description: knowledgeToolGroup.description,
+    capabilities: ['知识库索引', '全文搜索', '增量更新', '文档文本提取'],
+    keywords: knowledgeToolGroup.keywords,
+    estimatedTokens: 600,
+  });
+
+  // 注册任务管理工具到 ToolManager
+  for (const tool of taskTools) {
+    toolManager.registerTool(tool);
+  }
+  registerToolSetMeta({
+    name: 'task',
+    description: '任务管理工具（创建、列表、更新、完成）',
+    capabilities: ['任务创建', '状态追踪', '优先级管理', '子任务'],
+    keywords: ['任务', '待办', 'TODO', 'task', '管理', '追踪'],
+    estimatedTokens: 400,
   });
 
   // 注册 IPC 处理器

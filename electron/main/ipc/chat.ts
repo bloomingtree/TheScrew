@@ -7,6 +7,8 @@ import { bashTools } from '../tools/BashTools';
 import { officeCLITools, isAvailable as isOfficeCLIAvailable, officeCLIToolGroup } from '../tools/OfficeCLITools';
 import { askUserTools, registerAskUserIpc } from '../tools/AskUserTools';
 import { searchTools } from '../tools/SearchTools';
+import { knowledgeTools } from '../tools/KnowledgeTools';
+import { taskTools } from '../tools/TaskTools';
 import { getWorkspacePath } from '../tools/FileTools';
 import { getContextBuilder } from '../core/ContextBuilder';
 import { countContextTokens, compressContext, estimateTokens } from '../utils/tokenCounter';
@@ -268,7 +270,7 @@ export function registerChatHandlers(store: Store) {
   registerAskUserIpc();
 
   // 注册基础工具组（包含文件操作工具、Bash 工具、ask_user 工具）
-  const baseTools: any[] = [...fileTools, ...bashTools, ...searchTools, ...askUserTools];
+  const baseTools: any[] = [...fileTools, ...bashTools, ...searchTools, ...askUserTools, ...knowledgeTools, ...taskTools];
 
   // 如果 OfficeCLI 已安装，注册 Office 工具
   if (isOfficeCLIAvailable()) {

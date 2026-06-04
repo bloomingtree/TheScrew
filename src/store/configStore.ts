@@ -299,11 +299,13 @@ export const useConfigStore = create<ConfigState>((set, get) => {
     importConfigs: (configs) => {
       set((state) => {
         const now = Date.now();
+        // 始终为新导入的配置生成全新 ID，避免与现有配置冲突导致重复
         const newConfigs = configs.map((c, index) => ({
           ...c,
-          id: c.id || generateId(),
+          id: generateId(),
           name: c.name || `导入配置 ${index + 1}`,
-          createdAt: c.createdAt || now,
+          isDefault: false,
+          createdAt: now,
           updatedAt: now,
         }));
 
