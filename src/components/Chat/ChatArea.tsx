@@ -119,6 +119,78 @@ const ChatArea: React.FC = () => {
     return unsub;
   }, []);
 
+  // 监听定时任务/后台注入的消息事件
+  useEffect(() => {
+    const unsubMessageInjected = window.electronAPI.onMessageInjected(async (data) => {
+      const convId = data?.conversationId;
+      if (!convId) return;
+
+      // refresh 信号：agent turn 完成，后端已把新消息持久化，前端重新拉取
+      if ((data as any).refresh) {
+        // 刷新对话列表（新对话顺序、updatedAt 等）
+        await useConversationStore.getState().loadFromDatabase();
+        // 若注入的目标就是当前激活对话，重新加载消息
+        if (convId === useConversationStore.getState().currentConversationId) {
+          try {
+            const result = await window.electronAPI.message.getByConversationId(convId);
+            if (result?.success && Array.isArray(result.data)) {
+              setMessages(result.data);
+              lastSyncedMessagesRef.current = result.data;
+              useConversationStore.getState().updateConversationMessages(convId, result.data);
+            }
+          } catch (e) {
+            console.error('[ChatArea] Failed to reload messages after refresh:', e);
+          }
+        }
+        return;
+      }
+
+      // 单条注入消息（提醒型 assistant / agent 触发 user 消息）
+      const injected = data.message;
+      if (!injected) return;
+
+      // 先刷新对话列表（可能是新建的对话）
+      await useConversationStore.getState().loadFromDatabase();
+
+      // 若目标就是当前激活对话，追加到 chatStore 并同步到 conversationStore
+      if (convId === useConversationStore.getState().currentConversationId) {
+        const newMsg = {
+          id: `injected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: injected.role,
+          content: injected.content,
+          timestamp: Date.now(),
+        };
+        setMessages([...useChatStore.getState().messages, newMsg]);
+        lastSyncedMessagesRef.current = [...useChatStore.getState().messages];
+      }
+    });
+
+    // 用户点击系统通知后，切到指定对话
+    const unsubNavigate = window.electronAPI.onConversationNavigateTo((conversationId) => {
+      if (!conversationId) return;
+      const state = useConversationStore.getState();
+      if (state.conversations.find(c => c.id === conversationId)) {
+        state.selectConversation(conversationId);
+      } else {
+        // 对话可能还没加载到内存，先加载再切换
+        state.loadFromDatabase().then(() => {
+          useConversationStore.getState().selectConversation(conversationId);
+        });
+      }
+    });
+
+    // 对话列表发生变化（定时任务新建对话等）
+    const unsubListChanged = window.electronAPI.onConversationListChanged(() => {
+      useConversationStore.getState().loadFromDatabase();
+    });
+
+    return () => {
+      unsubMessageInjected();
+      unsubNavigate();
+      unsubListChanged();
+    };
+  }, [setMessages]);
+
   // 监听 AI 提问事件
   useEffect(() => {
     const cleanup = window.electronAPI.onUserQuestion((data) => {

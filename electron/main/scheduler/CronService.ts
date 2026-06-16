@@ -13,6 +13,7 @@ import {
   CronJob,
   CronSchedule,
   CronStore,
+  CronPayload,
   CronJobCallback,
 } from './types';
 
@@ -142,6 +143,30 @@ function matchesCronComponent(value: number, allowed: Set<number> | null): boole
   return allowed ? allowed.has(value) : false;
 }
 
+/**
+ * 迁移旧的 payload 格式（kind: 'message'|'tool'）到新格式（target: 'user'|'agent'）
+ * - 已是新格式（有 target）：原样返回
+ * - 旧格式 kind='tool' → target='agent'
+ * - 旧格式 kind='message' 或无值 → target='user'
+ */
+function migratePayload(raw: any): CronPayload {
+  if (raw && typeof raw.target === 'string' && (raw.target === 'user' || raw.target === 'agent')) {
+    return {
+      target: raw.target,
+      message: raw.message ?? '',
+      tools: raw.tools,
+      agentType: raw.agentType,
+    };
+  }
+  // 旧格式迁移
+  const target: 'user' | 'agent' = raw?.kind === 'tool' ? 'agent' : 'user';
+  return {
+    target,
+    message: raw?.message ?? '',
+    tools: raw?.tools,
+  };
+}
+
 // ============================================================================
 // CronService
 // ============================================================================
@@ -181,7 +206,7 @@ export class CronService {
           name: j.name,
           enabled: j.enabled ?? true,
           schedule: j.schedule,
-          payload: j.payload,
+          payload: migratePayload(j.payload),
           state: j.state || {},
           created_at_ms: j.created_at_ms || 0,
           updated_at_ms: j.updated_at_ms || 0,
@@ -323,8 +348,45 @@ export class CronService {
     await this.loadStore();
     this.recomputeNextRuns();
     await this.saveStore();
+    // 启动补偿：补执行应用关闭期间错过的 at 类型任务
+    await this.compensateMissedJobs();
     this.armTimer();
     console.log(`[CronService] Started with ${this.store?.jobs.length || 0} jobs`);
+  }
+
+  /**
+   * 启动补偿：扫描错过的 at 类型任务并立即执行。
+   * 仅对 at 类型且未执行过的任务补执行；every/cron 只重算 next_run（recomputeNextRuns 已做），
+   * 避免补执行风暴。
+   */
+  private async compensateMissedJobs(): Promise<void> {
+    if (!this.store) return;
+    const now = nowMs();
+    const missed: CronJob[] = [];
+
+    for (const job of this.store.jobs) {
+      if (!job.enabled) continue;
+      if (job.schedule.kind !== 'at') continue;
+      const atMs = job.schedule.at_ms;
+      if (!atMs || atMs >= now) continue;
+      // 已执行过（last_run >= at_ms）则不补
+      if (job.state.last_run_at_ms && job.state.last_run_at_ms >= atMs) continue;
+      missed.push(job);
+    }
+
+    if (missed.length === 0) return;
+
+    console.log(`[CronService] Compensating ${missed.length} missed job(s)`);
+    for (const job of missed) {
+      try {
+        await this.executeJob(job);
+        console.log(`[CronService] Compensated missed job '${job.name}'`);
+      } catch (e) {
+        console.error(`[CronService] Failed to compensate job '${job.name}':`, e);
+      }
+    }
+
+    await this.saveStore();
   }
 
   /**
@@ -370,7 +432,9 @@ export class CronService {
     schedule: CronSchedule,
     message: string,
     options: {
+      target?: 'user' | 'agent';
       tools?: string[];
+      agentType?: CronPayload['agentType'];
       delete_after_run?: boolean;
     } = {}
   ): Promise<CronJob> {
@@ -383,9 +447,10 @@ export class CronService {
       enabled: true,
       schedule,
       payload: {
-        kind: 'message',
+        target: options.target ?? 'user',
         message,
         tools: options.tools,
+        agentType: options.agentType,
       },
       state: {
         next_run_at_ms: computeNextRun(schedule, now),

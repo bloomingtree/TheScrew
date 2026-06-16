@@ -49,11 +49,56 @@ export interface ModelConfigs {
 export type ThinkingMode = 'auto' | 'enabled' | 'disabled';
 
 /**
+ * 权限与限制配置接口
+ */
+export interface PermissionsConfig {
+  maxTotalToolCalls?: number;   // 单轮对话中工具调用总次数上限（默认 50）
+  maxSingleToolCalls?: number;  // 单轮对话中单个工具调用次数上限（默认 10）
+}
+
+/**
+ * Python 环境配置接口
+ */
+export interface PythonConfig {
+  enabled: boolean;             // 是否启用 Python 环境
+  mirrorUrl?: string;           // 内网 PyPI 镜像地址，如 http://192.168.1.100:8080/simple/
+  trustedHost?: string;         // 镜像服务器地址（不含端口和路径）
+  timeout?: number;             // pip 安装超时（秒），默认 120
+  autoInstall?: boolean;        // 是否自动安装缺失依赖，默认 true
+}
+
+/**
+ * MinerU OCR 服务配置接口
+ */
+export interface MinerUSettingsConfig {
+  enabled: boolean;             // 是否启用 MinerU OCR 服务
+  endpoint: string;             // MinerU 服务地址，如 http://192.168.1.100:8900
+  timeout?: number;             // 请求超时（毫秒），默认 60000
+  parseMethod?: 'auto' | 'ocr' | 'txt';  // 解析方法，默认 auto
+  returnImages?: boolean;       // 是否返回图片，默认 true
+  formulaEnable?: boolean;      // 是否启用公式识别，默认 true
+  tableEnable?: boolean;        // 是否启用表格识别，默认 true
+}
+
+/**
+ * 远程操作配置接口
+ */
+export interface RemoteConfig {
+  defaultSSHPort?: number;     // 默认 SSH 端口，默认 22
+  connectionTimeout?: number;  // 连接超时（毫秒），默认 10000
+  commandTimeout?: number;     // 命令执行超时（毫秒），默认 30000
+}
+
+/**
  * 应用设置接口（思考模式等）
  */
 export interface AppSettings {
   thinkingMode?: ThinkingMode;  // 思考模式控制
   hardwareAcceleration?: boolean; // 硬件加速（默认 true），设为 false 可解决虚拟机/远程桌面卡顿
+  permissions?: PermissionsConfig; // 工具调用限制等权限配置
+  python?: PythonConfig;        // Python 环境配置
+  mineru?: MinerUSettingsConfig; // MinerU OCR 服务配置
+  remote?: RemoteConfig;        // 远程操作配置
   /** @deprecated 使用 thinkingMode 替代 */
   enableThinking?: boolean;
   [key: string]: any;  // 允许扩展其他设置
@@ -363,6 +408,83 @@ export class AppConfigStore {
    */
   setThinkingMode(mode: ThinkingMode): void {
     this.updateSetting('thinkingMode', mode);
+  }
+
+  // ==================== 权限与限制 ====================
+
+  /**
+   * 获取工具调用总次数上限
+   */
+  getMaxTotalToolCalls(): number {
+    const settings = this.getSettings();
+    return settings.permissions?.maxTotalToolCalls ?? 50;
+  }
+
+  /**
+   * 获取单个工具调用次数上限
+   */
+  getMaxSingleToolCalls(): number {
+    const settings = this.getSettings();
+    return settings.permissions?.maxSingleToolCalls ?? 10;
+  }
+
+  // ==================== Python 环境 ====================
+
+  /**
+   * 获取 Python 配置（带默认值）
+   */
+  getPythonConfig(): PythonConfig {
+    const settings = this.getSettings();
+    const python = settings.python;
+    return {
+      enabled: python?.enabled ?? true,
+      mirrorUrl: python?.mirrorUrl,
+      trustedHost: python?.trustedHost,
+      timeout: python?.timeout ?? 120,
+      autoInstall: python?.autoInstall ?? true,
+    };
+  }
+
+  /**
+   * 获取内嵌 Python 解释器路径
+   */
+  getPythonPath(): string {
+    const pathManager = getPathManager();
+    return pathManager.getPythonPath();
+  }
+
+  // ==================== MinerU OCR 服务 ====================
+
+  /**
+   * 获取 MinerU OCR 配置（带默认值）
+   */
+  getMinerUConfig(): MinerUSettingsConfig {
+    const settings = this.getSettings();
+    const mineru = settings.mineru;
+    return {
+      enabled: mineru?.enabled ?? false,
+      endpoint: mineru?.endpoint ?? '',
+      timeout: mineru?.timeout ?? 60000,
+      parseMethod: mineru?.parseMethod ?? 'auto',
+      returnImages: mineru?.returnImages ?? true,
+      formulaEnable: mineru?.formulaEnable ?? true,
+      tableEnable: mineru?.tableEnable ?? true,
+    };
+  }
+
+  // ==================== 远程操作 ====================
+
+  /**
+   * 获取远程操作配置（带默认值）
+   */
+  getRemoteConfig(): RemoteConfig {
+    const settings = this.getSettings();
+    const remote = settings.remote;
+    return {
+      defaultSSHPort: remote?.defaultSSHPort ?? 22,
+      connectionTimeout: remote?.connectionTimeout ?? 10000,
+      commandTimeout: remote?.commandTimeout ?? 30000,
+    };
   }
 }
 

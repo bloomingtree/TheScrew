@@ -27,14 +27,20 @@ export interface CronSchedule {
 
 /**
  * What to do when the job runs
+ *
+ * target 区分两种任务类型：
+ * - 'user'：提醒用户型。到点注入一条 assistant 提醒消息 + 系统通知，不触发 agent 执行。
+ * - 'agent'：Agent 自驱动型。到点把 message 作为 user 消息注入对话，并触发 agent 执行（调 LLM、用工具）。
  */
 export interface CronPayload {
-  /** Payload type */
-  kind: 'message' | 'tool';
-  /** Message content to process */
+  /** 任务目标：提醒用户 / agent 自主执行 */
+  target: 'user' | 'agent';
+  /** 消息内容（提醒文本 或 agent 要执行的 prompt） */
   message: string;
-  /** Optional: tool names to activate */
+  /** Optional: tool names to activate（agent 任务用） */
   tools?: string[];
+  /** Optional: agent 类型（agent 任务用，默认走 ContextBuilder 的统一身份） */
+  agentType?: 'default' | 'office' | 'devops' | 'secretary';
 }
 
 /**

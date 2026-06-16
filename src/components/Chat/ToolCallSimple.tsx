@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle, Clock, Eye, Terminal } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle, Clock, Eye, Terminal, PenLine } from 'lucide-react';
 import { ToolCall, ToolResult } from '../../types';
 import { getToolNameCN } from '../../types/thread';
+import { useChatStore } from '../../store/chatStore';
 
 interface ToolCallSimpleProps {
   toolCalls: ToolCall[];
@@ -33,6 +34,7 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
   toolResults = [],
 }) => {
   const [expandedCalls, setExpandedCalls] = useState<Set<string>>(new Set());
+  const toolCallWritingMap = useChatStore(state => state.toolCallWritingMap);
 
   // 检测是否是Word文档
   const isWordFile = (filepath?: string): boolean => {
@@ -80,7 +82,10 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
       <div className="flex flex-col items-start space-y-2 w-full">
       {toolCalls.map((toolCall, index) => {
         const result = toolResults.find(r => r.toolCallId === toolCall.id);
-        const isRunning = !result;
+        const writingState = toolCallWritingMap.get(toolCall.id);
+        const isWriting = writingState?.status === 'writing';
+        const isWritten = writingState?.status === 'written' && !result;
+        const isRunning = !result && !isWriting && !isWritten;
         const isSuccess = result?.success;
         const isError = result && !result.success;
         const isExpanded = expandedCalls.has(toolCall.id);
@@ -108,6 +113,9 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
             >
               {/* 状态图标 */}
               <div className="flex-shrink-0">
+                {isWriting && (
+                  <PenLine size={14} className="animate-pulse" style={{ color: TERMINAL.yellow }} />
+                )}
                 {isRunning && (
                   <Loader2 size={14} className="animate-spin" style={{ color: TERMINAL.green }} />
                 )}
@@ -145,12 +153,28 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
 
               {/* 状态标签 */}
               <div className="flex-shrink-0">
+                {isWriting && (
+                  <span
+                    className="text-xs font-mono animate-pulse"
+                    style={{ color: TERMINAL.yellow }}
+                  >
+                    编写中...
+                  </span>
+                )}
+                {isWritten && (
+                  <span
+                    className="text-xs font-mono"
+                    style={{ color: TERMINAL.cyan }}
+                  >
+                    参数就绪
+                  </span>
+                )}
                 {isRunning && (
                   <span
                     className="text-xs font-mono animate-pulse"
                     style={{ color: TERMINAL.orange }}
                   >
-                    ⏳ 执行中...
+                    执行中...
                   </span>
                 )}
                 {isSuccess && (
@@ -158,7 +182,7 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                     className="text-xs font-mono"
                     style={{ color: TERMINAL.green }}
                   >
-                    ✓ 完成
+                    完成
                   </span>
                 )}
                 {isError && (
@@ -166,7 +190,7 @@ const ToolCallSimple: React.FC<ToolCallSimpleProps> = ({
                     className="text-xs font-mono"
                     style={{ color: TERMINAL.pink }}
                   >
-                    ✗ 失败
+                    失败
                   </span>
                 )}
               </div>

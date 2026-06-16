@@ -17,11 +17,14 @@ import { registerSchedulerHandlers } from './ipc/scheduler';
 import { initDatabase } from './db';
 import { getSkillManager, initializeCore } from './core';
 import { getToolManager } from './tools/ToolManager';
-import { getCronService, HeartbeatService, CronJob, setCronService, setHeartbeatService } from './scheduler';
+import { getCronService, HeartbeatService, CronJob, setCronService, setHeartbeatService, getHeartbeatService } from './scheduler';
+import { dispatchJob } from './scheduler/JobDispatcher';
 import { cronTools, heartbeatTools } from './tools/SchedulerTools';
 import { bashTools, bashToolSet } from './tools/BashTools';
 import { setWorkspacePath } from './tools/FileTools';
 import { registerToolSetMeta } from './tools/ToolManager';
+import { PythonPackageManager, setPythonPackageManager } from './tools/PythonPackageManager';
+import { getAppConfigStore } from './config/AppConfigStore';
 // Reports functionality removed
 import { registerCredentialHandlers } from './ipc/credentials';
 import { registerWordHandlers } from './ipc/word';
@@ -32,10 +35,16 @@ import { registerP2PHandlers } from './ipc/p2p';
 import { registerFileEditorHandlers } from './ipc/fileEditor';
 import { getTransferService } from './p2p/TransferService';
 import { registerAttachmentHandlers } from './ipc/attachments';
+import { registerPermissionHandlers } from './ipc/permission';
 import { attachmentTools } from './tools/AttachmentTools';
 import { officeCLITools, officeCLIToolGroup } from './tools/OfficeCLITools';
 import { knowledgeTools, knowledgeToolGroup } from './tools/KnowledgeTools';
 import { taskTools } from './tools/TaskTools';
+import { remoteTools, remoteToolGroup } from './tools/RemoteTools';
+import { dbTools, dbToolGroup } from './tools/DbTools';
+import { pdfTools, pdfToolGroup } from './tools/PdfTools';
+import { reportTools, reportToolGroup } from './tools/ReportTools';
+import { pptxDesignTools, pptxDesignToolGroup } from './tools/PptxDesignTools';
 
 const store = new Store();
 
@@ -76,6 +85,15 @@ if (!hwAccelEnabled) {
 } else {
   console.log('[Main] 硬件加速已启用');
 }
+
+// 设置 AppUserModelId（必须在 app.whenReady 之前）
+// 否则 Windows 通知中心会显示为 "Electron" 而非应用名，且图标不正确。
+// 值取自 electron-builder.json 的 appId。
+app.setAppUserModelId('com.luosiding.app');
+
+// 初始化当前激活对话的全局占位（定时任务注入消息时用）
+// 由 chat:stream 和 conversation:setActive IPC 实时更新。
+(globalThis as any)[Symbol.for('zero-employee:activeConversationId')] = null;
 
 let mainWindow: BrowserWindow | null = null;
 function createWindow() {
@@ -139,14 +157,15 @@ app.whenReady().then(async () => {
   const userDataPath = app.getPath('userData');
   const cronService = getCronService();
 
-  // 设置 cron 任务执行回调
-  // 当定时任务触发时，通过 chat IPC 处理消息
+  // 设置 cron 任务执行回调：由 JobDispatcher 统一分发（提醒用户型 / Agent 自驱动型）
   cronService.onJob = async (job: CronJob): Promise<string | undefined> => {
-    console.log(`[CronService] Executing job: ${job.name}`);
-
-    // TODO: 这里需要集成到实际的聊天系统
-    // 暂时返回任务执行确认
-    return `Executed cron job: ${job.name}`;
+    console.log(`[CronService] Job triggered: ${job.name} (target=${job.payload.target})`);
+    try {
+      return await dispatchJob(job, 'cron');
+    } catch (e: any) {
+      console.error(`[CronService] dispatchJob failed for '${job.name}':`, e);
+      return undefined;
+    }
   };
 
   await cronService.start();
@@ -166,10 +185,25 @@ app.whenReady().then(async () => {
         enabled: true,
       },
       async (message: string) => {
-        // Heartbeat 回调 - 处理 HEARTBEAT.md 中的任务
-        console.log('[HeartbeatService] Processing heartbeat message');
-        // TODO: 集成到实际的聊天系统
-        return 'HEARTBEAT_OK';
+        // Heartbeat 回调：构造虚拟 CronJob（target=agent），复用 JobDispatcher 走 agent turn
+        console.log('[HeartbeatService] Heartbeat triggered, dispatching as agent task');
+        const virtualJob: CronJob = {
+          id: 'heartbeat',
+          name: '后台巡检',
+          enabled: true,
+          schedule: { kind: 'every', every_ms: 0 },
+          payload: { target: 'agent', message },
+          state: {},
+          created_at_ms: Date.now(),
+          updated_at_ms: Date.now(),
+          delete_after_run: false,
+        };
+        try {
+          return await dispatchJob(virtualJob, 'heartbeat');
+        } catch (e: any) {
+          console.error('[HeartbeatService] dispatchJob failed:', e);
+          return 'HEARTBEAT_OK';  // 失败不阻塞下次心跳
+        }
       }
     );
 
@@ -181,6 +215,27 @@ app.whenReady().then(async () => {
   const toolManager = getToolManager();
   for (const tool of [...cronTools, ...heartbeatTools]) {
     toolManager.registerTool(tool);
+  }
+
+  // ============================================================================
+  // 初始化 Python 包管理器
+  // ============================================================================
+  const appConfigStore = getAppConfigStore();
+  const pythonConfig = appConfigStore.getPythonConfig();
+  const pythonPath = appConfigStore.getPythonPath();
+
+  if (pythonConfig.enabled && fs.existsSync(pythonPath)) {
+    const pythonPackageManager = new PythonPackageManager(pythonPath, pythonConfig);
+    setPythonPackageManager(pythonPackageManager);
+
+    // If mirror is configured, write pip.ini
+    if (pythonConfig.mirrorUrl) {
+      await pythonPackageManager.updatePipConfig();
+    }
+
+    console.log('[Main] Python package manager initialized:', pythonPath);
+  } else {
+    console.log('[Main] Python environment disabled or not found, skipping. enabled=', pythonConfig.enabled, 'path=', pythonPath);
   }
 
   // 注册 Bash 工具到 ToolManager
@@ -240,6 +295,71 @@ app.whenReady().then(async () => {
     estimatedTokens: 400,
   });
 
+  // 注册远程操作工具到 ToolManager
+  for (const tool of remoteTools) {
+    toolManager.registerTool(tool);
+  }
+  toolManager.registerToolGroup(remoteToolGroup);
+  registerToolSetMeta({
+    name: remoteToolGroup.name,
+    description: 'SSH/WinRM 远程服务器管理',
+    capabilities: ['SSH远程执行', 'WinRM远程执行', '服务器列表'],
+    keywords: remoteToolGroup.keywords,
+    estimatedTokens: 500,
+  });
+
+  // 注册数据库工具到 ToolManager
+  for (const tool of dbTools) {
+    toolManager.registerTool(tool);
+  }
+  toolManager.registerToolGroup(dbToolGroup);
+  registerToolSetMeta({
+    name: dbToolGroup.name,
+    description: '数据库操作（Oracle/SQLite）',
+    capabilities: ['SQL查询', '数据执行', '表结构', '连接管理'],
+    keywords: dbToolGroup.keywords,
+    estimatedTokens: 600,
+  });
+
+  // 注册 PDF 工具到 ToolManager
+  for (const tool of pdfTools) {
+    toolManager.registerTool(tool);
+  }
+  toolManager.registerToolGroup(pdfToolGroup);
+  registerToolSetMeta({
+    name: pdfToolGroup.name,
+    description: 'PDF 处理（合并/拆分/水印/旋转）',
+    capabilities: ['PDF合并', 'PDF拆分', 'PDF水印', 'PDF旋转', 'PDF提取'],
+    keywords: pdfToolGroup.keywords,
+    estimatedTokens: 500,
+  });
+
+  // 注册报表工具到 ToolManager
+  for (const tool of reportTools) {
+    toolManager.registerTool(tool);
+  }
+  toolManager.registerToolGroup(reportToolGroup);
+  registerToolSetMeta({
+    name: reportToolGroup.name,
+    description: '报表生成（周报/月报/数据汇总）',
+    capabilities: ['周报', '月报', '数据汇总', '模板渲染'],
+    keywords: reportToolGroup.keywords,
+    estimatedTokens: 400,
+  });
+
+  // 注册 PPT 设计工具到 ToolManager
+  for (const tool of pptxDesignTools) {
+    toolManager.registerTool(tool);
+  }
+  toolManager.registerToolGroup(pptxDesignToolGroup);
+  registerToolSetMeta({
+    name: pptxDesignToolGroup.name,
+    description: 'PPT 设计（配色方案、数据图表）',
+    capabilities: ['配色方案', '数据图表', '主题应用'],
+    keywords: pptxDesignToolGroup.keywords,
+    estimatedTokens: 400,
+  });
+
   // 注册 IPC 处理器
   registerChatHandlers(store);
   registerConfigHandlers(store);
@@ -261,6 +381,7 @@ app.whenReady().then(async () => {
   registerP2PHandlers();
   registerFileEditorHandlers();
   registerAttachmentHandlers();
+  registerPermissionHandlers();
 
   // TODO: P2P 传输服务待调试和完善后再启用
   // 启动 P2P 传输服务（HTTP 服务器）
@@ -288,6 +409,8 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   const cronService = getCronService();
   cronService.stop();
+  // Heartbeat 也要停止（之前遗漏）
+  getHeartbeatService()?.stop();
 });
 
 ipcMain.handle('get-app-version', () => {

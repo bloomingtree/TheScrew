@@ -28,9 +28,12 @@ export interface SchedulerJob {
     at_ms?: number;
   };
   payload: {
-    kind: string;
+    // 兼容旧数据：可能存在 kind 字段；新数据使用 target
+    kind?: string;
+    target?: 'user' | 'agent';
     message: string;
     tools?: string[];
+    agentType?: 'default' | 'office' | 'devops' | 'secretary';
   };
   icon?: string;
   description?: string;
@@ -57,11 +60,13 @@ export interface JobNotification {
 
 // 预置模板
 export const PRESET_TEMPLATES = [
+  // ===== Agent 自驱动型（target: 'agent'）=====
   {
     name: '每日工作总结',
     description: '总结今日所有对话，提取关键信息到工作记忆',
     schedule: { kind: 'cron' as const, expr: '0 23 * * *' },
     message: '总结今日所有对话内容。提取关键决策、用户偏好和待跟进事项，写入工作记忆。',
+    target: 'agent' as const,
     icon: '📝',
     category: 'memory',
     notifyOnComplete: true,
@@ -71,6 +76,7 @@ export const PRESET_TEMPLATES = [
     description: '清理超过30天的临时文件和过期会话空间',
     schedule: { kind: 'cron' as const, expr: '0 3 * * 0' },
     message: '清理工作空间中超过30天的临时文件和过期会话空间。列出已清理的文件。',
+    target: 'agent' as const,
     icon: '🧹',
     category: 'maintenance',
     notifyOnComplete: false,
@@ -80,9 +86,41 @@ export const PRESET_TEMPLATES = [
     description: '从近期工作记忆中提炼重要信息到长期记忆',
     schedule: { kind: 'cron' as const, expr: '0 10 * * 1' },
     message: '回顾最近7天的工作记忆，提炼重要的用户偏好、项目信息和决策到长期记忆中。',
+    target: 'agent' as const,
     icon: '🧠',
     category: 'memory',
     notifyOnComplete: true,
+  },
+  // ===== 提醒用户型（target: 'user'）=====
+  {
+    name: '下班提醒',
+    description: '每天下午 6 点提醒用户准备下班',
+    schedule: { kind: 'cron' as const, expr: '0 18 * * *' },
+    message: '该下班了！记得整理今天的工作内容。',
+    target: 'user' as const,
+    icon: '⏰',
+    category: 'reminder',
+    notifyOnComplete: false,
+  },
+  {
+    name: '喝水提醒',
+    description: '每隔 2 小时提醒喝水',
+    schedule: { kind: 'every' as const, every_ms: 2 * 60 * 60 * 1000 },
+    message: '该喝水了，记得多喝水保持健康！',
+    target: 'user' as const,
+    icon: '💧',
+    category: 'reminder',
+    notifyOnComplete: false,
+  },
+  {
+    name: '周报提醒',
+    description: '每周五下午 5 点提醒写周报',
+    schedule: { kind: 'cron' as const, expr: '0 17 * * 5' },
+    message: '该写本周周报了，回顾本周工作成果和下周计划。',
+    target: 'user' as const,
+    icon: '📋',
+    category: 'reminder',
+    notifyOnComplete: false,
   },
 ];
 
@@ -139,7 +177,9 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
         name,
         schedule,
         message,
+        target: options?.target,
         tools: options?.tools,
+        agentType: options?.agentType,
         delete_after_run: options?.deleteAfterRun,
       });
       if (result.success) {

@@ -12,6 +12,7 @@ import {
   ChevronDown,
   HardDrive,
   Lightbulb,
+  Clock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useConversationStore } from '../../store/conversationStore';
@@ -20,6 +21,7 @@ import { useRightPanelStore } from '../../store/rightPanelStore';
 import { useTabStore } from '../../store/tabStore';
 import PreviewTab from '../RightPanel/tabs/PreviewTab';
 import SkillsTab from '../RightPanel/tabs/SkillsTab';
+import SchedulerTab from '../RightPanel/tabs/SchedulerTab';
 import FileExplorer from '../FileExplorer/FileExplorer';
 
 // 终端风格色彩常量
@@ -43,6 +45,7 @@ const TERMINAL = {
 // 功能按钮配置
 const FUNCTION_ITEMS = [
   { key: 'skills', icon: Lightbulb, label: '技能', color: TERMINAL.yellow },
+  { key: 'scheduler', icon: Clock, label: '定时任务', color: TERMINAL.blue },
 ];
 
 interface WorkspaceFile {
@@ -54,7 +57,7 @@ interface WorkspaceFile {
   children?: WorkspaceFile[];
 }
 
-type ModalType = 'history' | 'skills' | 'preview' | null;
+type ModalType = 'history' | 'skills' | 'scheduler' | 'preview' | null;
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -312,6 +315,8 @@ const Sidebar: React.FC<SidebarProps> = () => {
     switch (activeModal) {
       case 'skills':
         return <SkillsTab />;
+      case 'scheduler':
+        return <SchedulerTab />;
       case 'preview':
         return <PreviewTab />;
       default:
@@ -323,6 +328,8 @@ const Sidebar: React.FC<SidebarProps> = () => {
     switch (activeModal) {
       case 'skills':
         return '技能';
+      case 'scheduler':
+        return '定时任务';
       case 'preview':
         return currentPreviewFile?.split(/[\\/]/).pop() || '文件预览';
       case 'history':

@@ -237,6 +237,36 @@ export class PathManager {
   }
 
   /**
+   * 获取内嵌 Python 解释器路径
+   * - 开发环境：项目根目录/electron/main/python/python-3.8.10-embed-amd64/python.exe
+   * - 生产环境：exe 同目录/electron/main/python/python-3.8.10-embed-amd64/python.exe
+   */
+  getPythonPath(): string {
+    const pythonRelDir = path.join('electron', 'main', 'python', 'python-3.8.10-embed-amd64');
+    return path.join(this.appRootPath, pythonRelDir, 'python.exe');
+  }
+
+  /**
+   * 获取内嵌 BusyBox 解释器路径
+   * BusyBox-w32 提供 UTF-8 兼容的 Unix 命令环境（ash shell + 100+ 命令）
+   * - 开发环境：项目根目录/electron/main/busybox/busybox.exe
+   * - 生产环境：resources/busybox/busybox.exe
+   */
+  getBusyBoxPath(): string {
+    if (app.isPackaged) {
+      return path.join(process.resourcesPath, 'busybox', 'busybox.exe');
+    }
+    return path.join(this.appRootPath, 'electron', 'main', 'busybox', 'busybox.exe');
+  }
+
+  /**
+   * 获取 BusyBox 所在目录（用于 PATH 注入）
+   */
+  getBusyBoxDir(): string {
+    return path.dirname(this.getBusyBoxPath());
+  }
+
+  /**
    * 获取身份配置文件路径
    */
   getIdentityPath(): string {

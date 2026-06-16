@@ -1,11 +1,13 @@
 /**
  * Subagent IPC Handlers
  *
- * IPC handlers for the subagent system
+ * IPC handlers for the subagent system, including AgentSupervisor integration.
  */
 
-import { ipcMain } from 'electron';
-import { getSubagentManager } from '../subagents/SubagentManager';
+import { ipcMain, IpcMainInvokeEvent } from 'electron';
+import { getSubagentManager, SubAgentConfig } from '../subagents/SubagentManager';
+import { AgentSupervisor, SubTask } from '../subagents/AgentSupervisor';
+import { getAppConfigStore } from '../config/AppConfigStore';
 
 /**
  * Register subagent-related IPC handlers
@@ -13,7 +15,7 @@ import { getSubagentManager } from '../subagents/SubagentManager';
 export function registerSubagentHandlers(): void {
   const subagentManager = getSubagentManager();
 
-  // Spawn a new subagent task
+  // Spawn a new subagent task (supports both legacy and enhanced config)
   ipcMain.handle('subagents:spawn', async (
     _event,
     task: string,
@@ -26,13 +28,13 @@ export function registerSubagentHandlers(): void {
       temperature?: number;
       maxTokens?: number;
     },
-    options?: {
+    optionsOrAgentConfig?: {
       timeout?: number;
       maxIterations?: number;
-    }
+    } | SubAgentConfig,
   ) => {
     try {
-      const taskId = await subagentManager.spawn(task, label, parentSessionId, llmConfig, options);
+      const taskId = await subagentManager.spawn(task, label, parentSessionId, llmConfig, optionsOrAgentConfig as any);
       return {
         success: true,
         taskId,
@@ -221,5 +223,61 @@ export function registerSubagentHandlers(): void {
     }
   });
 
-  console.log('[IPC] Subagent handlers registered');
+  // ==================== Agent Supervisor IPC ====================
+
+  // Execute a multi-agent plan via the AgentSupervisor
+  ipcMain.handle('supervisor:execute', async (
+    event: IpcMainInvokeEvent,
+    request: string,
+    plan: SubTask[],
+  ) => {
+    try {
+      // Get active LLM config from AppConfigStore
+      const appConfigStore = getAppConfigStore();
+      const config = appConfigStore.getActiveConfig();
+
+      if (!config || !config.apiKey) {
+        return {
+          success: false,
+          error: '未找到有效的 LLM 配置，请先在设置中配置模型信息',
+        };
+      }
+
+      const supervisor = new AgentSupervisor(subagentManager);
+
+      const result = await supervisor.executePlan(
+        request,
+        plan,
+        {
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          model: config.model,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+        },
+        (update) => {
+          // Send progress updates to the renderer process
+          try {
+            event.sender.send('supervisor:progress', update);
+          } catch (e) {
+            // WebContents may have been destroyed
+          }
+        },
+      );
+
+      return {
+        success: true,
+        synthesis: result.synthesis,
+        results: result.results,
+      };
+    } catch (error: any) {
+      console.error('[IPC] supervisor:execute error:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  console.log('[IPC] Subagent + Supervisor handlers registered');
 }

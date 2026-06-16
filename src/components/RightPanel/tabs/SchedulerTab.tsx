@@ -47,6 +47,13 @@ const JobCard: React.FC<{
   onDelete: (id: string) => void;
   onRun: (id: string) => void;
 }> = ({ job, onToggle, onDelete, onRun }) => {
+  // 兼容旧数据：target 不存在时，根据 kind 字段推断（message→user，tool→agent），默认 user
+  const target: 'user' | 'agent' =
+    job.payload?.target
+      ?? (job.payload?.kind === 'tool' ? 'agent' : 'user');
+
+  const isUserReminder = target === 'user';
+
   return (
     <motion.div
       layout
@@ -55,15 +62,31 @@ const JobCard: React.FC<{
       exit={{ opacity: 0, y: -10 }}
       className={`p-3 rounded-lg border ${
         job.enabled
-          ? 'bg-white border-blue-200/60'
+          ? isUserReminder
+            ? 'bg-amber-50/40 border-amber-200/60'
+            : 'bg-white border-blue-200/60'
           : 'bg-gray-50 border-gray-200/60 opacity-70'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2 min-w-0">
-          <span className="text-base shrink-0 mt-0.5">{job.icon || '⏰'}</span>
+          <span className="text-base shrink-0 mt-0.5">
+            {job.icon || (isUserReminder ? '🔔' : '🤖')}
+          </span>
           <div className="min-w-0">
-            <h4 className="text-sm font-medium text-gray-800 truncate">{job.name}</h4>
+            <div className="flex items-center gap-1.5">
+              <h4 className="text-sm font-medium text-gray-800 truncate">{job.name}</h4>
+              <span
+                className={`shrink-0 px-1.5 py-0.5 text-[9px] rounded-full font-medium ${
+                  isUserReminder
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-blue-100 text-blue-700'
+                }`}
+                title={isUserReminder ? '提醒用户型：到点通知你' : 'Agent 自驱动型：到点自动执行'}
+              >
+                {isUserReminder ? '提醒我' : 'Agent'}
+              </span>
+            </div>
             <p className="text-xs text-gray-500 mt-0.5">
               <Clock size={10} className="inline mr-1" />
               {formatSchedule(job.schedule)}
@@ -134,6 +157,7 @@ const CreateJobDialog: React.FC<{
   onClose: () => void;
   onSubmit: (name: string, schedule: any, message: string, options?: any) => void;
 }> = ({ onClose, onSubmit }) => {
+  const [target, setTarget] = useState<'user' | 'agent'>('user');
   const [name, setName] = useState('');
   const [scheduleType, setScheduleType] = useState<'daily' | 'weekly' | 'cron'>('daily');
   const [time, setTime] = useState('23:00');
@@ -164,8 +188,9 @@ const CreateJobDialog: React.FC<{
     }
 
     onSubmit(name, schedule, message, {
+      target,
       notifyOnComplete,
-      icon: '⏰',
+      icon: target === 'user' ? '🔔' : '🤖',
     });
     onClose();
   };
@@ -178,6 +203,41 @@ const CreateJobDialog: React.FC<{
         </div>
 
         <div className="px-5 py-4 space-y-4">
+          {/* 任务类型 */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">任务类型</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setTarget('user')}
+                className={`p-2.5 rounded-lg border text-left transition-all ${
+                  target === 'user'
+                    ? 'bg-amber-50 border-amber-300'
+                    : 'border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base">🔔</span>
+                  <span className="text-sm font-medium text-gray-800">提醒我</span>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-0.5">到点通知你该做的事</p>
+              </button>
+              <button
+                onClick={() => setTarget('agent')}
+                className={`p-2.5 rounded-lg border text-left transition-all ${
+                  target === 'agent'
+                    ? 'bg-blue-50 border-blue-300'
+                    : 'border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base">🤖</span>
+                  <span className="text-sm font-medium text-gray-800">Agent 自驱</span>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-0.5">到点让 Agent 自动执行</p>
+              </button>
+            </div>
+          </div>
+
           {/* 任务名称 */}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">任务名称</label>
@@ -185,7 +245,7 @@ const CreateJobDialog: React.FC<{
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例如：每日工作总结"
+              placeholder={target === 'user' ? '例如：下班提醒' : '例如：每日工作总结'}
               className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-200 outline-none"
             />
           </div>
@@ -254,11 +314,17 @@ const CreateJobDialog: React.FC<{
 
           {/* 执行内容 */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">执行内容</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              {target === 'user' ? '提醒内容' : 'Agent 指令'}
+            </label>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="描述任务的执行内容..."
+              placeholder={
+                target === 'user'
+                  ? '例如：该下班了，记得整理今天的工作'
+                  : '描述 Agent 应执行的任务，例如：总结今日所有对话，提取关键信息到工作记忆'
+              }
               rows={3}
               className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-200 outline-none resize-none"
             />
@@ -268,26 +334,33 @@ const CreateJobDialog: React.FC<{
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">快速模板</label>
             <div className="space-y-1.5">
-              {PRESET_TEMPLATES.map((tpl, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    setName(tpl.name);
-                    setMessage(tpl.message);
-                    if (tpl.schedule.kind === 'cron' && tpl.schedule.expr) {
-                      setCronExpr(tpl.schedule.expr);
-                      setScheduleType('cron');
-                    }
-                  }}
-                  className="w-full flex items-center gap-2 p-2 rounded-lg border border-gray-200 hover:border-blue-200 hover:bg-blue-50/50 transition-all text-left"
-                >
-                  <span>{tpl.icon}</span>
-                  <div>
-                    <p className="text-xs font-medium text-gray-700">{tpl.name}</p>
-                    <p className="text-[10px] text-gray-400">{tpl.description}</p>
-                  </div>
-                </button>
-              ))}
+              {PRESET_TEMPLATES
+                .filter(tpl => (tpl as any).target === target)
+                .map((tpl, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setName(tpl.name);
+                      setMessage(tpl.message);
+                      if (tpl.schedule.kind === 'cron' && tpl.schedule.expr) {
+                        setCronExpr(tpl.schedule.expr);
+                        setScheduleType('cron');
+                      } else if (tpl.schedule.kind === 'every' && tpl.schedule.every_ms) {
+                        // 把 every 转成简易 cron（每小时）让用户看到时间字段
+                        const hours = Math.max(1, Math.round(tpl.schedule.every_ms / 3600000));
+                        setCronExpr(`0 */${hours} * * *`);
+                        setScheduleType('cron');
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 p-2 rounded-lg border border-gray-200 hover:border-blue-200 hover:bg-blue-50/50 transition-all text-left"
+                  >
+                    <span>{tpl.icon}</span>
+                    <div>
+                      <p className="text-xs font-medium text-gray-700">{tpl.name}</p>
+                      <p className="text-[10px] text-gray-400">{tpl.description}</p>
+                    </div>
+                  </button>
+                ))}
             </div>
           </div>
 

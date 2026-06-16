@@ -43,9 +43,23 @@ export class PowerShellExecutor {
       return this.executeWithBash(command, options);
     }
 
-    // 包装 cmd 命令：设置代码页并执行
-    // chcp 65001 切换到 UTF-8
-    const wrappedCommand = `chcp 65001 >nul && ${command}`;
+    // 包装命令：强制 UTF-8 编码（关键修复）
+    //
+    // 为什么不能用 `chcp 65001 >nul && ${command}`：
+    //   1. PowerShell 5.1（Windows 自带）不支持 `&&` 操作符，会报语法错误
+    //   2. 即使能用，chcp 只切 Win32 console 代码页，不会同步 PowerShell 的
+    //      `[Console]::OutputEncoding`（.NET 层，PowerShell 的 Write-Output 等用这个）
+    //
+    // 正确做法：用 PowerShell 语法（分号分隔）显式设置三层编码
+    //   - [Console]::OutputEncoding：控制 PowerShell 写入 stdout 时的字节编码
+    //   - $OutputEncoding：控制 PowerShell 通过管道发送给子进程时的编码
+    //   - chcp 65001：让被调用的原生 exe（如 ping、systeminfo）也输出 UTF-8
+    const wrappedCommand = [
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+      '$OutputEncoding = [System.Text.Encoding]::UTF8',
+      'chcp 65001 > $null',
+      command,
+    ].join('; ');
 
     // 将命令转换为 UTF-16LE 并 Base64 编码
     const encodedCommand = Buffer.from(wrappedCommand, 'utf16le').toString('base64');

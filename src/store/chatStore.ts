@@ -22,6 +22,13 @@ interface ChatState {
   toolCalls: ToolCall[];
   toolResults: ToolResult[];
   toolExecutions: Map<string, ToolExecution>;
+  toolCallWritingMap: Map<string, {
+    toolCallId: string;
+    name: string;
+    status: 'writing' | 'written';
+    argLength?: number;
+    timestamp: number;
+  }>;
   tasks: Task[];
   tokenUsage: TokenUsage;
 
@@ -39,6 +46,14 @@ interface ChatState {
   setToolResults: (toolResults: ToolResult[]) => void;
   startToolExecution: (execution: ToolExecution) => void;
   completeToolExecution: (toolCallId: string, success: boolean, duration: number) => void;
+  setToolCallWriting: (data: {
+    toolCallId: string;
+    name: string;
+    status: 'writing' | 'written';
+    argLength?: number;
+    timestamp: number;
+  }) => void;
+  clearToolCallWriting: (toolCallId: string) => void;
   addTask: (content: string) => void;
   toggleTask: (id: string) => void;
   removeTask: (id: string) => void;
@@ -52,6 +67,7 @@ export const useChatStore = create<ChatState>((set) => ({
   toolCalls: [],
   toolResults: [],
   toolExecutions: new Map(),
+  toolCallWritingMap: new Map(),
   tasks: [],
   tokenUsage: {
     current: 0,
@@ -164,6 +180,18 @@ export const useChatStore = create<ChatState>((set) => ({
       });
     }
     return { toolExecutions: newExecutions };
+  }),
+
+  setToolCallWriting: (data) => set((state) => {
+    const map = new Map(state.toolCallWritingMap);
+    map.set(data.toolCallId, data);
+    return { toolCallWritingMap: map };
+  }),
+
+  clearToolCallWriting: (toolCallId) => set((state) => {
+    const map = new Map(state.toolCallWritingMap);
+    map.delete(toolCallId);
+    return { toolCallWritingMap: map };
   }),
 
   addTask: (content) => set((state) => ({

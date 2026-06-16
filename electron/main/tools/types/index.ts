@@ -15,7 +15,7 @@ export interface ExecuteResult {
   /** 进程退出码 */
   exitCode: number;
   /** 使用的执行方式 */
-  executionMethod: 'direct' | 'powershell' | 'cmd' | 'responseFile';
+  executionMethod: 'direct' | 'powershell' | 'cmd' | 'responseFile' | 'busybox';
   /** 修复建议（失败时提供） */
   suggestions?: string[];
   /** 是否需要用户确认（危险命令） */
@@ -82,7 +82,7 @@ export interface InternalExecuteResult {
   stdout: string;
   stderr: string;
   exitCode: number;
-  method: 'direct' | 'powershell' | 'cmd' | 'responseFile';
+  method: 'direct' | 'powershell' | 'cmd' | 'responseFile' | 'busybox';
   wasTimeout?: boolean;
 }
 

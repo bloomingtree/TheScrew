@@ -76,7 +76,9 @@ export function registerSchedulerHandlers(): void {
     name: string;
     schedule: CronSchedule;
     message: string;
+    target?: 'user' | 'agent';
     tools?: string[];
+    agentType?: 'default' | 'office' | 'devops' | 'secretary';
     delete_after_run?: boolean;
   }) => {
     try {
@@ -85,7 +87,9 @@ export function registerSchedulerHandlers(): void {
         params.schedule,
         params.message,
         {
+          target: params.target,
           tools: params.tools,
+          agentType: params.agentType,
           delete_after_run: params.delete_after_run,
         }
       );

@@ -229,6 +229,7 @@ const electronAPI = {
     getStats: () => ipcRenderer.invoke('conversation:getStats'),
     export: () => ipcRenderer.invoke('conversation:export'),
     clear: () => ipcRenderer.invoke('conversation:clear'),
+    setActive: (id: string | null) => ipcRenderer.invoke('conversation:setActive', id),
   },
   message: {
     getByConversationId: (conversationId: string) => ipcRenderer.invoke('message:getByConversationId', conversationId),
@@ -485,6 +486,34 @@ const electronAPI = {
       error?: string;
     }>,
   },
+  // 定时任务（CronService）API
+  cron: {
+    start: () => ipcRenderer.invoke('cron:start') as Promise<{ success: boolean; error?: string }>,
+    stop: () => ipcRenderer.invoke('cron:stop') as Promise<{ success: boolean; error?: string }>,
+    status: () => ipcRenderer.invoke('cron:status') as Promise<{ success: boolean; status?: any; error?: string }>,
+    list: (includeDisabled?: boolean) => ipcRenderer.invoke('cron:list', includeDisabled) as Promise<{ success: boolean; jobs?: any[]; error?: string }>,
+    get: (jobId: string) => ipcRenderer.invoke('cron:get', jobId) as Promise<{ success: boolean; job?: any; error?: string }>,
+    add: (params: {
+      name: string;
+      schedule: any;
+      message: string;
+      target?: 'user' | 'agent';
+      tools?: string[];
+      agentType?: 'default' | 'office' | 'devops' | 'secretary';
+      delete_after_run?: boolean;
+    }) => ipcRenderer.invoke('cron:add', params) as Promise<{ success: boolean; job?: any; error?: string }>,
+    remove: (jobId: string) => ipcRenderer.invoke('cron:remove', jobId) as Promise<{ success: boolean; error?: string }>,
+    enable: (jobId: string, enabled: boolean) => ipcRenderer.invoke('cron:enable', jobId, enabled) as Promise<{ success: boolean; job?: any; error?: string }>,
+    run: (jobId: string, force?: boolean) => ipcRenderer.invoke('cron:run', jobId, force) as Promise<{ success: boolean; error?: string }>,
+    clear: () => ipcRenderer.invoke('cron:clear') as Promise<{ success: boolean; error?: string }>,
+  },
+  // 后台巡检（HeartbeatService）API
+  heartbeat: {
+    status: () => ipcRenderer.invoke('heartbeat:status') as Promise<{ success: boolean; status?: any; error?: string }>,
+    getTasks: () => ipcRenderer.invoke('heartbeat:getTasks') as Promise<{ success: boolean; tasks?: any[]; error?: string }>,
+    trigger: () => ipcRenderer.invoke('heartbeat:trigger') as Promise<{ success: boolean; result?: any; error?: string }>,
+    isEmpty: () => ipcRenderer.invoke('heartbeat:isEmpty') as Promise<{ success: boolean; isEmpty?: boolean; error?: string }>,
+  },
   // Memory Summarizer API
   memory: {
     summarizeSession: (sessionId: string, messages: any[]) =>
@@ -533,6 +562,11 @@ const electronAPI = {
     ipcRenderer.on('chat:tool_start', listener);
     return () => ipcRenderer.removeListener('chat:tool_start', listener);
   },
+  onToolCallWriting: (callback: (data: any) => void) => {
+    const listener = (_event: any, data: any) => callback(data);
+    ipcRenderer.on('chat:tool_call_writing', listener);
+    return () => ipcRenderer.removeListener('chat:tool_call_writing', listener);
+  },
   onToolComplete: (callback: (data: any) => void) => {
     const listener = (_event: any, data: any) => callback(data);
     ipcRenderer.on('chat:tool_complete', listener);
@@ -545,6 +579,30 @@ const electronAPI = {
   },
   removeChatChunkListener: () => {
     ipcRenderer.removeAllListeners('chat:chunk');
+  },
+  // 定时任务/后台注入的消息（提醒用户型 assistant 消息、agent 自驱动的 user 触发消息）
+  onMessageInjected: (callback: (data: { conversationId: string; message: { role: string; content: string } }) => void) => {
+    const listener = (_event: any, data: any) => callback(data);
+    ipcRenderer.on('chat:messageInjected', listener);
+    return () => ipcRenderer.removeListener('chat:messageInjected', listener);
+  },
+  // 通知前端切换到指定对话（如点击系统通知后）
+  onConversationNavigateTo: (callback: (conversationId: string) => void) => {
+    const listener = (_event: any, conversationId: string) => callback(conversationId);
+    ipcRenderer.on('conversation:navigateTo', listener);
+    return () => ipcRenderer.removeListener('conversation:navigateTo', listener);
+  },
+  // 对话列表发生变化（如定时任务新建了对话）
+  onConversationListChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('conversation:listChanged', listener);
+    return () => ipcRenderer.removeListener('conversation:listChanged', listener);
+  },
+  // 上下文压缩通知（与 chat:context_compressed 配套，便于前端全局监听）
+  onContextCompressed: (callback: (data: { pruned: number; oldPercentage: number; newPercentage: number }) => void) => {
+    const listener = (_event: any, data: any) => callback(data);
+    ipcRenderer.on('chat:context_compressed', listener);
+    return () => ipcRenderer.removeListener('chat:context_compressed', listener);
   },
   // 用户提问工具
   onUserQuestion: (callback: (data: {

@@ -458,6 +458,15 @@ export class OpenAIClient {
               if (tc.function?.arguments) {
                 acc.function.arguments += tc.function.arguments;
               }
+
+              // 【NEW】Yield intermediate tool_call delta event for real-time UI feedback
+              yield JSON.stringify({
+                type: 'tool_call_delta',
+                index: idx,
+                id: acc.id,
+                functionName: acc.function.name,
+                argumentsLength: acc.function.arguments.length,
+              });
             }
           }
         } catch (e) {

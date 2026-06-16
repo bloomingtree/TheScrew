@@ -307,6 +307,7 @@ interface ElectronAPI {
     getStats: () => Promise<{ success: boolean; data?: any; error?: string }>;
     export: () => Promise<{ success: boolean; data?: string; error?: string }>;
     clear: () => Promise<{ success: boolean; error?: string }>;
+    setActive: (id: string | null) => Promise<{ success: boolean }>;
   };
   message: {
     getByConversationId: (conversationId: string) => Promise<{ success: boolean; data?: any[]; error?: string }>;
@@ -422,7 +423,9 @@ interface ElectronAPI {
       name: string;
       schedule: any;
       message: string;
+      target?: 'user' | 'agent';
       tools?: string[];
+      agentType?: 'default' | 'office' | 'devops' | 'secretary';
       delete_after_run?: boolean;
     }) => Promise<{ success: boolean; job?: any; error?: string }>;
     remove: (jobId: string) => Promise<{ success: boolean; error?: string }>;
@@ -442,8 +445,13 @@ interface ElectronAPI {
   onToolResults: (callback: (results: any[]) => void) => () => void;
   onToolStart: (callback: (data: any) => void) => () => void;
   onToolComplete: (callback: (data: any) => void) => () => void;
+  onToolCallWriting: (callback: (data: any) => void) => () => void;
   onTokenUsage: (callback: (usage: any) => void) => () => void;
   removeChatChunkListener: () => void;
+  onMessageInjected: (callback: (data: { conversationId: string; message: { role: string; content: string } }) => void) => () => void;
+  onConversationNavigateTo: (callback: (conversationId: string) => void) => () => void;
+  onConversationListChanged: (callback: () => void) => () => void;
+  onContextCompressed: (callback: (data: { pruned: number; oldPercentage: number; newPercentage: number }) => void) => () => void;
   // 用户提问工具
   onUserQuestion: (callback: (data: {
     questionId: string;

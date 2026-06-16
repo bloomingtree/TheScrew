@@ -123,7 +123,15 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   /**
    * 选择对话
    */
-  selectConversation: (id) => set({ currentConversationId: id }),
+  selectConversation: (id) => {
+    set({ currentConversationId: id });
+    // 通知后端当前激活的对话（定时任务系统据此决定把提醒注入哪个对话）
+    try {
+      window.electronAPI.conversation.setActive(id);
+    } catch (e) {
+      // IPC 未就绪时忽略
+    }
+  },
 
   /**
    * 重命名对话

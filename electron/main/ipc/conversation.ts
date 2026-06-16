@@ -26,6 +26,16 @@ export function registerConversationHandlers() {
   // ==================== Conversations ====================
 
   /**
+   * 设置当前激活对话 ID
+   * 供定时任务系统读取，决定把提醒/后台任务注入到哪个对话。
+   * 前端在切换对话时调用，chat:stream 也会同步更新。
+   */
+  ipcMain.handle('conversation:setActive', async (_event, id: string | null) => {
+    (globalThis as any)[Symbol.for('zero-employee:activeConversationId')] = id;
+    return { success: true };
+  });
+
+  /**
    * 获取所有对话
    */
   ipcMain.handle('conversation:getAll', async () => {

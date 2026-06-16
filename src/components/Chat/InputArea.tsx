@@ -28,7 +28,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(({ onNewChat }, re
   const [pendingImageFiles, setPendingImageFiles] = useState<File[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, setTokenUsage } = useChatStore();
+const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, setTokenUsage, setToolCallWriting } = useChatStore();
   const { apiKey, appSettings, setThinkingMode, loadAppSettings } = useConfigStore();
   const { currentConversationId, generateTitle } = useConversationStore();
 
@@ -314,6 +314,15 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
         ensureAssistantMessage();
         // 使用 flushSync 强制立即渲染
         flushSync(() => {
+          // Clear writing state for these tool calls (mark as written)
+          toolCalls.forEach(tc => {
+            setToolCallWriting({
+              toolCallId: tc.id,
+              name: tc.function.name,
+              status: 'written',
+              timestamp: Date.now(),
+            });
+          });
           updateLastMessageToolCalls(toolCalls);
           setToolCalls(toolCalls);
         });
@@ -343,10 +352,17 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
         setTokenUsage(usage);
       };
 
+      const handleToolCallWriting = (_data: any) => {
+        flushSync(() => {
+          setToolCallWriting(_data);
+        });
+      };
+
       const removeChunkListener = window.electronAPI.onChatChunk(handleChunk);
       const removeToolCallsListener = window.electronAPI.onToolCalls(handleToolCalls);
       const removeToolResultsListener = window.electronAPI.onToolResults(handleToolResults);
       const removeToolStartListener = window.electronAPI.onToolStart(handleToolStart);
+      const removeToolCallWritingListener = window.electronAPI.onToolCallWriting(handleToolCallWriting);
       const removeToolCompleteListener = window.electronAPI.onToolComplete(handleToolComplete);
       const removeTokenUsageListener = window.electronAPI.onTokenUsage(handleTokenUsage);
 
@@ -356,6 +372,7 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
       removeToolCallsListener();
       removeToolResultsListener();
       removeToolStartListener();
+      removeToolCallWritingListener();
       removeToolCompleteListener();
       removeTokenUsageListener();
 

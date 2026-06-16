@@ -18,34 +18,44 @@ import { Tool } from './ToolManager';
 export const cronTools: Tool[] = [
   {
     name: 'cron_add',
-    description: 'Schedule a new cron job. Use this to create reminders or recurring tasks.',
+    description: '创建定时任务。target="user" 用于提醒用户做事（弹通知+注入对话，不触发agent执行）；target="agent" 用于让agent在后台自主执行周期任务（如每日总结、整理记忆、巡检待办）。时间参数三选一：at_timestamp（一次性）/every_seconds（周期）/cron_expr（cron表达式）。',
     parameters: {
       type: 'object',
       properties: {
         name: {
           type: 'string',
-          description: 'Short name for the job (e.g., "morning reminder")',
+          description: '任务名称（简短，如"汇报提醒"、"每日工作总结"）',
         },
         message: {
           type: 'string',
-          description: 'Message or task to execute when the job runs',
+          description: '任务内容。target=user 时是提醒文本（如"去给领导汇报"）；target=agent 时是 agent 要执行的 prompt（如"总结今天所有对话并提取关键信息"）',
+        },
+        target: {
+          type: 'string',
+          enum: ['user', 'agent'],
+          description: '任务目标：user=提醒用户（默认）；agent=agent 自主执行',
         },
         every_seconds: {
           type: 'number',
-          description: 'Interval in seconds for recurring tasks (e.g., 3600 for every hour)',
+          description: '周期任务的间隔秒数（如 3600=每小时、86400=每天）',
         },
         cron_expr: {
           type: 'string',
-          description: 'Cron expression like "0 9 * * *" for daily at 9 AM. Format: min hour day month dow',
+          description: 'cron 表达式，格式"分 时 日 月 周"，如"0 9 * * *"=每天9点。AI 设定时间时优先用此参数。',
         },
         at_timestamp: {
-          type: 'number',
-          description: 'Unix timestamp in milliseconds for one-time tasks',
+          type: ['number', 'string'],
+          description: '一次性任务的时间。支持：毫秒时间戳(number)、日期时间字符串(string，如"2026-06-14 10:05:00"、"10:30"、"2026-06-14T10:05:00")',
+        },
+        agentType: {
+          type: 'string',
+          enum: ['default', 'office', 'devops', 'secretary'],
+          description: 'target=agent 时可选的 agent 类型，默认 default',
         },
       },
     },
     handler: async (args) => {
-      const { name, message, every_seconds, cron_expr, at_timestamp } = args;
+      const { name, message, target, every_seconds, cron_expr, at_timestamp, agentType } = args;
 
       if (!name || !message) {
         return {
@@ -55,25 +65,40 @@ export const cronTools: Tool[] = [
       }
 
       const cronService = getCronService();
+      const jobTarget: 'user' | 'agent' = target === 'agent' ? 'agent' : 'user';
+
+      // 解析 at_timestamp（兼容 number 和 string 两种格式）
+      let atMs: number | undefined;
+      if (at_timestamp !== undefined && at_timestamp !== null && at_timestamp !== '') {
+        if (typeof at_timestamp === 'number') {
+          atMs = at_timestamp;
+        } else if (typeof at_timestamp === 'string') {
+          const trimmed = at_timestamp.trim();
+          // 纯数字字符串 → 当作毫秒时间戳
+          if (/^\d+$/.test(trimmed)) {
+            atMs = parseInt(trimmed, 10);
+          } else {
+            const parsed = Date.parse(trimmed);
+            if (isNaN(parsed)) {
+              return {
+                success: false,
+                error: `无法解析时间字符串: "${at_timestamp}"。支持格式：毫秒时间戳、"YYYY-MM-DD HH:mm:ss"、"HH:mm"、"YYYY-MM-DDTHH:mm:ss"`,
+              };
+            }
+            atMs = parsed;
+          }
+        }
+      }
 
       // Determine schedule type
       let schedule: CronSchedule;
 
-      if (at_timestamp) {
-        schedule = {
-          kind: 'at',
-          at_ms: at_timestamp,
-        };
+      if (atMs) {
+        schedule = { kind: 'at', at_ms: atMs };
       } else if (every_seconds) {
-        schedule = {
-          kind: 'every',
-          every_ms: every_seconds * 1000,
-        };
+        schedule = { kind: 'every', every_ms: every_seconds * 1000 };
       } else if (cron_expr) {
-        schedule = {
-          kind: 'cron',
-          expr: cron_expr,
-        };
+        schedule = { kind: 'cron', expr: cron_expr };
       } else {
         return {
           success: false,
@@ -82,14 +107,21 @@ export const cronTools: Tool[] = [
       }
 
       try {
-        const job = await cronService.addJob(name, schedule, message);
+        const job = await cronService.addJob(name, schedule, message, {
+          target: jobTarget,
+          agentType: jobTarget === 'agent' ? agentType : undefined,
+        });
         return {
           success: true,
           job: {
             id: job.id,
             name: job.name,
+            target: job.payload.target,
             schedule: job.schedule,
             next_run: job.state.next_run_at_ms,
+            next_run_formatted: job.state.next_run_at_ms
+              ? new Date(job.state.next_run_at_ms).toLocaleString('zh-CN')
+              : null,
           },
         };
       } catch (error: any) {

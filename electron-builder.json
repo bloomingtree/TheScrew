@@ -15,6 +15,11 @@
       "from": "electron/main/python",
       "to": "python",
       "filter": "**/*"
+    },
+    {
+      "from": "electron/main/busybox",
+      "to": "busybox",
+      "filter": ["**/*"]
     }
   ],
   "extraFiles": [
@@ -35,15 +40,14 @@
     }
   ],
   "win": {
-    "icon": "build/icon.png",
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "portable",
         "arch": ["x64"]
       }
     ],
-    "sign": null,
-    "signAndEditExecutable": false
+    "sign": null
   },
   "extraMetadata": {
     "main": "dist-electron/main/index.js"

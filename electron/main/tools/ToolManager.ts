@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { outputTruncator } from '../utils/OutputTruncator';
+import { getPermissionManager } from './PermissionManager';
 
 export interface Tool {
   name: string;
@@ -189,6 +190,28 @@ export class ToolManager {
         args = {};
       }
 
+      // 【权限检查】在执行工具前检查权限
+      const pm = getPermissionManager();
+      const permission = pm.checkPermission(tool.name, args);
+
+      if (permission === 'denied') {
+        const riskLevel = pm.getRiskLevel(tool.name);
+        console.warn(`[ToolManager] Permission DENIED for tool "${tool.name}" (risk: ${riskLevel})`);
+        return {
+          toolCallId: toolCall.id,
+          name: toolCall.function.name,
+          success: false,
+          error: `该操作被权限策略拒绝。工具 "${tool.name}" 的风险等级为 ${riskLevel}，需要更高级别的授权。`,
+        };
+      }
+
+      // Phase 1: 'requires_confirmation' 自动执行但记录警告日志
+      // Phase 2 将在此处弹出前端确认对话框，等待用户响应后再继续
+      if (permission === 'requires_confirmation') {
+        const riskLevel = pm.getRiskLevel(tool.name);
+        console.log(`[ToolManager] Permission: auto-executing "${tool.name}" (risk: ${riskLevel}, confirmation deferred to Phase 2)`);
+      }
+
       // 清理路径参数中数字与中文之间的多余空格（模型常见错误）
       // 注意：跳过带扩展名的文件名（如 "小红帽 0.docx"），只清理纯目录路径
       if (args && typeof args === 'object') {
@@ -236,6 +259,9 @@ export class ToolManager {
       const argsWithId = { ...args, _toolCallId: toolCall.id };
       const result = await tool.handler(argsWithId);
 
+      // 记录工具执行结果到审计日志
+      pm.logExecutionResult(tool.name, 'success');
+
       // 工具输出截断 - 防止大块输出撑爆上下文
       const truncatedResult = await truncateToolOutput(
         result,
@@ -250,6 +276,9 @@ export class ToolManager {
         result: truncatedResult,
       };
     } catch (error: any) {
+      // 记录工具执行失败到审计日志
+      getPermissionManager().logExecutionResult(tool.name, 'failure');
+
       return {
         toolCallId: toolCall.id,
         name: toolCall.function.name,
