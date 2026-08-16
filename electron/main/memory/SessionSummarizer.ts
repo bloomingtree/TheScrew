@@ -69,8 +69,9 @@ class SessionSummarizerClass {
     messages: any[],
     title?: string
   ): Promise<SessionSummary | null> {
-    if (messages.length < 3) {
-      console.log('[SessionSummarizer] 会话消息太少，跳过总结');
+    // P2-1 规范：消息数 < 6 跳过总结，避免空对话浪费 LLM 调用
+    if (messages.length < 6) {
+      console.log(`[SessionSummarizer] 会话消息太少（${messages.length} < 6），跳过总结`);
       return null;
     }
 
@@ -109,8 +110,11 @@ class SessionSummarizerClass {
       const responseText = chunks.join('').trim();
       const summary = this.parseSummaryResponse(responseText, sessionId, messages, title);
 
-      // 保存到文件
+      // 保存结构化 JSON 到 session_summaries/{sessionId}.json（保留原始数据备份）
       await this.saveSessionSummary(summary);
+
+      // 追加 markdown 段到 daily/{今天}.md（供 ContextBuilder 读取注入到 system prompt）
+      await this.appendSummaryToDaily(summary);
 
       return summary;
     } catch (error: any) {
@@ -120,7 +124,90 @@ class SessionSummarizerClass {
   }
 
   /**
-   * 将会话总结追加到当日工作记忆
+   * 将会话总结格式化为 markdown 段并追加到当日 daily 笔记（daily/{今天}.md）
+   *
+   * 段头格式：### HH:MM 会话总结
+   * 包含字段：summary 文本 + keyDecisions + outputFiles + userPreferences + followUps
+   *
+   * 与 ContextBuilder._buildMemorySection() 读取的路径完全一致：
+   *   `{memoryPath}/daily/YYYY-MM-DD.md`
+   */
+  async appendSummaryToDaily(summary: SessionSummary): Promise<void> {
+    const dailyDir = join(this.pathManager.getMemoryPath(), 'daily');
+    await mkdir(dailyDir, { recursive: true });
+
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const dailyPath = join(dailyDir, `${today}.md`);
+
+    // 构造 markdown 段
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const section = this.formatSummaryAsMarkdown(summary, `${hh}:${mm}`);
+
+    // 读取已有内容（若文件不存在则用日期标题作为起始）
+    let existing = '';
+    if (existsSync(dailyPath)) {
+      try {
+        existing = await readFile(dailyPath, 'utf-8');
+      } catch {
+        existing = '';
+      }
+    } else {
+      existing = `# ${today} 工作笔记\n`;
+    }
+
+    // 追加段（确保与已有内容之间有空行分隔）
+    const sep = existing.length > 0 && !existing.endsWith('\n') ? '\n\n' : (existing.endsWith('\n') ? '' : '\n');
+    const newContent = existing + (existing.endsWith('\n') && !existing.endsWith('\n\n') ? '\n' : sep) + section;
+
+    await writeFile(dailyPath, newContent, 'utf-8');
+    console.log(`[SessionSummarizer] 已追加会话总结到 daily/${today}.md`);
+  }
+
+  /**
+   * 将 SessionSummary 格式化为 markdown 段（不含文件 I/O，便于测试）
+   */
+  private formatSummaryAsMarkdown(summary: SessionSummary, hhmm: string): string {
+    const lines: string[] = [];
+    lines.push(`### ${hhmm} 会话总结`);
+    lines.push('');
+    lines.push(`**会话**：${summary.title}（${summary.sessionId.slice(0, 8)}）`);
+    lines.push('');
+    if (summary.summary) {
+      lines.push(`**摘要**：${summary.summary}`);
+      lines.push('');
+    }
+    if (summary.topics.length > 0) {
+      lines.push(`**话题**：${summary.topics.join('、')}`);
+      lines.push('');
+    }
+    if (summary.keyDecisions.length > 0) {
+      lines.push(`**关键决策**：`);
+      for (const d of summary.keyDecisions) lines.push(`- ${d}`);
+      lines.push('');
+    }
+    if (summary.outputFiles.length > 0) {
+      lines.push(`**输出文件**：`);
+      for (const f of summary.outputFiles) lines.push(`- ${f}`);
+      lines.push('');
+    }
+    if (summary.userPreferences.length > 0) {
+      lines.push(`**用户偏好**：`);
+      for (const p of summary.userPreferences) lines.push(`- ${p}`);
+      lines.push('');
+    }
+    if (summary.followUps.length > 0) {
+      lines.push(`**后续跟进**：`);
+      for (const f of summary.followUps) lines.push(`- ${f}`);
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * 将会话总结追加到当日工作记忆（JSON 格式备份）
+   * @deprecated P2 改用 appendSummaryToDaily（markdown 段），本方法保留以兼容外部调用
    */
   async appendToDailyNote(summary: SessionSummary): Promise<void> {
     const dailySummariesDir = this.pathManager.getDailySummariesPath();

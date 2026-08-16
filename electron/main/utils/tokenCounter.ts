@@ -143,8 +143,11 @@ export function compressContext(
   const summary = compressMessagesToSummary(oldMessages);
 
   // 创建压缩摘要消息
+  // 注意：必须用 role: 'user'，不能用 'system'。
+  // DashScope/OpenAI 兼容 API 要求 system 消息只能出现在数组开头，
+  // 压缩后摘要处于中间位置，若用 'system' 会触发 400 "System message must be at the beginning"。
   const summaryMessage: any = {
-    role: 'system',
+    role: 'user',
     content: `【以下是对话历史的压缩摘要，已省略详细内容以节省上下文】\n${summary}\n\n【摘要结束】`,
   };
 

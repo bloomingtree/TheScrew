@@ -1,7 +1,60 @@
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow } from 'electron';
 import { readFile, writeFile, stat } from 'fs/promises';
+import { watch as fsWatch, type FSWatcher } from 'fs';
 import path from 'path';
 import * as XLSX from 'xlsx';
+
+// ============================================================================
+// 预览文件变更监听（支持多窗口、多文件，防抖通知）
+// ============================================================================
+const previewWatchers = new Map<string, FSWatcher>();
+const previewDebounceTimers = new Map<string, NodeJS.Timeout>();
+
+function broadcastPreviewChanged(filepath: string) {
+  // 防抖：同一文件多次变更只在 300ms 后通知一次
+  const norm = path.resolve(filepath);
+  const existing = previewDebounceTimers.get(norm);
+  if (existing) clearTimeout(existing);
+  previewDebounceTimers.set(
+    norm,
+    setTimeout(() => {
+      previewDebounceTimers.delete(norm);
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('filePreview:fileChanged', { path: norm });
+      }
+    }, 300)
+  );
+}
+
+function startPreviewWatch(filepath: string) {
+  const norm = path.resolve(filepath);
+  // 已在监听则跳过
+  if (previewWatchers.has(norm)) return;
+  try {
+    const watcher = fsWatch(norm, { persistent: false }, (_event, _filename) => {
+      broadcastPreviewChanged(norm);
+    });
+    watcher.on('error', () => {
+      previewWatchers.delete(norm);
+    });
+    previewWatchers.set(norm, watcher);
+  } catch {
+    // 文件不存在或无权限，静默忽略
+  }
+}
+
+function stopPreviewWatch(filepath: string) {
+  const norm = path.resolve(filepath);
+  const w = previewWatchers.get(norm);
+  if (w) {
+    try {
+      w.close();
+    } catch {
+      // ignore
+    }
+    previewWatchers.delete(norm);
+  }
+}
 
 // ============================================================================
 // 文件预览 IPC 处理器
@@ -330,6 +383,26 @@ export function registerFilePreviewHandlers() {
       return { success: true, canPreview, type };
     } catch (error: any) {
       return { success: false, error: error.message, canPreview: false };
+    }
+  });
+
+  // 监听预览文件变更（组件挂载时调用）
+  ipcMain.handle('filePreview:watch', async (_event, filepath: string) => {
+    try {
+      startPreviewWatch(filepath);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // 停止监听预览文件变更（组件卸载时调用）
+  ipcMain.handle('filePreview:unwatch', async (_event, filepath: string) => {
+    try {
+      stopPreviewWatch(filepath);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
     }
   });
 

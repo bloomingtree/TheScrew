@@ -190,6 +190,9 @@ interface ElectronAPI {
       success: boolean;
       error?: string;
     }>;
+    watchFile: (filepath: string) => Promise<{ success: boolean; error?: string }>;
+    unwatchFile: (filepath: string) => Promise<{ success: boolean; error?: string }>;
+    onFileChanged: (callback: (data: { path: string }) => void) => () => void;
   };
   // Word 文档 API
   word: {
@@ -316,6 +319,7 @@ interface ElectronAPI {
     delete: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
   memory: {
+    // ===== MemoryStore IPC =====
     getLongTerm: () => Promise<{ success: boolean; content?: string; error?: string }>;
     addLongTerm: (content: string, tags?: string[]) => Promise<{ success: boolean; error?: string }>;
     getTodayNote: () => Promise<{ success: boolean; content?: string; error?: string }>;
@@ -328,11 +332,30 @@ interface ElectronAPI {
       maxDays?: number;
       maxResults?: number;
     }) => Promise<{ success: boolean; results?: any[]; error?: string }>;
-    buildContext: () => Promise<{ success: boolean; context?: string; error?: string }>;
+    getStats: () => Promise<{
+      success: boolean;
+      stats?: {
+        longTermMemorySize: number;
+        dailyNotesCount: number;
+        totalMemories: number;
+      };
+      error?: string;
+    }>;
     delete: (type: 'long_term' | 'daily_note', dateString?: string) => Promise<{ success: boolean; error?: string }>;
-    getStats: () => Promise<{ success: boolean; stats?: any; error?: string }>;
     clearAll: () => Promise<{ success: boolean; error?: string }>;
-    // Session summarizer methods
+    // 扩展：读取/列出文件（供前端 MemoryPanel 使用）
+    readFile: (relPath: string) => Promise<{
+      success: boolean;
+      content?: string;
+      path?: string;
+      error?: string;
+    }>;
+    listFiles: (scope?: 'topics' | 'daily' | 'all') => Promise<{
+      success: boolean;
+      files?: Array<{ name: string; relPath: string }>;
+      error?: string;
+    }>;
+    // ===== SessionSummarizer IPC =====
     summarizeSession: (sessionId: string, messages: any[]) => Promise<{ success: boolean; summary?: any; error?: string }>;
     getDailySummary: (dateString: string) => Promise<{ success: boolean; summary?: any; error?: string }>;
     getRecentSummaries: (days?: number) => Promise<{ success: boolean; summaries?: any[]; error?: string }>;
@@ -455,15 +478,44 @@ interface ElectronAPI {
   // 用户提问工具
   onUserQuestion: (callback: (data: {
     questionId: string;
-    question: string;
-    options: Array<{ label: string; value: string; description?: string }>;
-    allow_custom: boolean;
-    custom_placeholder: string;
+    questions: Array<{
+      question: string;
+      header: string;
+      options: Array<{ label: string; description?: string }>;
+      multiSelect: boolean;
+      allowOther: boolean;
+    }>;
   }) => void) => () => void;
-  answerQuestion: (questionId: string, answer: string) => Promise<{
+  answerQuestion: (questionId: string, answers: Record<string, string | string[]>) => Promise<{
     success: boolean;
     error?: string;
   }>;
+
+  // 任务列表（与 AI 工具共享 tasks.json）
+  listTasks: () => Promise<{
+    success: boolean;
+    tasks: Array<{
+      id: string;
+      humanId: string;
+      title: string;
+      description: string;
+      status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+      priority: 'high' | 'medium' | 'low';
+      tags: string[];
+      dueDate: string | null;
+      createdAt: string;
+      updatedAt: string;
+      completedAt: string | null;
+      notes: string[];
+      subtasks: Array<{ id: string; title: string; completed: boolean }>;
+    }>;
+    error?: string;
+  }>;
+  updateTaskStatus: (
+    id: string,
+    status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  ) => Promise<{ success: boolean; error?: string }>;
+  onTasksChanged: (callback: () => void) => () => void;
 }
 
 declare global {

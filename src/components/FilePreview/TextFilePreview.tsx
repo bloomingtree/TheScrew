@@ -3,6 +3,7 @@ import { File, X, Search, Maximize2, Minimize2, Edit3, Save, XCircle, Code } fro
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTabStore } from '@/store/tabStore';
+import { useFilePreviewWatcher } from '@/hooks/useFilePreviewWatcher';
 
 interface TextFilePreviewProps {
   filepath: string;
@@ -53,6 +54,9 @@ const TextFilePreview: React.FC<TextFilePreviewProps> = ({ filepath }) => {
       setLoading(false);
     }
   };
+
+  // 监听磁盘文件变更，自动重新加载（编辑模式下禁用，避免覆盖用户输入）
+  useFilePreviewWatcher(filepath, loadFile, !isEditing);
 
   const handleSave = async () => {
     setSaving(true);

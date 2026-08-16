@@ -9,7 +9,9 @@
  */
 
 import { readFile } from 'fs/promises';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { getPathManager } from '../config/PathManager';
 import {
   HeartbeatConfig,
   HeartbeatCallback,
@@ -18,6 +20,50 @@ import {
   HEARTBEAT_OK_TOKEN,
   HEARTBEAT_PROMPT,
 } from './types';
+
+// ============================================================================
+// 常量（P2-4）
+// ============================================================================
+
+/** MEMORY.md 超长阈值（行数） */
+const MEMORY_INDEX_MAX_LINES = 200;
+
+/** MEMORY.md 超长时注入的触发消息（替代 HEARTBEAT_PROMPT） */
+const MEMORY_OVERSIZE_PROMPT = `MEMORY.md 已超过 200 行（当前 {N} 行），请把详细内容拆分到 topics/*.md，本文件只保留索引和链接。
+
+**步骤**：
+1. 先用 memory_read(target: 'index') 读取当前 MEMORY.md 全文
+2. 识别哪些章节过于详细（如整段的调试日志、完整的项目说明）
+3. 把详细内容用 memory_save 写到对应的 topics/*.md：
+   - 用户偏好 → topics/user-profile.md
+   - 项目事实 → topics/project-facts.md
+   - 反复出现的 bug → topics/recurring-bugs.md
+   - 调试经验 → topics/debugging-notes.md
+4. 用 memory_save(topic: 'memory-index', mode: 'replace') 重写 MEMORY.md 为精简索引，每章节只保留 2-3 行总结 + 链接到 topics/*.md 的相对路径
+5. 重写后 MEMORY.md 应 < 100 行
+
+**注意**：不要丢失任何关键信息，只是从 MEMORY.md 移到 topics/。`;
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+/**
+ * 计算 MEMORY.md 行数；若文件不存在返回 0（P2-4）
+ */
+function getMemoryIndexLineCount(): number {
+  try {
+    const indexPath = join(getPathManager().getMemoryPath(), 'MEMORY.md');
+    if (!existsSync(indexPath)) {
+      return 0;
+    }
+    const content = readFileSync(indexPath, 'utf-8');
+    // 用 split('\n') 而非 match(/\n/g)，确保空文件返回 0 而非 undefined
+    return content.split('\n').length;
+  } catch {
+    return 0;
+  }
+}
 
 // ============================================================================
 // Utilities
@@ -229,8 +275,20 @@ export class HeartbeatService {
 
     // Execute heartbeat callback
     if (this.onHeartbeat) {
+      // P2-4: 检查 MEMORY.md 行数；超长则改用 MEMORY 整理 prompt
+      let prompt = HEARTBEAT_PROMPT;
       try {
-        const response = await this.onHeartbeat(HEARTBEAT_PROMPT);
+        const lineCount = getMemoryIndexLineCount();
+        if (lineCount > MEMORY_INDEX_MAX_LINES) {
+          prompt = MEMORY_OVERSIZE_PROMPT.replace('{N}', String(lineCount));
+          console.log(`[HeartbeatService] MEMORY.md 行数 ${lineCount} > ${MEMORY_INDEX_MAX_LINES}，改用 MEMORY 整理 prompt`);
+        }
+      } catch (e: any) {
+        console.warn('[HeartbeatService] 检查 MEMORY.md 行数失败（非致命）:', e?.message || e);
+      }
+
+      try {
+        const response = await this.onHeartbeat(prompt);
 
         // Check if agent said "nothing to do"
         const normalizedResponse = response.toUpperCase().replace(/_/g, '');

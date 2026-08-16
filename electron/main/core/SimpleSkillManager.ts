@@ -160,7 +160,8 @@ export class SimpleSkillManager {
     const content = await readFile(path, 'utf-8');
 
     // 解析 YAML frontmatter（简单的正则解析）
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    // 同时兼容 \n 和 \r\n 行尾
+    const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 
     let name = category;
     let description = '';
@@ -531,21 +532,42 @@ ${sections.join('\n\n')}`;
     }
 
     // 查找 SKILL.md 文件，确定技能名
+    // 同时兼容 / 和 \ 分隔符（Windows 创建的 zip 常用 \）
+    const normalize = (p: string) => p.replace(/\\/g, '/');
     const skillMdEntry = zipEntries.find(e =>
-      !e.isDirectory && e.entryName.endsWith('SKILL.md')
+      !e.isDirectory && normalize(e.entryName).endsWith('SKILL.md')
     );
 
     if (!skillMdEntry) {
       throw new Error('Invalid skill zip: SKILL.md not found');
     }
 
-    // 提取技能名（zip 根目录名）
-    const pathParts = skillMdEntry.entryName.split('/');
-    const skillName = pathParts[0];
+    const normalizedMdPath = normalize(skillMdEntry.entryName);
+    const pathParts = normalizedMdPath.split('/');
+
+    // 两种支持结构：
+    //   A) skill-name/SKILL.md       （有外层目录，技能名 = 目录名）
+    //   B) SKILL.md                  （无外层目录，技能名从 frontmatter 读取）
+    let skillName: string | undefined;
+    if (pathParts.length > 1) {
+      skillName = pathParts[0];
+    } else {
+      // 从 SKILL.md frontmatter 提取 name 字段
+      // 同时兼容 \n 和 \r\n 行尾
+      const mdContent = skillMdEntry.getData().toString('utf-8');
+      const fmMatch = mdContent.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (fmMatch) {
+        const nameMatch = fmMatch[1].match(/^name:\s*(\S+)/m);
+        if (nameMatch) skillName = nameMatch[1];
+      }
+    }
 
     if (!skillName) {
-      throw new Error('Invalid skill zip: cannot determine skill name');
+      throw new Error('Invalid skill zip: cannot determine skill name (provide a wrapping directory or a "name:" field in SKILL.md frontmatter)');
     }
+
+    // 外层目录前缀（结构 A 才有；结构 B 为空字符串）
+    const prefix = pathParts.length > 1 ? `${skillName}/` : '';
 
     // 创建技能目录
     const skillDir = join(this.workspaceSkillsDir, skillName);
@@ -555,9 +577,10 @@ ${sections.join('\n\n')}`;
     for (const entry of zipEntries) {
       if (entry.isDirectory) continue;
 
-      // 去掉根目录前缀（skill-name/）
-      const relativePath = entry.entryName.substring(skillName.length + 1);
-      if (!relativePath) continue;
+      // 统一分隔符并去掉外层目录前缀
+      const normalized = normalize(entry.entryName);
+      const relativePath = prefix ? normalized.substring(prefix.length) : normalized;
+      if (!relativePath || relativePath.endsWith('/')) continue;
 
       const targetPath = join(skillDir, relativePath);
       const targetDir = join(targetPath, '..');
@@ -597,7 +620,12 @@ ${sections.join('\n\n')}`;
   /**
    * 从 Buffer 导入技能（自动检测 zip 或 JSON 格式）
    */
-  async importSkillFromBuffer(buffer: Buffer): Promise<SkillMeta> {
+  async importSkillFromBuffer(buffer: Buffer | Uint8Array): Promise<SkillMeta> {
+    // IPC 从渲染层传入的 Uint8Array 不是 Node Buffer，
+    // adm-zip 依赖 Buffer 的方法，直接传入会静默解析失败返回 0 个 entry
+    if (!Buffer.isBuffer(buffer)) {
+      buffer = Buffer.from(buffer);
+    }
     // 尝试检测是否为 zip 文件（zip 文件以 PK 签名开头）
     const isZip = buffer.length >= 4 &&
       buffer[0] === 0x50 && buffer[1] === 0x4B; // 'PK'

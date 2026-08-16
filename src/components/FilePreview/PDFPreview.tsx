@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FileText, ExternalLink, RefreshCw, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
+import { useFilePreviewWatcher } from '@/hooks/useFilePreviewWatcher';
 
 interface PDFPreviewProps {
   filepath: string;
@@ -50,6 +51,9 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ filepath }) => {
   useEffect(() => {
     loadFile();
   }, [loadFile]);
+
+  // 监听磁盘文件变更，自动重新加载
+  useFilePreviewWatcher(filepath, loadFile);
 
   // 使用 pdfjs-dist 渲染页面
   useEffect(() => {

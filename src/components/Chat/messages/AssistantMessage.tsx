@@ -24,34 +24,110 @@ interface AssistantMessageProps {
  *  2. --- 分隔符（模型在 content 中用 --- 分割思考与正式回答）
  *  3. reasoning_content 字段（由 OpenAI client 在流式层处理）
  */
-function extractThinkingFromContent(content: string): { thinking: string | null; cleanContent: string } {
-  // 1. 先尝试 <think > 标签
+function extractThinkingFromContent(content: string | null | undefined): { thinking: string | null; cleanContent: string } {
+  // 只用 <think >...</think > 标签提取思考内容
+  // 注意：流式层（openai.ts 的 ThinkTagParser）已实时解析这些标签，
+  // 此函数仅作为持久化消息渲染时的 fallback。
+  // 不再用 --- 分隔符作为 fallback（会误把正文中的水平线当成思考边界）
+
+  // content 可能为 null/undefined（纯工具调用消息没有文本内容）
+  if (!content) {
+    return { thinking: null, cleanContent: '' };
+  }
+
+  // 1. 先尝试成对 <think>...</think>
   const thinkRegex = /<think\s*>([\s\S]*?)<\/think\s*>/gi;
   const matches: string[] = [];
   let cleanContent = content.replace(thinkRegex, (_, inner) => {
     matches.push(inner.trim());
     return '';
   });
-  cleanContent = cleanContent.replace(/^\s*\n/, '').replace(/\n\s*$/, '').trim();
   if (matches.length > 0) {
+    cleanContent = cleanContent.replace(/^\s*\n/, '').replace(/\n\s*$/, '').trim();
     return { thinking: matches.join('\n'), cleanContent };
   }
 
-  // 2. 尝试 --- 分隔符（第一个独立行的 --- 作为分界线）
-  const separatorRegex = /^[ \t]*---[ \t]*$/m;
-  const separatorIdx = content.search(separatorRegex);
-  if (separatorIdx > 0) {
-    // 分隔符之前的内容作为思考，之后的内容作为正式回答
-    const before = content.substring(0, separatorIdx).trim();
-    const after = content.substring(separatorIdx).replace(separatorRegex, '').trim();
-    // 只有当分隔符前有实质内容时才视为思考内容
-    if (before.length > 0 && after.length > 0) {
-      return { thinking: before, cleanContent: after };
-    }
+  // 2. 单边闭合：模型只输出 `思考内容</think>正式回答`（无 <think> 开标签）
+  const closeIdx = content.search(/<\/think\s*>/i);
+  if (closeIdx !== -1) {
+    let thinking = content.substring(0, closeIdx);
+    // 剥离残留的孤立 <think> 开标签
+    thinking = thinking.replace(/<think\s*>/gi, '').trim();
+    const closeMatch = content.match(/<\/think\s*>/i);
+    const afterClose = closeMatch
+      ? content.substring(closeIdx + closeMatch[0].length)
+      : content.substring(closeIdx);
+    const cleanContent = afterClose.replace(/^\s*\n/, '').replace(/\n\s*$/, '').trim();
+    return { thinking: thinking || null, cleanContent };
   }
 
   return { thinking: null, cleanContent: content };
 }
+
+/** Markdown 渲染配置（顶层回复与嵌套 markdown 代码块共用） */
+const markdownComponents = {
+  code(props: any) {
+    const { inline, className, children, ...rest } = props;
+    const match = /language-(\w+)/.exec(className || '');
+    // 嵌套的 markdown 代码块：渲染为真实 Markdown（表格/列表等正常显示），而非原始代码
+    if (!inline && match && ['markdown', 'md'].includes(match[1])) {
+      return (
+        <div className="my-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50 overflow-x-auto">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {String(children).replace(/\n$/, '')}
+          </ReactMarkdown>
+        </div>
+      );
+    }
+    return !inline && match ? (
+      <SyntaxHighlighter
+        style={vscDarkPlus as any}
+        language={match[1]}
+        PreTag="div"
+        customStyle={{ borderRadius: '6px', fontSize: '13px' }}
+        {...rest}
+      >
+        {String(children).replace(/\n$/, '')}
+      </SyntaxHighlighter>
+    ) : (
+      <code
+        className="px-1.5 py-0.5 rounded text-xs font-mono"
+        style={{ backgroundColor: '#f3f4f6', color: '#e11d48' }}
+        {...rest}
+      >
+        {children}
+      </code>
+    );
+  },
+  p({ children }: any) {
+    return <p className="md-fade-in my-1 text-[#374151] text-sm leading-relaxed">{children}</p>;
+  },
+  ul({ children }: any) {
+    return <ul className="md-fade-in my-1 pl-5 list-disc text-sm text-[#374151]" style={{ listStyleType: 'disc' }}>{children}</ul>;
+  },
+  ol({ children }: any) {
+    return <ol className="md-fade-in my-1 pl-5 list-decimal text-sm text-[#374151]" style={{ listStyleType: 'decimal' }}>{children}</ol>;
+  },
+  li({ children }: any) {
+    return <li className="md-fade-in my-0.5">{children}</li>;
+  },
+  table({ children }: any) {
+    return (
+      <div className="md-fade-in overflow-x-auto my-2">
+        <table className="min-w-full border-collapse text-sm text-[#374151]">{children}</table>
+      </div>
+    );
+  },
+  thead({ children }: any) {
+    return <thead className="bg-gray-100">{children}</thead>;
+  },
+  th({ children }: any) {
+    return <th className="border border-gray-300 px-3 py-1.5 text-left font-semibold">{children}</th>;
+  },
+  td({ children }: any) {
+    return <td className="border border-gray-300 px-3 py-1.5">{children}</td>;
+  },
+};
 
 /** 思考折叠块组件 */
 const ThinkingBlock: React.FC<{ content: string }> = ({ content }) => {
@@ -159,59 +235,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
                 <div className="prose prose-sm max-w-none prose-p:max-w-none prose-headings:max-w-none">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
-                    components={{
-                      code(props: any) {
-                        const { inline, className, children, ...rest } = props;
-                        const match = /language-(\w+)/.exec(className || '');
-                        return !inline && match ? (
-                          <SyntaxHighlighter
-                            style={vscDarkPlus as any}
-                            language={match[1]}
-                            PreTag="div"
-                            customStyle={{ borderRadius: '6px', fontSize: '13px' }}
-                            {...rest}
-                          >
-                            {String(children).replace(/\n$/, '')}
-                          </SyntaxHighlighter>
-                        ) : (
-                          <code
-                            className="px-1.5 py-0.5 rounded text-xs font-mono"
-                            style={{ backgroundColor: '#f3f4f6', color: '#e11d48' }}
-                            {...rest}
-                          >
-                            {children}
-                          </code>
-                        );
-                      },
-                      p({ children }) {
-                        return <p className="my-1 text-[#374151] text-sm leading-relaxed">{children}</p>;
-                      },
-                      ul({ children }) {
-                        return <ul className="my-1 pl-5 list-disc text-sm text-[#374151]" style={{ listStyleType: 'disc' }}>{children}</ul>;
-                      },
-                      ol({ children }) {
-                        return <ol className="my-1 pl-5 list-decimal text-sm text-[#374151]" style={{ listStyleType: 'decimal' }}>{children}</ol>;
-                      },
-                      li({ children }) {
-                        return <li className="my-0.5">{children}</li>;
-                      },
-                      table({ children }) {
-                        return (
-                          <div className="overflow-x-auto my-2">
-                            <table className="min-w-full border-collapse text-sm text-[#374151]">{children}</table>
-                          </div>
-                        );
-                      },
-                      thead({ children }) {
-                        return <thead className="bg-gray-100">{children}</thead>;
-                      },
-                      th({ children }) {
-                        return <th className="border border-gray-300 px-3 py-1.5 text-left font-semibold">{children}</th>;
-                      },
-                      td({ children }) {
-                        return <td className="border border-gray-300 px-3 py-1.5">{children}</td>;
-                      },
-                    }}
+                    components={markdownComponents}
                   >
                     {displayContent}
                   </ReactMarkdown>

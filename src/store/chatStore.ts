@@ -1,13 +1,6 @@
 import { create } from 'zustand';
 import { ToolCall, ToolResult, ToolExecution } from '../types';
 
-interface Task {
-  id: string;
-  content: string;
-  completed: boolean;
-  createdAt: number;
-}
-
 interface TokenUsage {
   current: number;
   max: number;
@@ -29,7 +22,6 @@ interface ChatState {
     argLength?: number;
     timestamp: number;
   }>;
-  tasks: Task[];
   tokenUsage: TokenUsage;
 
   // 消息操作（保持顺序）
@@ -54,9 +46,6 @@ interface ChatState {
     timestamp: number;
   }) => void;
   clearToolCallWriting: (toolCallId: string) => void;
-  addTask: (content: string) => void;
-  toggleTask: (id: string) => void;
-  removeTask: (id: string) => void;
   setTokenUsage: (usage: Partial<TokenUsage>) => void;
 }
 
@@ -68,7 +57,6 @@ export const useChatStore = create<ChatState>((set) => ({
   toolResults: [],
   toolExecutions: new Map(),
   toolCallWritingMap: new Map(),
-  tasks: [],
   tokenUsage: {
     current: 0,
     max: 128000,
@@ -88,6 +76,8 @@ export const useChatStore = create<ChatState>((set) => ({
 
     // 只更新最后一条 assistant 消息的内容
     if (updated[lastIdx].role === 'assistant') {
+      // 同值守卫：内容未变化时不产生新数组，避免无效重渲染
+      if (updated[lastIdx].content === content) return state;
       updated[lastIdx] = {
         ...updated[lastIdx],
         content,
@@ -104,6 +94,8 @@ export const useChatStore = create<ChatState>((set) => ({
     const lastIdx = updated.length - 1;
 
     if (updated[lastIdx].role === 'assistant') {
+      // 同值守卫：思考内容未变化时不产生新数组
+      if (updated[lastIdx].thinkingContent === thinking) return state;
       updated[lastIdx] = {
         ...updated[lastIdx],
         thinkingContent: thinking,
@@ -193,28 +185,6 @@ export const useChatStore = create<ChatState>((set) => ({
     map.delete(toolCallId);
     return { toolCallWritingMap: map };
   }),
-
-  addTask: (content) => set((state) => ({
-    tasks: [
-      ...state.tasks,
-      {
-        id: Date.now().toString(),
-        content,
-        completed: false,
-        createdAt: Date.now(),
-      },
-    ],
-  })),
-
-  toggleTask: (id) => set((state) => ({
-    tasks: state.tasks.map((task) =>
-      task.id === id ? { ...task, completed: !task.completed } : task
-    ),
-  })),
-
-  removeTask: (id) => set((state) => ({
-    tasks: state.tasks.filter((task) => task.id === id),
-  })),
 
   setTokenUsage: (usage) => set((state) => ({
     tokenUsage: { ...state.tokenUsage, ...usage },

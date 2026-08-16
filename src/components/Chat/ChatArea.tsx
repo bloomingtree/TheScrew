@@ -5,7 +5,7 @@ import MessageList from './MessageList';
 import InputArea from './InputArea';
 import WorkspaceSelector from '../Workspace/WorkspaceSelector';
 import DropZone from './DropZone';
-import UserQuestionDialog from './UserQuestionDialog';
+import EditedFilesBar from './EditedFilesBar';
 
 const ChatArea: React.FC = () => {
   const { currentConversationId, createConversation, updateConversationMessages } = useConversationStore();
@@ -16,10 +16,13 @@ const ChatArea: React.FC = () => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [pendingQuestion, setPendingQuestion] = useState<{
     questionId: string;
-    question: string;
-    options: Array<{ label: string; value: string; description?: string }>;
-    allow_custom: boolean;
-    custom_placeholder: string;
+    questions: Array<{
+      question: string;
+      header: string;
+      options: Array<{ label: string; description?: string }>;
+      multiSelect: boolean;
+      allowOther: boolean;
+    }>;
   } | null>(null);
   const hasInitialized = useRef(false);
   const lastSyncedMessagesRef = useRef<any[]>([]);
@@ -199,9 +202,9 @@ const ChatArea: React.FC = () => {
     return cleanup;
   }, []);
 
-  const handleAnswerQuestion = async (questionId: string, answer: string) => {
+  const handleAnswerQuestion = async (questionId: string, answers: Record<string, string | string[]>) => {
     try {
-      await window.electronAPI.answerQuestion(questionId, answer);
+      await window.electronAPI.answerQuestion(questionId, answers);
     } catch (error) {
       console.error('[ChatArea] Failed to send answer:', error);
     }
@@ -210,8 +213,8 @@ const ChatArea: React.FC = () => {
 
   const handleDismissQuestion = () => {
     if (pendingQuestion) {
-      // 发送空回答表示用户跳过
-      window.electronAPI.answerQuestion(pendingQuestion.questionId, '').catch(() => {});
+      // 发送空对象表示用户取消
+      window.electronAPI.answerQuestion(pendingQuestion.questionId, {}).catch(() => {});
     }
     setPendingQuestion(null);
   };
@@ -292,8 +295,14 @@ const ChatArea: React.FC = () => {
       <DropZone isActive={isDragOver} />
 
       <div className="flex-1 overflow-hidden min-h-0">
-        <MessageList />
+        <MessageList
+          pendingQuestion={pendingQuestion}
+          onAnswerQuestion={handleAnswerQuestion}
+          onDismissQuestion={handleDismissQuestion}
+        />
       </div>
+      {/* 本次对话已编辑文档的快捷访问条 */}
+      <EditedFilesBar />
       <div className="flex-shrink-0">
         <InputArea ref={inputAreaRef} onNewChat={handleNewChat} />
       </div>
@@ -301,11 +310,6 @@ const ChatArea: React.FC = () => {
         isOpen={showWorkspaceSelector}
         onClose={() => setShowWorkspaceSelector(false)}
         onWorkspaceSelect={handleWorkspaceSelect}
-      />
-      <UserQuestionDialog
-        question={pendingQuestion}
-        onAnswer={handleAnswerQuestion}
-        onDismiss={handleDismissQuestion}
       />
     </div>
   );

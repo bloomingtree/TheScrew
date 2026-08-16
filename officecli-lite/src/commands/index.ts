@@ -241,10 +241,15 @@ async function cmdBatch(filePath: string, _args: string[], options: CLIOptions):
     if (!result.success) break; // Stop on first error
   }
 
+  const okCount = results.filter(r => r.success).length;
+  const allOk = okCount === commands.length;
+  // 失败时必须提供 error 字段，否则 runCommand 会输出 "Error: undefined"
+  const firstFailure = results.find(r => !r.success);
   return {
-    success: results.every(r => r.success),
+    success: allOk,
     data: results,
-    message: `${results.length}/${commands.length} commands succeeded`,
+    message: `${okCount}/${commands.length} commands succeeded`,
+    error: allOk ? undefined : (firstFailure?.error ?? `${okCount}/${commands.length} commands succeeded`),
   };
 }
 
@@ -301,6 +306,22 @@ async function cmdApplyStyle(filePath: string, args: string[], options: CLIOptio
   } finally {
     if (templateDoc) closeDocument(templateDoc);
     if (targetDoc) closeDocument(targetDoc);
+  }
+}
+
+async function cmdValidate(filePath: string, _args: string[], options: CLIOptions): Promise<CommandResult> {
+  let doc: OOXMLDocument | null = null;
+  try {
+    doc = await openDocument(filePath);
+    const handler = getHandler(doc.docType);
+    if (!handler.validate) {
+      return { success: false, error: `validate not supported for .${doc.docType}` };
+    }
+    return await handler.validate(doc, options);
+  } catch (err: unknown) {
+    return { success: false, error: String((err as Error).message ?? err) };
+  } finally {
+    if (doc) closeDocument(doc);
   }
 }
 
@@ -410,6 +431,13 @@ export const COMMANDS: Record<string, CommandEntry> = {
     handler: cmdApplyStyle,
     minArgs: 1,
     usage: 'applyStyle <target_file> <template_file>',
+  },
+  validate: {
+    name: 'validate',
+    description: 'Validate document structure (OOXML compliance check)',
+    handler: cmdValidate,
+    minArgs: 0,
+    usage: 'validate <file>',
   },
 };
 

@@ -2,6 +2,123 @@ import axios from 'axios';
 import { ThinkingMode } from '../config/AppConfigStore';
 
 /**
+ * 流式 <think>...</think> 标签解析器（状态机）
+ *
+ * 用于处理将思考内容写在 content 字段里（而非 reasoning_content）的模型。
+ * 维护跨 chunk 的解析状态，正确处理：
+ * - 标签被拆分到多个 chunk 的情况（缓冲尾部可能的标签前缀）
+ * - 多对 <think>...</think> 标签
+ * - 未闭合的 <think> 标签（stream end 时 flush）
+ *
+ * 用法：
+ *   const parser = new ThinkTagParser();
+ *   for each chunk: const pieces = parser.feed(chunk);
+ *   at end: const trailing = parser.flush();
+ */
+class ThinkTagParser {
+  private inThink = false;
+  /**
+   * "单边闭合"模式标志：当模型只输出 `</think>` 而无 `<think>` 开标签时启用。
+   * 一旦识别到此模式，outside 状态下遇到 `</think>` 会把之前累积的 content 视为 thinking。
+   */
+  private soloCloseMode = false;
+  private buffer = '';
+
+  /** 匹配可能被截断的 <think> 开标签前缀（如 "<t", "<th", ..., "<think "） */
+  private static readonly PARTIAL_OPEN = /<t(?:h(?:i(?:n(?:k(?:\s+)?)?)?)?)?$/i;
+  /** 匹配可能被截断的 </think> 闭标签前缀 */
+  private static readonly PARTIAL_CLOSE = /<\/t(?:h(?:i(?:n(?:k(?:\s+)?)?)?)?)?$/i;
+
+  feed(text: string): Array<{ type: 'thinking' | 'content'; text: string }> {
+    this.buffer += text;
+    const out: Array<{ type: 'thinking' | 'content'; text: string }> = [];
+    const OPEN_TAG = /<think\s*>/gi;
+    const CLOSE_TAG = /<\/think\s*>/gi;
+
+    let safety = 200; // 防止意外死循环
+    while (this.buffer.length > 0 && safety-- > 0) {
+      if (this.inThink) {
+        CLOSE_TAG.lastIndex = 0;
+        const match = this.buffer.match(CLOSE_TAG);
+        if (match && match.index !== undefined) {
+          const before = this.buffer.substring(0, match.index);
+          if (before) out.push({ type: 'thinking', text: before });
+          this.buffer = this.buffer.substring(match.index + match[0].length);
+          this.inThink = false;
+        } else {
+          // 没找到闭标签。检查 buffer 尾部是否有可能是 </think 前缀
+          const partial = this.buffer.match(ThinkTagParser.PARTIAL_CLOSE);
+          if (partial && partial.index !== undefined) {
+            if (partial.index > 0) {
+              out.push({ type: 'thinking', text: this.buffer.substring(0, partial.index) });
+            }
+            this.buffer = this.buffer.substring(partial.index);
+          } else {
+            if (this.buffer) out.push({ type: 'thinking', text: this.buffer });
+            this.buffer = '';
+          }
+          break; // 等待更多 chunk
+        }
+      } else {
+        // outside 状态：同时查找 OPEN_TAG 和 CLOSE_TAG，比较谁先出现
+        OPEN_TAG.lastIndex = 0;
+        CLOSE_TAG.lastIndex = 0;
+        const openMatch = this.buffer.match(OPEN_TAG);
+        const closeMatch = this.buffer.match(CLOSE_TAG);
+        const openIdx = openMatch && openMatch.index !== undefined ? openMatch.index : -1;
+        const closeIdx = closeMatch && closeMatch.index !== undefined ? closeMatch.index : -1;
+
+        // 检测单边闭合模式：CLOSE 出现且早于 OPEN（或没有 OPEN）
+        // 一旦进入 soloCloseMode，后续的 CLOSE 都按单边规则处理
+        if (closeIdx !== -1 && (openIdx === -1 || closeIdx < openIdx)) {
+          // 把 </think> 之前的内容视为 thinking
+          const before = this.buffer.substring(0, closeIdx);
+          if (before) out.push({ type: 'thinking', text: before });
+          this.buffer = this.buffer.substring(closeIdx + closeMatch![0].length);
+          this.soloCloseMode = true;
+          // 保持在 outside 状态；之后的内容作为 content，直到再次遇到 </think>
+          continue;
+        }
+
+        if (openIdx !== -1) {
+          const before = this.buffer.substring(0, openIdx);
+          if (before) out.push({ type: 'content', text: before });
+          this.buffer = this.buffer.substring(openIdx + openMatch![0].length);
+          this.inThink = true;
+        } else {
+          // 单边闭合模式下，缓冲尾部可能有部分 </think 前缀需要保留
+          const partial = this.soloCloseMode
+            ? this.buffer.match(ThinkTagParser.PARTIAL_CLOSE)
+            : this.buffer.match(ThinkTagParser.PARTIAL_OPEN);
+          if (partial && partial.index !== undefined) {
+            if (partial.index > 0) {
+              // 单边模式下，partial 之前的内容仍按 content 输出（等待确认是否还有 </think>）
+              out.push({ type: 'content', text: this.buffer.substring(0, partial.index) });
+            }
+            this.buffer = this.buffer.substring(partial.index);
+          } else {
+            if (this.buffer) out.push({ type: 'content', text: this.buffer });
+            this.buffer = '';
+          }
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  /** 流结束时调用，冲刷残留 buffer */
+  flush(): Array<{ type: 'thinking' | 'content'; text: string }> {
+    if (!this.buffer) return [];
+    const result = [{ type: (this.inThink ? 'thinking' : 'content') as 'thinking' | 'content', text: this.buffer }];
+    this.buffer = '';
+    this.inThink = false;
+    this.soloCloseMode = false;
+    return result;
+  }
+}
+
+/**
  * 安全的 JSON.stringify，处理循环引用
  */
 function safeStringify(obj: any, indent?: number | string): string {
@@ -25,10 +142,19 @@ function safeStringify(obj: any, indent?: number | string): string {
  * 清理消息，只保留 OpenAI API 规范字段
  * 移除非标准字段（id、thinkingContent、images、attachments 等）
  * DashScope 等严格 API 会对非标准字段返回 400 错误
+ *
+ * 额外防护：强制 system 消息只能出现在数组开头。
+ * 某些代码路径（工具次数警告、上下文压缩摘要）可能错误地在中间插入 system 消息，
+ * 这会触发 "System message must be at the beginning of the conversation" 400 错误。
+ * 这里将任何非首位的 system 消息降级为 user 消息作为兜底。
  */
 function sanitizeMessages(messages: any[]): any[] {
-  return messages.map(msg => {
-    const role = msg.role;
+  return messages.map((msg, idx) => {
+    // 兜底：非首位的 system 消息降级为 user，避免 400 错误
+    let role = msg.role;
+    if (role === 'system' && idx > 0) {
+      role = 'user';
+    }
 
     switch (role) {
       case 'system':
@@ -385,15 +511,25 @@ export class OpenAIClient {
     const stream = response.data;
     // 使用 index → toolCall 的 Map 来支持并行工具调用
     const toolCallMap: Map<number, any> = new Map();
-    let buffer = '';
+    let buffer = Buffer.alloc(0);
     let contentChunks: string[] = [];
 
-    for await (const chunk of stream) {
-      const chunkStr = chunk.toString();
-      buffer += chunkStr;
+    // <think>...</think> 标签解析器：某些模型（如 vLLM/DLMox）将思考内容
+    // 直接写在 content 字段里（而非 reasoning_content），需要流式层实时识别并转换。
+    // 解析后：think 标签内的内容 → \x01THINKING\x02 sentinel；标签外 → 正常 content。
+    const thinkParser = new ThinkTagParser();
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+    for await (const chunk of stream) {
+      // 按 Buffer 累积并只解码完整行：chunk 边界可能截断多字节 UTF-8 字符（如汉字），
+      // 若对每个 chunk 单独 toString() 会产生 U+FFFD 乱码（"数据库��作"）
+      buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+
+      const lines: string[] = [];
+      let newlineIdx: number;
+      while ((newlineIdx = buffer.indexOf(0x0A)) !== -1) {
+        lines.push(buffer.subarray(0, newlineIdx).toString('utf-8'));
+        buffer = buffer.subarray(newlineIdx + 1);
+      }
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -411,10 +547,30 @@ export class OpenAIClient {
         try {
           const parsed = JSON.parse(jsonStr);
 
-          const delta = parsed.choices?.[0]?.delta;
+          const choice = parsed.choices?.[0];
+          const delta = choice?.delta;
           const content = delta?.content;
           const reasoningContent = delta?.reasoning_content;
           const newToolCalls = delta?.tool_calls;
+
+          // 诊断日志：记录 finish_reason 和非标准字段
+          if (choice?.finish_reason) {
+            console.log(`[OpenAIClient] finish_reason: ${choice.finish_reason}, contentChunks so far: ${contentChunks.length}, toolCallMap size: ${toolCallMap.size}`);
+          }
+          // 检测非标准位置可能藏着的 tool_calls（某些 provider 偏离 OpenAI 规范）
+          if (choice?.message?.tool_calls && !newToolCalls) {
+            console.warn('[OpenAIClient] Detected tool_calls in choice.message (non-standard), rescuing');
+            for (const tc of choice.message.tool_calls) {
+              const idx = tc.index ?? 0;
+              if (!toolCallMap.has(idx)) {
+                toolCallMap.set(idx, { id: tc.id || '', type: 'function', function: { name: '', arguments: '' } });
+              }
+              const acc = toolCallMap.get(idx);
+              if (tc.id) acc.id = tc.id;
+              if (tc.function?.name) acc.function.name = tc.function.name;
+              if (tc.function?.arguments) acc.function.arguments += tc.function.arguments;
+            }
+          }
 
           // 处理思考内容（千问/QwQ/DeepSeek 等模型的 reasoning_content）
           if (reasoningContent) {
@@ -422,8 +578,17 @@ export class OpenAIClient {
           }
 
           if (content) {
-            contentChunks.push(content);
-            yield content;
+            // 通过 ThinkTagParser 实时识别 <think>...</think> 标签。
+            // 标签内的内容转换为 THINKING sentinel，标签外的作为正常 content。
+            const pieces = thinkParser.feed(content);
+            for (const piece of pieces) {
+              if (piece.type === 'thinking') {
+                yield `\x01THINKING\x02${piece.text}`;
+              } else {
+                contentChunks.push(piece.text);
+                yield piece.text;
+              }
+            }
           }
 
           // 按 OpenAI 流式规范组装 tool_calls：
@@ -476,6 +641,17 @@ export class OpenAIClient {
       }
     }
 
+    // 流结束后，flush thinkParser 中残留的内容（未闭合的 <think> 或尾部片段）
+    const trailing = thinkParser.flush();
+    for (const piece of trailing) {
+      if (piece.type === 'thinking') {
+        yield `\x01THINKING\x02${piece.text}`;
+      } else {
+        contentChunks.push(piece.text);
+        yield piece.text;
+      }
+    }
+
     // 将 Map 转为有序数组，并为缺失 id 的 tool call 生成兜底 id
     const toolCalls: any[] = [];
     const sortedIndices = Array.from(toolCallMap.keys()).sort((a, b) => a - b);
@@ -493,9 +669,82 @@ export class OpenAIClient {
 
     if (toolCalls.length > 0) {
       yield JSON.stringify({ type: 'tool_calls', toolCalls });
+    } else if (contentChunks.length > 0) {
+      // 兜底：某些模型（尤其 qwen-flash 小模型）会把工具调用以文本形式塞在 content 里，
+      // 而不是通过 delta.tool_calls 流式返回。这里扫描内容尝试提取。
+      const fullContent = contentChunks.join('');
+      const rescued = rescueToolCallsFromContent(fullContent);
+      if (rescued.length > 0) {
+        console.warn(`[OpenAIClient] Rescued ${rescued.length} tool call(s) from content (model did not use delta.tool_calls)`);
+        yield JSON.stringify({ type: 'tool_calls', toolCalls: rescued });
+        return;
+      }
     }
 
     // 调试：记录流结束时的状态
     console.log('[OpenAIClient] Stream ended - content chunks:', contentChunks.length, 'tool calls:', toolCalls.length);
   }
+}
+
+/**
+ * 从文本内容中抢救式提取 tool_call
+ * 支持的格式：
+ *   1. <tool_call>{"name":"x","arguments":{...}}</tool_call>
+ *   2. ```tool_call\n{...}\n``` 或 ```json\n{"name":...}\n```
+ *   3. 纯 JSON：{"name":"x","arguments":{...}}
+ */
+function rescueToolCallsFromContent(content: string): any[] {
+  const results: any[] = [];
+  const seen = new Set<string>();
+
+  const tryAdd = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return;
+    // 兼容两种结构：{name, arguments} 或 {function: {name, arguments}}
+    let name: string | undefined;
+    let args: any;
+    if (obj.function?.name) {
+      name = obj.function.name;
+      args = obj.function.arguments;
+    } else if (obj.name) {
+      name = obj.name;
+      args = obj.arguments;
+    }
+    if (!name || typeof name !== 'string') return;
+    if (args && typeof args === 'object') args = JSON.stringify(args);
+    if (args === undefined) args = '{}';
+    const key = `${name}:${args}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push({
+      id: `call_rescued_${results.length}_${Date.now()}`,
+      type: 'function',
+      function: { name, arguments: args },
+    });
+  };
+
+  // 1. <tool_call>...</tool_call>
+  const xmlRe = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+  let m: RegExpExecArray | null;
+  while ((m = xmlRe.exec(content)) !== null) {
+    try { tryAdd(JSON.parse(m[1])); } catch {}
+  }
+
+  // 2. ```tool_call ... ``` 或 ```tool_use ... ```
+  const fenceRe = /```(?:tool_call|tool_use|json)?\s*\n?([\s\S]*?)\n?```/g;
+  while ((m = fenceRe.exec(content)) !== null) {
+    const body = m[1].trim();
+    try { tryAdd(JSON.parse(body)); } catch {}
+  }
+
+  // 3. 兜底：扫描裸 JSON（仅当上面没匹配到时）
+  if (results.length === 0) {
+    const jsonRe = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\s*\}/g;
+    while ((m = jsonRe.exec(content)) !== null) {
+      try {
+        tryAdd({ name: m[1], arguments: JSON.parse(m[2]) });
+      } catch {}
+    }
+  }
+
+  return results;
 }

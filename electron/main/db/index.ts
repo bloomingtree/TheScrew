@@ -103,7 +103,13 @@ export async function createConversation(conversation: ConversationInsert): Prom
   };
 
   const conversations = getStore().get('conversations', []) as StoredConversation[];
-  conversations.unshift(newConv);
+  // 防止重复 id（多次保存同一条对话时做 upsert，避免历史列表出现同 key 重复）
+  const existingIndex = conversations.findIndex(conv => conv.id === conversation.id);
+  if (existingIndex !== -1) {
+    conversations[existingIndex] = { ...conversations[existingIndex], ...newConv };
+  } else {
+    conversations.unshift(newConv);
+  }
   getStore().set('conversations', conversations);
 
   return {

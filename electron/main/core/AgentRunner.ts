@@ -250,6 +250,62 @@ export interface AgentTurnResult {
 }
 
 /**
+ * 将前端/DB 中的消息规整为 OpenAI API 要求的格式：
+ *  - tool 角色消息：camelCase `toolCallId` → snake_case `tool_call_id`
+ *  - assistant 消息：camelCase `toolCalls` → snake_case `tool_calls`
+ *  - 丢弃没有 tool_call_id 的孤儿 tool 消息（否则 API 报 400 missing field `tool_call_id`）
+ *  - 丢弃前导/孤立的 tool 消息（前面没有对应 assistant tool_calls）
+ */
+function normalizeMessagesForLLM(input: any[]): any[] {
+  if (!Array.isArray(input)) return [];
+  // 第一遍：字段标准化 + 过滤无效 tool 消息
+  const normalized = input.map((m: any) => {
+    if (!m || typeof m !== 'object') return null;
+    const role = m.role;
+    if (role === 'tool') {
+      const toolCallId = m.tool_call_id ?? m.toolCallId;
+      if (!toolCallId) {
+        console.warn('[AgentRunner] Drop tool message without tool_call_id');
+        return null;
+      }
+      return {
+        ...m,
+        role: 'tool',
+        tool_call_id: toolCallId,
+        content: m.content ?? '',
+      };
+    }
+    if (role === 'assistant') {
+      const toolCalls = m.tool_calls ?? m.toolCalls;
+      const out: any = {
+        ...m,
+        role: 'assistant',
+      };
+      if (toolCalls) out.tool_calls = toolCalls;
+      return out;
+    }
+    return m;
+  }).filter(Boolean);
+
+  // 第二遍：丢弃孤儿 tool 消息（前面找不到匹配的 assistant tool_calls）
+  const validToolCallIds = new Set<string>();
+  for (const m of normalized as any[]) {
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        if (tc?.id) validToolCallIds.add(tc.id);
+      }
+    }
+  }
+  return (normalized as any[]).filter((m: any) => {
+    if (m.role === 'tool' && !validToolCallIds.has(m.tool_call_id)) {
+      console.warn(`[AgentRunner] Drop orphan tool message tool_call_id=${m.tool_call_id}`);
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
  * 执行一次完整的 agent turn：构建 system prompt → 工具循环 → 流式推送。
  *
  * 行为等价于原 chat:stream handler 的核心逻辑。
@@ -257,7 +313,7 @@ export interface AgentTurnResult {
  */
 export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> {
   const { conversationId, sender, source = 'user' } = opts;
-  let messages = opts.messages;
+  let messages = normalizeMessagesForLLM(opts.messages);
 
   const sourceTag = `[AgentRunner/${source}]`;
 
@@ -316,7 +372,6 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
     const toolCallHistory: string[] = [];
     let totalToolCalls = 0;
     let iteration = 0;
-    const MAX_TOTAL_TOOL_CALLS = appConfigStore.getMaxTotalToolCalls();
     const MAX_SINGLE_TOOL_CALLS = appConfigStore.getMaxSingleToolCalls();
     const toolCallCounter = new Map<string, number>();
 
@@ -409,26 +464,21 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
                 toolCallHistory.push(callKey);
               }
 
-              // 单工具/总工具调用次数限制
-              let hitTotalLimit = false;
+              // 单工具/总工具调用次数追踪（单工具超阈值时仅注入柔性提醒，不强制中断）
               for (const call of parsed.toolCalls) {
                 const toolCount = (toolCallCounter.get(call.function.name) || 0) + 1;
                 toolCallCounter.set(call.function.name, toolCount);
-                if (toolCount >= MAX_SINGLE_TOOL_CALLS) {
-                  console.warn(`${sourceTag} Tool "${call.function.name}" called ${toolCount} times (limit ${MAX_SINGLE_TOOL_CALLS})`);
+                if (toolCount >= MAX_SINGLE_TOOL_CALLS && toolCount % MAX_SINGLE_TOOL_CALLS === 0) {
+                  console.warn(`${sourceTag} Tool "${call.function.name}" called ${toolCount} times`);
+                  // 注意：不能用 role: 'system'，否则会违反"system 消息只能在开头"的 API 约束
                   messages.push({
-                    role: 'system',
-                    content: `警告：工具 "${call.function.name}" 已调用 ${toolCount} 次，请检查是否有更高效的方式或直接总结。`,
+                    role: 'user',
+                    content: `[系统提醒] 工具 "${call.function.name}" 已调用 ${toolCount} 次，请检查是否有更高效的方式或直接总结。`,
                   });
                 }
               }
-              if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
-                console.warn(`${sourceTag} Total tool calls reached limit: ${totalToolCalls}/${MAX_TOTAL_TOOL_CALLS}`);
-                messages.push({
-                  role: 'system',
-                  content: `工具调用总次数已达上限（${MAX_TOTAL_TOOL_CALLS}次），请立即总结当前结果并回复用户。`,
-                });
-                hitTotalLimit = true;
+              if (totalToolCalls > 0 && totalToolCalls % 50 === 0) {
+                console.log(`${sourceTag} Total tool calls: ${totalToolCalls}`);
               }
 
               sender.send('chat:tool_calls', parsed.toolCalls);
@@ -508,10 +558,6 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
                   });
                 }
 
-                if (hitTotalLimit) {
-                  console.log(`${sourceTag} Total tool call limit reached, breaking`);
-                  hasToolCalls = false;
-                }
                 break;
               } catch (toolError: any) {
                 console.error(`${sourceTag} Tool execution error:`, toolError);

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Table, File, RefreshCw, Sheet } from 'lucide-react';
+import { useFilePreviewWatcher } from '@/hooks/useFilePreviewWatcher';
 
 interface ExcelPreviewProps {
   filepath: string;
@@ -62,6 +63,9 @@ const ExcelPreview: React.FC<ExcelPreviewProps> = ({ filepath }) => {
       setLoading(false);
     }
   };
+
+  // 监听磁盘文件变更，自动重新加载
+  useFilePreviewWatcher(filepath, loadFile);
 
   const formatFileSize = (bytes?: number): string => {
     if (!bytes) return '-';

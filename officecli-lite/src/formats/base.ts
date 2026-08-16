@@ -82,4 +82,12 @@ export abstract class BaseDocumentHandler implements DocumentHandler {
   ): Promise<CommandResult> {
     return { success: false, error: `applyStyle not implemented for .${targetDoc.docType}` };
   }
+
+  /**
+   * 校验文档结构合法性。返回 { valid, issues } 列表。
+   * 默认实现：未提供具体校验逻辑时报告 "not implemented"。
+   */
+  async validate(doc: OOXMLDocument, _options: CLIOptions): Promise<CommandResult> {
+    return { success: false, error: `validate not implemented for .${doc.docType}` };
+  }
 }

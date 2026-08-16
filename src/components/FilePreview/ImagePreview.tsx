@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Image, Maximize2, Minimize2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
+import { useFilePreviewWatcher } from '@/hooks/useFilePreviewWatcher';
 
 interface ImagePreviewProps {
   filepath: string;
@@ -48,6 +49,9 @@ const ImagePreview: React.FC<ImagePreviewProps> = ({ filepath }) => {
       setLoading(false);
     }
   };
+
+  // 监听磁盘文件变更，自动重新加载
+  useFilePreviewWatcher(filepath, loadImage);
 
   const formatFileSize = (bytes?: number): string => {
     if (!bytes) return '-';

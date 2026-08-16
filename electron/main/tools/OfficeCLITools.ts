@@ -39,7 +39,7 @@ function getCLICommand(): { cmd: string; baseArgs: string[] } {
 }
 
 // 检查 officecli 是否可用
-function isAvailable(): boolean {
+export function isOfficeCLIAvailable(): boolean {
   const { cmd } = getCLICommand();
   return fs.existsSync(cmd);
 }
@@ -65,7 +65,7 @@ function truncateOfficeOutput(output: string, toolName: string): string {
 }
 
 // 执行 officecli 命令
-function execOfficeCLI(args: string[], timeout: number = 30000, cwd?: string): Promise<string> {
+export function execOfficeCLI(args: string[], timeout: number = 30000, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const { cmd, baseArgs } = getCLICommand();
 
@@ -120,7 +120,9 @@ function execOfficeCLIWithStdin(args: string[], stdinData: string, timeout: numb
     child.on('close', (code: number) => {
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error(`OfficeCLI failed: ${stderr}${stdout}`));
+        // 优先使用 stdout/stderr 中的实际错误信息，避免显示空错误
+        const detail = (stderr || '').trim() || (stdout || '').trim() || `exit code ${code}`;
+        reject(new Error(`OfficeCLI 执行失败 (code=${code}): ${detail}`));
       } else {
         resolve(stdout);
       }
@@ -216,18 +218,25 @@ const officeSetTool: Tool = {
 
 const officeAddTool: Tool = {
   name: 'office_add',
-  description: '向文档添加元素（如段落、幻灯片、行等）',
+  description: '向文档添加元素（段落、表格、表格行/列、分页等）。type=table 时可指定 rows/cols；type=paragraph 时可指定 text 设置初始文本',
   parameters: {
     type: 'object',
     properties: {
       filename: { type: 'string', description: '文件路径' },
-      parent_path: { type: 'string', description: '父元素路径（如 /body, /slide[1]）' },
-      type: { type: 'string', description: '元素类型（如 paragraph, slide, row）' },
+      parent_path: { type: 'string', description: '父元素路径（如 /body, /slide[1], /table[1]）' },
+      type: { type: 'string', description: '元素类型：paragraph | pageBreak | table | row | column' },
+      text: { type: 'string', description: '当 type=paragraph 时的初始文本（可选）' },
+      rows: { type: 'number', description: '当 type=table 时的行数（默认 2）' },
+      cols: { type: 'number', description: '当 type=table 时的列数（默认 2）' },
     },
     required: ['filename', 'parent_path', 'type'],
   },
   handler: async (args: any) => {
-    const result = await execOfficeCLI(['add', args.filename, args.parent_path, args.type]);
+    const cmdArgs = ['add', args.filename, args.parent_path, args.type];
+    if (args.rows !== undefined) cmdArgs.push('--rows', String(args.rows));
+    if (args.cols !== undefined) cmdArgs.push('--cols', String(args.cols));
+    if (args.text !== undefined) cmdArgs.push('--text', String(args.text));
+    const result = await execOfficeCLI(cmdArgs);
     return { success: true, output: result };
   },
 };
@@ -270,7 +279,7 @@ const officeQueryTool: Tool = {
 
 const officeValidateTool: Tool = {
   name: 'office_validate',
-  description: '校验文档结构是否有效',
+  description: '校验文档 OOXML 结构合法性（cell 块级性、表格列对齐、tblGrid 存在性等）',
   parameters: {
     type: 'object',
     properties: {
@@ -279,7 +288,8 @@ const officeValidateTool: Tool = {
     required: ['filename'],
   },
   handler: async (args: any) => {
-    return { success: true, output: '文档校验功能在轻量版中暂不可用。基本结构检查将在打开文档时自动进行。' };
+    const result = await execOfficeCLI(['validate', args.filename, '--json']);
+    return { success: true, output: truncateOfficeOutput(result, 'office_validate') };
   },
 };
 
@@ -312,8 +322,21 @@ const officeBatchTool: Tool = {
     required: ['filename', 'operations'],
   },
   handler: async (args: any) => {
-    const result = await execOfficeCLIWithStdin(['batch', args.filename], args.operations, 120000);
-    return { success: true, output: result };
+    // 防御性校验：AI 可能传入对象/数组而非 JSON 字符串
+    let ops = args.operations;
+    if (typeof ops !== 'string') {
+      try {
+        ops = JSON.stringify(ops);
+      } catch {
+        return { success: false, error: 'operations 必须是 JSON 字符串或可序列化对象' };
+      }
+    }
+    try {
+      const result = await execOfficeCLIWithStdin(['batch', args.filename], ops, 120000);
+      return { success: true, output: truncateOfficeOutput(result, 'office_batch') };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
   },
 };
 
@@ -449,4 +472,6 @@ export const officeCLIToolGroup = {
 };
 
 // 导出检查函数
-export { isAvailable, getCLICommand, execOfficeCLI };
+// 注意：isAvailable 是 isOfficeCLIAvailable 的内部别名（保留兼容）
+const isAvailable = isOfficeCLIAvailable;
+export { isAvailable, getCLICommand };

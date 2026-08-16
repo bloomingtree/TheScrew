@@ -5,8 +5,11 @@
  */
 
 import { ipcMain } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import { getMemoryStore } from '../memory/MemoryStore';
 import { getSessionSummarizer } from '../memory/SessionSummarizer';
+import { getPathManager } from '../config/PathManager';
 
 /**
  * Register memory-related IPC handlers
@@ -210,6 +213,75 @@ export function registerMemoryHandlers(): void {
         success: false,
         error: error.message,
       };
+    }
+  });
+
+  // ========== 扩展：直接读取/列出记忆文件（供前端 MemoryPanel 使用） ==========
+
+  // 读取指定相对路径的记忆文件
+  ipcMain.handle('memory:readFile', async (_event, relPath: string) => {
+    try {
+      if (typeof relPath !== 'string' || relPath.trim().length === 0) {
+        return { success: false, error: 'relPath 必须是非空字符串' };
+      }
+      // 禁止路径穿越
+      const normalized = path.normalize(relPath).replace(/\\/g, '/');
+      if (normalized.startsWith('..') || path.isAbsolute(relPath)) {
+        return { success: false, error: 'relPath 必须是相对路径' };
+      }
+      const memoryRoot = getPathManager().getMemoryPath();
+      const fullPath = path.join(memoryRoot, normalized);
+      if (!fs.existsSync(fullPath)) {
+        return { success: false, error: `文件不存在: ${normalized}`, path: fullPath };
+      }
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      return { success: true, content, path: fullPath };
+    } catch (error: any) {
+      return { success: false, error: error?.message || String(error) };
+    }
+  });
+
+  // 列出指定 scope（topics / daily / all）下的文件
+  ipcMain.handle('memory:listFiles', async (_event, scope: 'topics' | 'daily' | 'all' = 'all') => {
+    try {
+      const memoryRoot = getPathManager().getMemoryPath();
+
+      const listDir = (sub: string): Array<{ name: string; relPath: string }> => {
+        const dir = path.join(memoryRoot, sub);
+        if (!fs.existsSync(dir)) return [];
+        const out: Array<{ name: string; relPath: string }> = [];
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isFile() && entry.name.endsWith('.md')) {
+            out.push({
+              name: entry.name,
+              relPath: `${sub}/${entry.name}`,
+            });
+          }
+        }
+        // 按文件名倒序（daily 越新越前）
+        out.sort((a, b) => (a.name < b.name ? 1 : -1));
+        return out;
+      };
+
+      const result: Array<{ name: string; relPath: string }> = [];
+      if (scope === 'topics' || scope === 'all') {
+        result.push(...listDir('topics'));
+      }
+      if (scope === 'daily' || scope === 'all') {
+        result.push(...listDir('daily'));
+      }
+      // all 时也把 MEMORY.md 包含进来
+      if (scope === 'all') {
+        const indexPath = path.join(memoryRoot, 'MEMORY.md');
+        if (fs.existsSync(indexPath)) {
+          result.unshift({ name: 'MEMORY.md', relPath: 'MEMORY.md' });
+        }
+      }
+
+      return { success: true, files: result };
+    } catch (error: any) {
+      return { success: false, error: error?.message || String(error) };
     }
   });
 

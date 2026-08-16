@@ -13,6 +13,8 @@ import {
   HardDrive,
   Lightbulb,
   Clock,
+  CheckSquare,
+  Brain,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useConversationStore } from '../../store/conversationStore';
@@ -23,6 +25,8 @@ import PreviewTab from '../RightPanel/tabs/PreviewTab';
 import SkillsTab from '../RightPanel/tabs/SkillsTab';
 import SchedulerTab from '../RightPanel/tabs/SchedulerTab';
 import FileExplorer from '../FileExplorer/FileExplorer';
+import TaskList from '../TaskList/TaskList';
+import MemoryPanel from '../Memory/MemoryPanel';
 
 // 终端风格色彩常量
 const TERMINAL = {
@@ -46,6 +50,8 @@ const TERMINAL = {
 const FUNCTION_ITEMS = [
   { key: 'skills', icon: Lightbulb, label: '技能', color: TERMINAL.yellow },
   { key: 'scheduler', icon: Clock, label: '定时任务', color: TERMINAL.blue },
+  { key: 'tasks', icon: CheckSquare, label: '任务列表', color: TERMINAL.green },
+  { key: 'memory', icon: Brain, label: '记忆', color: TERMINAL.purple },
 ];
 
 interface WorkspaceFile {
@@ -57,7 +63,7 @@ interface WorkspaceFile {
   children?: WorkspaceFile[];
 }
 
-type ModalType = 'history' | 'skills' | 'scheduler' | 'preview' | null;
+type ModalType = 'history' | 'skills' | 'scheduler' | 'tasks' | 'memory' | 'preview' | null;
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -317,6 +323,10 @@ const Sidebar: React.FC<SidebarProps> = () => {
         return <SkillsTab />;
       case 'scheduler':
         return <SchedulerTab />;
+      case 'tasks':
+        return <TaskList />;
+      case 'memory':
+        return <MemoryPanel />;
       case 'preview':
         return <PreviewTab />;
       default:
@@ -330,6 +340,10 @@ const Sidebar: React.FC<SidebarProps> = () => {
         return '技能';
       case 'scheduler':
         return '定时任务';
+      case 'tasks':
+        return '任务列表';
+      case 'memory':
+        return '记忆管理';
       case 'preview':
         return currentPreviewFile?.split(/[\\/]/).pop() || '文件预览';
       case 'history':
@@ -522,9 +536,11 @@ const Sidebar: React.FC<SidebarProps> = () => {
             )}
           </button>
 
-          {/* 文件列表 */}
-          {isOpen && (
-            <div className="flex-1 overflow-y-auto">
+          {/* 文件列表（始终挂载，收起时仅隐藏，保留 FileExplorer 展开/加载状态） */}
+          <div
+            className="flex-1 overflow-y-auto"
+            style={{ display: isOpen ? 'block' : 'none' }}
+          >
               {workspaceNotSet ? (
                 <div className="text-center py-6 px-3">
                   <p className="text-xs mb-3" style={{ color: TERMINAL.textSecondary }}>
@@ -562,8 +578,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
                   加载中...
                 </div>
               )}
-            </div>
-          )}
+          </div>
         </div>
       </motion.div>
 

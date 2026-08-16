@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import * as db from '../db';
+import { getSessionSummarizer } from '../memory/SessionSummarizer';
 
 export interface Conversation {
   id: string;
@@ -19,6 +20,59 @@ export interface Message {
   toolCallId?: string;
 }
 
+// ============================================================================
+// 会话总结触发（P2-1）
+// ============================================================================
+
+/**
+ * 触发会话总结的辅助函数（fire-and-forget）。
+ *
+ * - 消息数 < 6 时跳过（避免空对话浪费 LLM 调用）
+ * - 异步执行，不阻塞 IPC 返回；失败只 log 不报错
+ *
+ * @param conversationId 要总结的对话 ID
+ */
+function triggerSessionSummary(conversationId: string): void {
+  try {
+    const conv = db.getConversationWithMessages(conversationId);
+    if (!conv) {
+      return;
+    }
+    // 转换 db 消息为通用格式（仅保留 LLM 总结所需字段）
+    const messages = conv.messages.map((m) => ({
+      id: m.id,
+      role: m.role as 'user' | 'assistant' | 'tool',
+      content: m.content ?? '',
+      timestamp: m.timestamp ?? Date.now(),
+    }));
+
+    // 消息数 < 6 条跳过（在 SessionSummarizer 内部也会校验，这里提前短路避免无谓日志）
+    if (messages.length < 6) {
+      console.log(`[Conversation] 会话 ${conversationId} 消息数 ${messages.length} < 6，跳过总结`);
+      return;
+    }
+
+    const title = conv.title;
+    console.log(`[Conversation] 触发会话 ${conversationId} 的总结（异步）`);
+
+    // fire-and-forget；catch 仅 log，不影响 UI
+    getSessionSummarizer()
+      .summarizeSession(conversationId, messages, title)
+      .then((summary) => {
+        if (summary) {
+          console.log(`[Conversation] 会话 ${conversationId} 总结完成`);
+        } else {
+          console.log(`[Conversation] 会话 ${conversationId} 总结跳过或失败`);
+        }
+      })
+      .catch((e: unknown) => {
+        console.error(`[Conversation] 会话 ${conversationId} 总结异常:`, e);
+      });
+  } catch (e: any) {
+    console.error(`[Conversation] triggerSessionSummary 失败 (${conversationId}):`, e);
+  }
+}
+
 /**
  * 注册对话和消息相关的 IPC 处理器
  */
@@ -29,9 +83,20 @@ export function registerConversationHandlers() {
    * 设置当前激活对话 ID
    * 供定时任务系统读取，决定把提醒/后台任务注入到哪个对话。
    * 前端在切换对话时调用，chat:stream 也会同步更新。
+   *
+   * P2-1：若从旧对话切换到不同的新对话，触发旧对话的总结（fire-and-forget）。
    */
   ipcMain.handle('conversation:setActive', async (_event, id: string | null) => {
-    (globalThis as any)[Symbol.for('zero-employee:activeConversationId')] = id;
+    const activeSymbol = Symbol.for('zero-employee:activeConversationId');
+    const previousId = (globalThis as any)[activeSymbol] as string | null;
+
+    // 触发旧会话总结：id 变化且旧 id 非空且与当前不同
+    if (previousId && previousId !== id) {
+      console.log(`[Conversation] Switching active: ${previousId} → ${id}, triggering summary for old session`);
+      triggerSessionSummary(previousId);
+    }
+
+    (globalThis as any)[activeSymbol] = id;
     return { success: true };
   });
 

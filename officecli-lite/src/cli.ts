@@ -8,7 +8,11 @@
 import { Command } from 'commander';
 import { COMMANDS, getCommand, getCommandNames } from './commands';
 import { formatOutput, truncateOutput } from './core/output';
+import { withFileLock } from './core/file-lock';
 import type { CLIOptions } from './types';
+
+/** 写命令集合：会修改文件，需要加锁防并发覆盖 */
+const WRITE_COMMANDS = new Set(['create', 'set', 'add', 'remove', 'replace', 'merge', 'batch', 'applyStyle']);
 
 const VERSION = '1.0.0';
 
@@ -62,9 +66,16 @@ program
 // add
 program
   .command('add <file> <path> <type>')
-  .description('Add a new element')
-  .action(async (filePath: string, elemPath: string, type: string) => {
-    await runCommand('add', filePath, [elemPath, type], collectOptions());
+  .description('Add a new element (paragraph/pageBreak/table/row/column)')
+  .option('--rows <n>', 'Number of rows for table type', '2')
+  .option('--cols <n>', 'Number of cols for table type', '2')
+  .option('--text <txt>', 'Initial text for paragraph type')
+  .action(async (filePath: string, elemPath: string, type: string, cmdOpts: { rows?: string; cols?: string; text?: string }) => {
+    const opts = collectOptions();
+    if (cmdOpts.rows) opts.rows = cmdOpts.rows;
+    if (cmdOpts.cols) opts.cols = cmdOpts.cols;
+    if (cmdOpts.text !== undefined) opts.text = cmdOpts.text;
+    await runCommand('add', filePath, [elemPath, type], opts);
   });
 
 // remove
@@ -129,6 +140,14 @@ program
     await runCommand('applyStyle', targetPath, [templatePath], collectOptions());
   });
 
+// validate
+program
+  .command('validate <file>')
+  .description('Validate document structure (checks OOXML compliance)')
+  .action(async (filePath: string) => {
+    await runCommand('validate', filePath, [], collectOptions());
+  });
+
 // ── Helpers ────────────────────────────────────────────────────
 
 /**
@@ -142,6 +161,9 @@ function collectOptions(): CLIOptions {
     verbose: globalOpts.verbose === true,
     xpath: undefined,
     data: undefined,
+    rows: undefined,
+    cols: undefined,
+    text: undefined,
   };
 }
 
@@ -164,8 +186,12 @@ async function runCommand(
     console.error(`[verbose] command=${name} file=${filePath} args=${JSON.stringify(args)}`);
   }
 
+  // 写命令整体加文件锁（batch 在锁内递归调用 handler，不会重入此层）
+  const exec = () => entry.handler(filePath, args, options);
+  const wrapped = WRITE_COMMANDS.has(name) ? () => withFileLock(filePath, exec) : exec;
+
   try {
-    const result = await entry.handler(filePath, args, options);
+    const result = await wrapped();
 
     let output: string;
     if (result.success) {

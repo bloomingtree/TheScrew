@@ -17,9 +17,8 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import { getSimpleSkillManager } from './SimpleSkillManager';
 import { getMemoryStore } from '../memory/MemoryStore';
-import { getSessionSummarizer } from '../memory/SessionSummarizer';
 import { getToolManager } from '../tools/ToolManager';
-import { CONFIG_DIR_NAME } from '../config/PathManager';
+import { CONFIG_DIR_NAME, getPathManager } from '../config/PathManager';
 
 /**
  * Context Builder options
@@ -49,7 +48,6 @@ const BOOTSTRAP_FILES = {
 export class ContextBuilder {
   private skillManager = getSimpleSkillManager();
   private memoryStore = getMemoryStore();
-  private sessionSummarizer = getSessionSummarizer();
   private toolManager = getToolManager();
 
   /**
@@ -218,40 +216,77 @@ export class ContextBuilder {
   }
 
   /**
-   * 4. 内存部分（改进版：加入工作记忆）
+   * 4. 内存部分
+   *
+   * P0 重构后读取顺序（硬截断，按字符数）：
+   *   1. MEMORY.md 索引（常驻，最多 4000 字符）
+   *   2. 近 3 天 daily 笔记（最多 2000 字符，按日期倒序拼接）
+   *   3. 今日笔记（最多 1000 字符；若已包含在近 3 天中则跳过重复）
+   *
+   * 不再调用 SessionSummarizer.buildRecentMemoryText，直接读 daily/*.md markdown 文件。
    */
-  private async _buildMemorySection(options: ContextBuilderOptions): Promise<string | null> {
+  private async _buildMemorySection(_options: ContextBuilderOptions): Promise<string | null> {
     try {
       const sections: string[] = [];
-      const maxTokens = options.maxMemoryTokens || 2000;
-      let usedTokens = 0;
 
-      // 1. 长期记忆（始终加载，截断）
-      const longTerm = await this.memoryStore.getLongTermMemory();
-      if (longTerm && !longTerm.includes('No long-term memories')) {
-        const maxChars = Math.min(longTerm.length, 1000 * 2);
-        sections.push(`## 核心记忆\n${longTerm.slice(0, maxChars)}`);
-        usedTokens += maxChars / 2;
-      }
-
-      // 2. 近7日工作记忆摘要
-      if (usedTokens < maxTokens) {
+      // === 1. MEMORY.md 核心索引 ===
+      const memoryIndexPath = join(getPathManager().getMemoryPath(), 'MEMORY.md');
+      if (existsSync(memoryIndexPath)) {
         try {
-          const recentMemory = await this.sessionSummarizer.buildRecentMemoryText(maxTokens - usedTokens);
-          if (recentMemory) {
-            sections.push(recentMemory);
-          }
-        } catch {
-          // SessionSummarizer 可能初始化失败，忽略
+          const indexContent = await readFile(memoryIndexPath, 'utf-8');
+          const truncated = indexContent.length > 4000
+            ? indexContent.slice(0, 4000) + '\n\n... (MEMORY.md 已截断，完整内容请用 memory_read 读取)'
+            : indexContent;
+          sections.push(`## 核心记忆（常驻索引）\n\n${truncated}`);
+        } catch (e) {
+          console.warn('[ContextBuilder] Failed to read MEMORY.md:', e);
         }
       }
 
-      // 3. 今日笔记
-      if (usedTokens < maxTokens) {
-        const todayNote = await this.memoryStore.getTodayNote();
-        if (todayNote && !todayNote.includes('No notes for today')) {
-          const remaining = (maxTokens - usedTokens) * 2;
-          sections.push(`## 今日笔记\n${todayNote.slice(0, remaining)}`);
+      // === 2. 近 3 天 daily 笔记 ===
+      const dailyDir = join(getPathManager().getMemoryPath(), 'daily');
+      const today = new Date();
+      const dailyFiles: { date: string; content: string }[] = [];
+      for (let i = 0; i < 3; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        const filePath = join(dailyDir, `${dateStr}.md`);
+        if (existsSync(filePath)) {
+          try {
+            const content = await readFile(filePath, 'utf-8');
+            dailyFiles.push({ date: dateStr, content });
+          } catch {
+            // 忽略读取错误
+          }
+        }
+      }
+      if (dailyFiles.length > 0) {
+        // 拼接并硬截断到 2000 字符
+        const joined = dailyFiles
+          .map(f => `### ${f.date}\n\n${f.content}`)
+          .join('\n\n---\n\n');
+        const truncated = joined.length > 2000
+          ? joined.slice(0, 2000) + '\n\n... (近期笔记已截断)'
+          : joined;
+        sections.push(`## 近期工作记忆（最近 3 天）\n\n${truncated}`);
+      }
+
+      // === 3. 今日笔记 ===
+      // 若今日 daily 已在「近 3 天」中包含，则跳过避免重复
+      if (!dailyFiles.some(f => f.date === today.toISOString().split('T')[0])) {
+        const todayStr = today.toISOString().split('T')[0];
+        const todayPath = join(dailyDir, `${todayStr}.md`);
+        if (existsSync(todayPath)) {
+          try {
+            const todayContent = await readFile(todayPath, 'utf-8');
+            const truncated = todayContent.length > 1000
+              ? todayContent.slice(0, 1000) + '\n\n... (今日笔记已截断)'
+              : todayContent;
+            sections.push(`## 今日笔记\n\n${truncated}`);
+          } catch {
+            // 忽略
+          }
         }
       }
 

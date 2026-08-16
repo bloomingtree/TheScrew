@@ -57,6 +57,9 @@ export async function openDocument(filePath: string): Promise<OOXMLDocument> {
 /**
  * Save the document. If `filePath` is omitted the original path is used.
  * Any cached parts that were modified are written back to the ZIP before saving.
+ *
+ * 写入策略：先写入同目录临时文件，再原子 rename 覆盖目标文件，
+ * 避免「读到一半 / 写到一半」状态被其他进程读取。
  */
 export async function saveDocument(doc: OOXMLDocument, filePath?: string): Promise<void> {
   // Flush cached dirty parts back into the ZIP
@@ -71,7 +74,23 @@ export async function saveDocument(doc: OOXMLDocument, filePath?: string): Promi
 
   const target = path.resolve(filePath ?? doc.filePath);
   const generated = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
-  fs.writeFileSync(target, generated as Buffer);
+  await atomicWriteFile(target, generated as Buffer);
+}
+
+/**
+ * 原子写入：写临时文件 + rename。同分区 rename 是原子操作，
+ * 保证目标文件要么是旧版要么是新版，永远不会写到一半。
+ */
+export async function atomicWriteFile(target: string, data: Buffer): Promise<void> {
+  const tmp = target + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, data);
+  try {
+    fs.renameSync(tmp, target);
+  } catch (e) {
+    // rename 失败时清理临时文件并向上抛错
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    throw e;
+  }
 }
 
 /**

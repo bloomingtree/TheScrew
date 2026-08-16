@@ -80,7 +80,35 @@ export class DocxHandler extends BaseDocumentHandler {
       } else if (child.tag === 'w:tbl') {
         const rows = childrenOf(child, 'w:tr').length;
         const cols = childrenOf(childrenOf(child, 'w:tr')[0], 'w:tc').length;
-        structure.push({ path: `/table[${idx}]`, type: 'table', rows, cols });
+        // 输出单元格文本矩阵，让用户/AI 直接看到表格内容
+        const cells: string[][] = [];
+        const trs = childrenOf(child, 'w:tr');
+        let truncated = false;
+        for (const tr of trs) {
+          const tcs = childrenOf(tr, 'w:tc');
+          const row: string[] = [];
+          for (const tc of tcs) {
+            // 单元格文本 = 所有 w:p 的纯文本拼接
+            let text = '';
+            for (const p of childrenOf(tc, 'w:p')) {
+              text += paraText(p);
+            }
+            if (text.length > 200) {
+              text = text.substring(0, 200) + '...';
+              truncated = true;
+            }
+            row.push(text);
+          }
+          cells.push(row);
+        }
+        structure.push({
+          path: `/table[${idx}]`,
+          type: 'table',
+          rows,
+          cols,
+          cells,
+          ...(truncated ? { truncated: true } : {}),
+        });
       }
     }
 
@@ -146,7 +174,13 @@ export class DocxHandler extends BaseDocumentHandler {
       } else {
         const ref = resolveDocxElement(body, path);
         if (!ref) return { success: false, error: `Reference element not found: ${path}` };
-        insertAfter(body, ref, newPara);
+        // 关键：如果父路径指向 cell（w:tc），段落应作为 cell 内部子元素追加
+        // （OOXML 模型：w:tc 内可含多个 w:p）；其他场景沿用 insertAfter（同级插入）
+        if (ref.tag === 'w:tc') {
+          appendChild(ref, newPara);
+        } else {
+          insertAfter(body, ref, newPara);
+        }
       }
       writePart(doc, 'word/document.xml', serializeXml(tree));
       return { success: true, message: `Added paragraph` };
@@ -178,6 +212,45 @@ export class DocxHandler extends BaseDocumentHandler {
       return { success: true, message: `Added table ${rows}x${cols}` };
     }
 
+    if (type === 'row') {
+      // 在指定表格末尾或指定位置插入空行
+      const tbl = resolveDocxElement(body, path);
+      if (!tbl || tbl.tag !== 'w:tbl') {
+        return { success: false, error: `Table not found or path is not a table: ${path}` };
+      }
+      const existingRows = childrenOf(tbl, 'w:tr');
+      const cols = existingRows.length > 0
+        ? childrenOf(existingRows[0], 'w:tc').length
+        : childrenOf(childrenOf(tbl, 'w:tblGrid')[0] ?? { children: [] }, 'w:gridCol').length;
+      const newRow = createRow(cols);
+      appendChild(tbl, newRow);
+      writePart(doc, 'word/document.xml', serializeXml(tree));
+      return { success: true, message: `Added row (${cols} cells)` };
+    }
+
+    if (type === 'column' || type === 'col') {
+      // 给表格所有行追加一个空单元格
+      const tbl = resolveDocxElement(body, path);
+      if (!tbl || tbl.tag !== 'w:tbl') {
+        return { success: false, error: `Table not found or path is not a table: ${path}` };
+      }
+      const rows = childrenOf(tbl, 'w:tr');
+      if (rows.length === 0) {
+        return { success: false, error: 'Table has no rows' };
+      }
+      for (const tr of rows) {
+        appendChild(tr, el('w:tc', {}, [el('w:p', {}, [])]));
+      }
+      // 同步更新 tblGrid（如果存在）
+      const grid = childrenOf(tbl, 'w:tblGrid')[0];
+      if (grid) {
+        appendChild(grid, el('w:gridCol', {}));
+      }
+      writePart(doc, 'word/document.xml', serializeXml(tree));
+      const newCols = childrenOf(rows[0], 'w:tc').length;
+      return { success: true, message: `Added column (total cols: ${newCols})` };
+    }
+
     return { success: false, error: `Unknown add type: ${type}` };
   }
 
@@ -192,9 +265,17 @@ export class DocxHandler extends BaseDocumentHandler {
     const elem = resolveDocxElement(body, path);
     if (!elem) return { success: false, error: `Element not found: ${path}` };
 
-    removeChild(body, elem);
+    // 关键修复：必须找到 elem 的真正父节点（旧实现总是传 body，导致表格行/单元格静默失败）
+    const parent = findParentNode(body, elem);
+    if (!parent) {
+      return { success: false, error: `Cannot find parent of ${path}` };
+    }
+    const removed = removeChild(parent, elem);
+    if (!removed) {
+      return { success: false, error: `Failed to remove ${path}` };
+    }
     writePart(doc, 'word/document.xml', serializeXml(tree));
-    return { success: true, message: `Removed ${path}` };
+    return { success: true, message: `Removed ${path}`, data: { removed: 1 } };
   }
 
   // ── Find ────────────────────────────────────────────────────
@@ -333,6 +414,109 @@ export class DocxHandler extends BaseDocumentHandler {
 
     return { success: true, message: `Applied template styles: ${applied.join(', ')}` };
   }
+
+  // ── Validate ────────────────────────────────────────────────
+
+  /**
+   * 轻量结构校验：检查 OOXML 合规性问题。
+   * - w:tc 第一个子元素必须是块级（w:p 或 w:tbl），不能是 w:r
+   * - w:tr 内所有 w:tc 数量一致（列对齐）
+   * - w:tbl 必须含 w:tblGrid（推荐，缺失警告）
+   * - 关键 part 存在性检查（document.xml / styles.xml）
+   */
+  async validate(doc: OOXMLDocument, _options: CLIOptions): Promise<CommandResult> {
+    const issues: { severity: 'error' | 'warning'; path: string; message: string }[] = [];
+
+    // 1. document.xml 必须存在
+    if (!hasPart(doc, 'word/document.xml')) {
+      return {
+        success: true,
+        data: { valid: false, issues: [{ severity: 'error', path: 'word/document.xml', message: 'document.xml 不存在' }] },
+      };
+    }
+
+    const xml = readPart(doc, 'word/document.xml');
+    const tree = parseXml(xml);
+    const body = findBody(tree);
+
+    if (!body) {
+      return {
+        success: true,
+        data: { valid: false, issues: [{ severity: 'error', path: 'word/document.xml', message: '缺少 w:body 元素' }] },
+      };
+    }
+
+    // 2. 遍历所有表格做结构检查
+    let tblIdx = 0;
+    for (const child of body.children ?? []) {
+      if (child.type !== 'element' || child.tag !== 'w:tbl') continue;
+      tblIdx++;
+      const tblPath = `/table[${tblIdx}]`;
+
+      // 2a. 列对齐：所有 w:tr 的 w:tc 数量应一致
+      const rows = childrenOf(child, 'w:tr');
+      const colCounts = rows.map(tr => childrenOf(tr, 'w:tc').length);
+      const uniqueColCounts = new Set(colCounts);
+      if (uniqueColCounts.size > 1) {
+        issues.push({
+          severity: 'error',
+          path: tblPath,
+          message: `表格列数不一致：各行 cell 数为 ${colCounts.join(', ')}`,
+        });
+      }
+
+      // 2b. 每行检查 cell 结构合法性
+      let rowIdx = 0;
+      for (const tr of rows) {
+        rowIdx++;
+        let cellIdx = 0;
+        for (const tc of childrenOf(tr, 'w:tc')) {
+          cellIdx++;
+          // tc 的第一个元素子节点必须是块级（w:p 或 w:tbl），不能是 w:r
+          const firstElemChild = (tc.children ?? []).find(c => c.type === 'element');
+          if (firstElemChild && firstElemChild.tag === 'w:r') {
+            issues.push({
+              severity: 'error',
+              path: `${tblPath}/row[${rowIdx}]/cell[${cellIdx}]`,
+              message: 'w:tc 第一个子元素是 w:r（非法），应为 w:p',
+            });
+          }
+          if (!firstElemChild) {
+            issues.push({
+              severity: 'warning',
+              path: `${tblPath}/row[${rowIdx}]/cell[${cellIdx}]`,
+              message: 'w:tc 为空（无块级子元素）',
+            });
+          }
+        }
+      }
+
+      // 2c. tblGrid 推荐
+      if (childrenOf(child, 'w:tblGrid').length === 0) {
+        issues.push({
+          severity: 'warning',
+          path: tblPath,
+          message: '表格缺少 w:tblGrid（影响列宽渲染）',
+        });
+      }
+    }
+
+    const errors = issues.filter(i => i.severity === 'error');
+    const valid = errors.length === 0;
+
+    return {
+      success: true,
+      data: {
+        valid,
+        errorCount: errors.length,
+        warningCount: issues.length - errors.length,
+        issues,
+      },
+      message: valid
+        ? `文档结构合法（${issues.length} 个警告）`
+        : `发现 ${errors.length} 个结构错误`,
+    };
+  }
 }
 
 // ── Helper functions ───────────────────────────────────────────
@@ -351,6 +535,42 @@ function paraText(para: XmlNode): string {
     }
   }
   return result;
+}
+
+/**
+ * 按元素类型智能提取文本。
+ * - w:tbl → 行间 \n、cell 间 \t
+ * - w:tr  → cell 间 \t
+ * - w:tc  → 内部多段落用 \n 分隔
+ * - w:p   → 走 paraText（直接子 w:r/w:t）
+ * - 其他  → 递归收集所有 w:t 文本（兜底）
+ */
+function elementText(elem: XmlNode): string {
+  if (elem.tag === 'w:tbl') {
+    const rows: string[] = [];
+    for (const tr of childrenOf(elem, 'w:tr')) {
+      const cells = childrenOf(tr, 'w:tc').map(elementText);
+      rows.push(cells.join('\t'));
+    }
+    return rows.join('\n');
+  }
+  if (elem.tag === 'w:tr') {
+    return childrenOf(elem, 'w:tc').map(elementText).join('\t');
+  }
+  if (elem.tag === 'w:tc') {
+    return childrenOf(elem, 'w:p').map(paraText).filter(s => s.length > 0).join('\n');
+  }
+  if (elem.tag === 'w:p') {
+    return paraText(elem);
+  }
+  // 兜底：递归收集所有 w:t
+  return collectAllText(elem);
+}
+
+function collectAllText(node: XmlNode): string {
+  if (node.type === 'text') return node.text ?? '';
+  if (!node.children) return '';
+  return node.children.map(collectAllText).join('');
 }
 
 /** Resolve a path like "/paragraph[3]" or "/table[1]/row[2]/cell[1]" to an element node. */
@@ -394,7 +614,13 @@ function resolveDocxElement(body: XmlNode, path: string): XmlNode | null {
 function getElementProp(elem: XmlNode, prop: string): string | null {
   switch (prop) {
     case 'text':
-      return paraText(elem);
+      // 根据元素类型智能提取文本：
+      // - w:p    → 段落 run 文本（旧行为，保持兼容）
+      // - w:tc   → 单元格内所有 w:p 文本，用 \n 分隔（多段落场景）
+      // - w:tr   → 行内所有 cell 文本，用 \t 分隔
+      // - w:tbl  → 整表所有行，行间 \n、cell 间 \t
+      // - 其他   → 递归收集所有 w:t 文本
+      return elementText(elem);
     case 'style': {
       const pPr = childrenOf(elem, 'w:pPr')[0];
       if (!pPr) return 'Normal';
@@ -421,6 +647,52 @@ function getElementProp(elem: XmlNode, prop: string): string | null {
       const c = childrenOf(rPr, 'w:color')[0];
       return c?.attrs?.['w:val'] ?? null;
     }
+    case 'rows': {
+      if (elem.tag !== 'w:tbl') return null;
+      return String(childrenOf(elem, 'w:tr').length);
+    }
+    case 'cols': {
+      if (elem.tag !== 'w:tbl') return null;
+      const firstRow = childrenOf(elem, 'w:tr')[0];
+      if (!firstRow) return '0';
+      return String(childrenOf(firstRow, 'w:tc').length);
+    }
+    case 'cells': {
+      if (elem.tag !== 'w:tbl') return null;
+      const matrix: string[][] = [];
+      for (const tr of childrenOf(elem, 'w:tr')) {
+        const row: string[] = [];
+        for (const tc of childrenOf(tr, 'w:tc')) {
+          let text = '';
+          for (const p of childrenOf(tc, 'w:p')) {
+            text += paraText(p);
+          }
+          row.push(text);
+        }
+        matrix.push(row);
+      }
+      return JSON.stringify(matrix);
+    }
+    case 'runs': {
+      // 返回 run 级数组：[{text, bold, italic, fontSize, color}]
+      const runs = childrenOf(elem, 'w:r');
+      const result = runs.map(r => {
+        const rPr = childrenOf(r, 'w:rPr')[0];
+        const text = childrenOf(r, 'w:t').map(t => textOf(t)).join('');
+        const bold = rPr && childrenOf(rPr, 'w:b').length > 0;
+        const italic = rPr && childrenOf(rPr, 'w:i').length > 0;
+        const sz = rPr && childrenOf(rPr, 'w:sz')[0];
+        const color = rPr && childrenOf(rPr, 'w:color')[0];
+        return {
+          text,
+          bold: !!bold,
+          italic: !!italic,
+          ...(sz?.attrs?.['w:val'] ? { fontSize: String(parseInt(sz.attrs['w:val'], 10) / 2) + 'pt' } : {}),
+          ...(color?.attrs?.['w:val'] ? { color: color.attrs['w:val'] } : {}),
+        };
+      });
+      return JSON.stringify(result);
+    }
     default:
       return elem.attrs?.[prop] ?? null;
   }
@@ -439,16 +711,19 @@ function findRunProp(para: XmlNode): XmlNode {
 function setElementProp(elem: XmlNode, prop: string, value: string, tree: XmlTree): boolean {
   switch (prop) {
     case 'text': {
-      // Find or create w:r > w:t
-      let run = childrenOf(elem, 'w:r')[0];
+      // 表格单元格 (w:tc) 内部必须先有 w:p，再把 w:r 放入 w:p，否则会产生
+      // 非法结构 <w:tc><w:r>...</w:r><w:p/></w:tc>，Word/python-docx 读不到内容。
+      const target = ensureParagraphHost(elem);
+      // Find or create w:r > w:t inside the host paragraph
+      let run = childrenOf(target, 'w:r')[0];
       if (!run) {
         run = el('w:r', {}, [el('w:t', { 'xml:space': 'preserve' }, [txt(value)])]);
         // Ensure w:pPr comes before w:r
-        const pPr = childrenOf(elem, 'w:pPr')[0];
+        const pPr = childrenOf(target, 'w:pPr')[0];
         if (pPr) {
-          insertAfter(elem, pPr, run);
+          insertAfter(target, pPr, run);
         } else {
-          elem.children!.unshift(run);
+          target.children!.unshift(run);
         }
         return true;
       }
@@ -462,21 +737,63 @@ function setElementProp(elem: XmlNode, prop: string, value: string, tree: XmlTre
       return true;
     }
     case 'bold': {
-      setRunFormatting(elem, 'w:b', value !== 'false');
+      setRunFormatting(ensureParagraphHost(elem), 'w:b', value !== 'false');
       return true;
     }
     case 'italic': {
-      setRunFormatting(elem, 'w:i', value !== 'false');
+      setRunFormatting(ensureParagraphHost(elem), 'w:i', value !== 'false');
       return true;
     }
     case 'fontSize': {
       const halfPts = Math.round(parseFloat(value) * 2);
-      setRunFormatting(elem, 'w:sz', true, String(halfPts));
+      setRunFormatting(ensureParagraphHost(elem), 'w:sz', true, String(halfPts));
       return true;
     }
     case 'color': {
-      setRunFormatting(elem, 'w:color', true, value);
+      setRunFormatting(ensureParagraphHost(elem), 'w:color', true, value);
       return true;
+    }
+    case 'alignment': {
+      // OOXML 标准要求对齐放在 <w:pPr><w:jc w:val="..."/></w:pPr>
+      const p = ensureParagraphHost(elem);
+      let pPr = childrenOf(p, 'w:pPr')[0];
+      if (!pPr) {
+        pPr = el('w:pPr', {}, []);
+        p.children!.unshift(pPr);
+      }
+      let jc = childrenOf(pPr, 'w:jc')[0];
+      if (!jc) {
+        jc = el('w:jc', {}, []);
+        appendChild(pPr, jc);
+      }
+      if (!jc.attrs) jc.attrs = {};
+      jc.attrs['w:val'] = value;
+      return true;
+    }
+    case 'width': {
+      // 表格宽度：<w:tbl><w:tblPr><w:tblW w:w="..." w:type="..."/></w:tblPr>
+      if (elem.tag === 'w:tbl') {
+        let tblPr = childrenOf(elem, 'w:tblPr')[0];
+        if (!tblPr) {
+          tblPr = el('w:tblPr', {}, []);
+          elem.children!.unshift(tblPr);
+        }
+        let tblW = childrenOf(tblPr, 'w:tblW')[0];
+        if (!tblW) {
+          tblW = el('w:tblW', {}, []);
+          appendChild(tblPr, tblW);
+        }
+        if (!tblW.attrs) tblW.attrs = {};
+        tblW.attrs['w:w'] = value;
+        tblW.attrs['w:type'] = 'dxa';
+        return true;
+      }
+      // 其他场景降级为属性挂载
+      if (elem.attrs) {
+        elem.attrs[prop] = value;
+        return true;
+      }
+      return false;
     }
     default:
       if (elem.attrs) {
@@ -485,6 +802,26 @@ function setElementProp(elem: XmlNode, prop: string, value: string, tree: XmlTre
       }
       return false;
   }
+}
+
+/**
+ * 确保返回一个合法的段落宿主（w:p）用于挂载 w:r。
+ * - 如果 elem 本身就是 w:p，直接返回
+ * - 如果 elem 是 w:tc（表格单元格），返回/创建其内部的第一个 w:p
+ * - 其他情况返回 elem 自身（让默认行为兼容旘认法）
+ */
+function ensureParagraphHost(elem: XmlNode): XmlNode {
+  if (elem.tag === 'w:p') return elem;
+  if (elem.tag === 'w:tc') {
+    let p = childrenOf(elem, 'w:p')[0];
+    if (!p) {
+      p = el('w:p', {}, []);
+      // tc 内部第一个子元素应为块级 w:p
+      elem.children = [p, ...(elem.children ?? [])];
+    }
+    return p;
+  }
+  return elem;
 }
 
 function setRunFormatting(para: XmlNode, tag: string, on: boolean, val?: string): void {
@@ -525,11 +862,7 @@ function createParagraph(text: string): XmlNode {
 function createTable(rows: number, cols: number): XmlNode {
   const trs: XmlNode[] = [];
   for (let r = 0; r < rows; r++) {
-    const tcs: XmlNode[] = [];
-    for (let c = 0; c < cols; c++) {
-      tcs.push(el('w:tc', {}, [el('w:p', {}, [])]));
-    }
-    trs.push(el('w:tr', {}, tcs));
+    trs.push(createRow(cols));
   }
   return el('w:tbl', {}, [
     el('w:tblPr', {}, [
@@ -539,6 +872,31 @@ function createTable(rows: number, cols: number): XmlNode {
     el('w:tblGrid', {}, Array(cols).fill(null).map(() => el('w:gridCol', {}))),
     ...trs,
   ]);
+}
+
+/** 创建一个包含 cols 个空单元格的表格行 */
+function createRow(cols: number): XmlNode {
+  const tcs: XmlNode[] = [];
+  for (let c = 0; c < cols; c++) {
+    tcs.push(el('w:tc', {}, [el('w:p', {}, [])]));
+  }
+  return el('w:tr', {}, tcs);
+}
+
+/**
+ * 在 root 子树内 DFS 搜索 target 节点的真正父节点。
+ * 用于 remove 操作：elem 可能是 w:tr / w:tc，其父级不是 body。
+ */
+function findParentNode(root: XmlNode, target: XmlNode): XmlNode | null {
+  if (!root.children) return null;
+  for (const child of root.children) {
+    if (child === target) return root;
+    if (child.type === 'element') {
+      const found = findParentNode(child, target);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 function replaceInTree(nodes: XmlNode[], oldText: string, newText: string, onReplace: () => void): void {

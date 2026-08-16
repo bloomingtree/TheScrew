@@ -292,27 +292,50 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
       // 累积思考内容
       const { updateLastMessageThinking } = useChatStore.getState();
 
+      // 流式渲染节流：逐 chunk 的 flushSync 会强制同步全量渲染（ReactMarkdown 全量重解析），
+      // chunk 到达快于渲染完成时嵌套超限（Maximum update depth exceeded）且 CPU 打满。
+      // 改为把累积文本合并到 ~50ms 一次的批量刷入，配合块级淡入动画依然顺滑。
+      let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const cancelPendingFlush = () => {
+        if (pendingFlushTimer !== null) {
+          clearTimeout(pendingFlushTimer);
+          pendingFlushTimer = null;
+        }
+      };
+
+      const flushAccumulated = () => {
+        updateLastMessageThinking(accumulatedThinking);
+        updateLastMessage(accumulatedContent);
+      };
+
+      const scheduleFlush = () => {
+        if (pendingFlushTimer !== null) return;
+        pendingFlushTimer = setTimeout(() => {
+          pendingFlushTimer = null;
+          flushAccumulated();
+        }, 50);
+      };
+
       const handleChunk = (chunk: string) => {
         // 处理思考内容（\x01THINKING\x02... 格式的思考 token）
         if (chunk.startsWith('\x01THINKING\x02')) {
           ensureAssistantMessage();
           accumulatedThinking += chunk.substring('\x01THINKING\x02'.length);
-          flushSync(() => {
-            updateLastMessageThinking(accumulatedThinking);
-          });
+          scheduleFlush();
           return;
         }
         ensureAssistantMessage();
         accumulatedContent += chunk;
-        // 使用 flushSync 强制立即渲染，确保文本在工具调用之前显示
-        flushSync(() => {
-          updateLastMessage(accumulatedContent);
-        });
+        scheduleFlush();
       };
 
       const handleToolCalls = (toolCalls: any[]) => {
         ensureAssistantMessage();
-        // 使用 flushSync 强制立即渲染
+        // 先同步刷掉已累积的文本，确保文本先于工具调用显示
+        cancelPendingFlush();
+        flushAccumulated();
+        // 使用 flushSync 强制立即渲染（一次性，事件频率低）
         flushSync(() => {
           // Clear writing state for these tool calls (mark as written)
           toolCalls.forEach(tc => {
@@ -353,9 +376,8 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
       };
 
       const handleToolCallWriting = (_data: any) => {
-        flushSync(() => {
-          setToolCallWriting(_data);
-        });
+        // 工具参数写入事件同样高频，交给 zustand/React 自动批处理即可
+        setToolCallWriting(_data);
       };
 
       const removeChunkListener = window.electronAPI.onChatChunk(handleChunk);
@@ -375,6 +397,9 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
       removeToolCallWritingListener();
       removeToolCompleteListener();
       removeTokenUsageListener();
+
+      // 流结束：取消未触发的节流刷入，防止延迟覆盖下面的权威消息
+      cancelPendingFlush();
 
       if (result.success) {
         // 重要：必须使用后端返回的完整消息列表更新 chatStore
@@ -415,9 +440,12 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
           updateLastMessage(accumulatedContent);
         }
       } else {
+        flushAccumulated(); // 先刷入已生成的部分内容
         updateLastMessage(`❌ 错误: ${result.error}`);
       }
     } catch (error: any) {
+      // flushAccumulated 定义在 try 内不可见，这里直接刷入已生成的部分内容
+      useChatStore.getState().updateLastMessageThinking(accumulatedThinking);
       updateLastMessage(`❌ 错误: ${error.message}`);
     } finally {
       setStreaming(false);

@@ -66,9 +66,17 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         const dbIds = new Set(conversationsWithData.map(c => c.id));
         const uniqueUnsavedConversations = unsavedConversations.filter(c => !dbIds.has(c.id));
 
+        // 最终按 id 去重（防止 DB 返回重复或边界情况下出现同 id 多条）
+        const seenIds = new Set<string>();
+        const merged = [...uniqueUnsavedConversations, ...conversationsWithData].filter(c => {
+          if (seenIds.has(c.id)) return false;
+          seenIds.add(c.id);
+          return true;
+        });
+
         set({
           // 将未保存的对话放在最前面
-          conversations: [...uniqueUnsavedConversations, ...conversationsWithData],
+          conversations: merged,
           isLoaded: true,
         });
       } else {

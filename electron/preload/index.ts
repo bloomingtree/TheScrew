@@ -287,6 +287,19 @@ const electronAPI = {
       success: boolean;
       error?: string;
     }>,
+    watchFile: (filepath: string) => ipcRenderer.invoke('filePreview:watch', filepath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    unwatchFile: (filepath: string) => ipcRenderer.invoke('filePreview:unwatch', filepath) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+    onFileChanged: (callback: (data: { path: string }) => void) => {
+      const listener = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('filePreview:fileChanged', listener);
+      return () => ipcRenderer.removeListener('filePreview:fileChanged', listener);
+    },
   },
   // Word 文档 API
   word: {
@@ -516,6 +529,91 @@ const electronAPI = {
   },
   // Memory Summarizer API
   memory: {
+    // ===== MemoryStore IPC =====
+    getLongTerm: () =>
+      ipcRenderer.invoke('memory:getLongTerm') as Promise<{
+        success: boolean;
+        content?: string;
+        error?: string;
+      }>,
+    addLongTerm: (content: string, tags?: string[]) =>
+      ipcRenderer.invoke('memory:addLongTerm', content, tags) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    getTodayNote: () =>
+      ipcRenderer.invoke('memory:getTodayNote') as Promise<{
+        success: boolean;
+        content?: string;
+        error?: string;
+      }>,
+    addTodayNote: (content: string) =>
+      ipcRenderer.invoke('memory:addTodayNote', content) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    getDailyNote: (dateString: string) =>
+      ipcRenderer.invoke('memory:getDailyNote', dateString) as Promise<{
+        success: boolean;
+        content?: string;
+        error?: string;
+      }>,
+    addDailyNote: (content: string, dateString: string) =>
+      ipcRenderer.invoke('memory:addDailyNote', content, dateString) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    getRecentNotes: (days?: number) =>
+      ipcRenderer.invoke('memory:getRecentNotes', days) as Promise<{
+        success: boolean;
+        notes?: Record<string, string>;
+        error?: string;
+      }>,
+    search: (query: string, options?: {
+      types?: Array<'long_term' | 'daily_note'>;
+      maxDays?: number;
+      maxResults?: number;
+    }) =>
+      ipcRenderer.invoke('memory:search', query, options) as Promise<{
+        success: boolean;
+        results?: any[];
+        error?: string;
+      }>,
+    getStats: () =>
+      ipcRenderer.invoke('memory:getStats') as Promise<{
+        success: boolean;
+        stats?: {
+          longTermMemorySize: number;
+          dailyNotesCount: number;
+          totalMemories: number;
+        };
+        error?: string;
+      }>,
+    delete: (type: 'long_term' | 'daily_note', dateString?: string) =>
+      ipcRenderer.invoke('memory:delete', type, dateString) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    clearAll: () =>
+      ipcRenderer.invoke('memory:clearAll') as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    // 扩展：读取/列出文件（供前端 MemoryPanel 使用）
+    readFile: (relPath: string) =>
+      ipcRenderer.invoke('memory:readFile', relPath) as Promise<{
+        success: boolean;
+        content?: string;
+        path?: string;
+        error?: string;
+      }>,
+    listFiles: (scope?: 'topics' | 'daily' | 'all') =>
+      ipcRenderer.invoke('memory:listFiles', scope) as Promise<{
+        success: boolean;
+        files?: Array<{ name: string; relPath: string }>;
+        error?: string;
+      }>,
+    // ===== SessionSummarizer IPC =====
     summarizeSession: (sessionId: string, messages: any[]) =>
       ipcRenderer.invoke('memory:summarizeSession', sessionId, messages) as Promise<{
         success: boolean;
@@ -604,23 +702,44 @@ const electronAPI = {
     ipcRenderer.on('chat:context_compressed', listener);
     return () => ipcRenderer.removeListener('chat:context_compressed', listener);
   },
-  // 用户提问工具
+  // 用户提问工具（多问题向导）
   onUserQuestion: (callback: (data: {
     questionId: string;
-    question: string;
-    options: Array<{ label: string; value: string; description?: string }>;
-    allow_custom: boolean;
-    custom_placeholder: string;
+    questions: Array<{
+      question: string;
+      header: string;
+      options: Array<{ label: string; description?: string }>;
+      multiSelect: boolean;
+      allowOther: boolean;
+    }>;
   }) => void) => {
     const listener = (_event: any, data: any) => callback(data);
     ipcRenderer.on('chat:user_question', listener);
     return () => ipcRenderer.removeListener('chat:user_question', listener);
   },
-  answerQuestion: (questionId: string, answer: string) =>
-    ipcRenderer.invoke('chat:answer_question', { questionId, answer }) as Promise<{
+  answerQuestion: (questionId: string, answers: any) =>
+    ipcRenderer.invoke('chat:answer_question', { questionId, answers }) as Promise<{
       success: boolean;
       error?: string;
     }>,
+
+  // ===== 任务列表（与 AI 工具共享 tasks.json）=====
+  listTasks: () =>
+    ipcRenderer.invoke('tasks:list') as Promise<{
+      success: boolean;
+      tasks: any[];
+      error?: string;
+    }>,
+  updateTaskStatus: (id: string, status: 'pending' | 'in_progress' | 'completed' | 'cancelled') =>
+    ipcRenderer.invoke('tasks:updateStatus', { id, status }) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  onTasksChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('tasks:changed', listener);
+    return () => ipcRenderer.removeListener('tasks:changed', listener);
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

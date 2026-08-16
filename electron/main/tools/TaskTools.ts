@@ -2,7 +2,7 @@
  * TaskTools - 任务管理工具
  * 为 AI 助手提供秘书/管家角色能力，管理用户的待办任务
  *
- * 存储：workspacePath/.config/data/tasks.json
+ * 存储：应用根目录 .config/data/tasks.json（PathManager 管理，不依赖工作空间）
  * 零外部依赖，纯 Node.js 实现
  */
 
@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { Tool } from './ToolManager';
+import { getPathManager } from '../config/PathManager';
 
 // ==================== 类型定义 ====================
 
@@ -19,7 +20,7 @@ interface SubTask {
   completed: boolean;
 }
 
-interface Task {
+export interface Task {
   id: string;
   humanId: string;
   title: string;
@@ -35,7 +36,7 @@ interface Task {
   subtasks: SubTask[];
 }
 
-interface TaskStore {
+export interface TaskStore {
   tasks: Task[];
   nextId: number;
 }
@@ -52,6 +53,7 @@ const VALID_SORT_ORDERS = ['asc', 'desc'] as const;
 // ==================== 工具空间路径 ====================
 
 // 使用 globalThis + Symbol.for 获取工作空间路径（跨 chunk 共享）
+// 仅用于一次性迁移旧数据，日常存储不再依赖工作空间
 const _workspaceKey = Symbol.for('zero-employee:getWorkspacePath()');
 
 function getWorkspacePath(): string | null {
@@ -61,19 +63,28 @@ function getWorkspacePath(): string | null {
 // ==================== 存储操作 ====================
 
 /**
- * 获取任务数据文件路径，确保目录存在
+ * 获取任务数据文件路径（应用根目录 .config/data/，由 PathManager 统一管理）
  */
 function getTasksFilePath(): string {
+  return path.join(getPathManager().getDataPath(), TASKS_FILE);
+}
+
+/**
+ * 旧版存储位置（workspacePath/.config/data/tasks.json）迁移
+ * 新文件不存在而旧文件存在时，将旧数据复制过来（仅执行一次）
+ */
+function migrateLegacyStoreIfNeeded(newFilePath: string): void {
+  if (fs.existsSync(newFilePath)) return;
   const workspaceRoot = getWorkspacePath();
-  if (!workspaceRoot) {
-    throw new Error('工作空间未设置，请先让用户设置工作空间');
+  if (!workspaceRoot) return;
+  const legacyPath = path.join(workspaceRoot, '.config', 'data', TASKS_FILE);
+  try {
+    if (fs.existsSync(legacyPath)) {
+      fs.copyFileSync(legacyPath, newFilePath);
+    }
+  } catch {
+    // 迁移失败忽略，使用空存储
   }
-  const dataDir = path.join(workspaceRoot, '.config', 'data');
-  // 确保目录存在
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  return path.join(dataDir, TASKS_FILE);
 }
 
 /**
@@ -81,6 +92,7 @@ function getTasksFilePath(): string {
  */
 function loadStore(): TaskStore {
   const filePath = getTasksFilePath();
+  migrateLegacyStoreIfNeeded(filePath);
   if (!fs.existsSync(filePath)) {
     const empty: TaskStore = { tasks: [], nextId: 1 };
     saveStore(empty);
@@ -88,6 +100,50 @@ function loadStore(): TaskStore {
   }
   const raw = fs.readFileSync(filePath, 'utf-8');
   return JSON.parse(raw) as TaskStore;
+}
+
+/**
+ * 公共 helper：供 IPC 层（electron/main/ipc/tasks.ts）复用，读取任务列表快照
+ * 读取失败时返回空数组（不抛错）。
+ */
+export function listAllTasksForIPC(): Task[] {
+  try {
+    return loadStore().tasks;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 公共 helper：供 IPC 层直接修改任务状态（供前端 UI 调用，不走 AI 工具协议）
+ * 成功返回更新后的 task，失败抛错。
+ */
+export function updateTaskStatusForIPC(
+  id: string,
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+): Task {
+  if (!id || typeof id !== 'string') {
+    throw new Error('必须提供任务 ID');
+  }
+  if (!['pending', 'in_progress', 'completed', 'cancelled'].includes(status)) {
+    throw new Error(`无效的状态 "${status}"`);
+  }
+  const store = loadStore();
+  const task = findTask(store, id);
+  if (!task) {
+    throw new Error(`未找到任务 "${id}"`);
+  }
+  const oldStatus = task.status;
+  task.status = status;
+  if (status === 'completed' && oldStatus !== 'completed') {
+    task.completedAt = nowISO();
+  }
+  if (oldStatus === 'completed' && status !== 'completed') {
+    task.completedAt = null;
+  }
+  task.updatedAt = nowISO();
+  saveStore(store);
+  return task;
 }
 
 /**

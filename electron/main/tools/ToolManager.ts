@@ -236,7 +236,10 @@ export class ToolManager {
         // 不能用 require('./FileTools')，因为 Vite 打包后不存在独立模块文件，require 会静默失败
         const _workspaceKey = Symbol.for('zero-employee:getWorkspacePath()');
         const workspacePath = (globalThis as any)[_workspaceKey] ?? null;
-        console.log(`[ToolManager] Path resolution check - workspace: ${workspacePath}, tool: ${toolCall.function.name}`);
+        // namespace=config 时路径是相对于 .config 配置目录的，不应拼接到 workspace
+        // 否则 read_file({filepath:"skills/x/SKILL.md", namespace:"config"}) 会被错误解析到 workspace 下
+        const skipWorkspaceResolution = args.namespace === 'config';
+        console.log(`[ToolManager] Path resolution check - workspace: ${workspacePath}, tool: ${toolCall.function.name}, skipWorkspace: ${skipWorkspaceResolution}`);
         for (const key of filePathKeys) {
           if (typeof args[key] === 'string') {
             const val = args[key];
@@ -244,6 +247,8 @@ export class ToolManager {
             if (val.match(/^[A-Za-z]:[\\\/]/) || val.startsWith('/')) continue;
             // 跳过 URL
             if (val.startsWith('http://') || val.startsWith('https://')) continue;
+            // namespace=config 时路径相对于 .config 目录，交给工具自己解析，不拼 workspace
+            if (skipWorkspaceResolution) continue;
             // 相对路径 → 拼接工作区路径
             if (workspacePath) {
               args[key] = path.join(workspacePath, val);
@@ -261,6 +266,16 @@ export class ToolManager {
 
       // 记录工具执行结果到审计日志
       pm.logExecutionResult(tool.name, 'success');
+
+      // 任务工具修改后通知前端面板刷新（tasks:changed 广播）
+      if (tool.name === 'task_create' || tool.name === 'task_update' || tool.name === 'task_complete' || tool.name === 'task_list') {
+        try {
+          const { broadcastTasksChanged } = require('../ipc/tasks');
+          broadcastTasksChanged();
+        } catch {
+          // IPC 尚未注册时忽略
+        }
+      }
 
       // 工具输出截断 - 防止大块输出撑爆上下文
       const truncatedResult = await truncateToolOutput(

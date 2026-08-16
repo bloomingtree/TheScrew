@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { FileText, ExternalLink, RefreshCw, ZoomIn, ZoomOut } from 'lucide-react';
+import { useFilePreviewWatcher } from '@/hooks/useFilePreviewWatcher';
 
 interface WordPreviewProps {
   filepath: string;
@@ -87,6 +88,9 @@ const WordPreview: React.FC<WordPreviewProps> = ({ filepath }) => {
   useEffect(() => {
     loadFile();
   }, [loadFile]);
+
+  // 监听磁盘文件变更，自动重新加载
+  useFilePreviewWatcher(filepath, loadFile);
 
   const formatFileSize = (bytes?: number): string => {
     if (!bytes) return '-';

@@ -124,6 +124,12 @@ export interface CLIOptions {
   maxOutput?: number;
   /** Verbose logging */
   verbose?: boolean;
+  /** 行数（add table 时使用） */
+  rows?: string;
+  /** 列数（add table 时使用） */
+  cols?: string;
+  /** 初始文本（add paragraph 时使用） */
+  text?: string;
 }
 
 // ── Document handler interface ─────────────────────────────────

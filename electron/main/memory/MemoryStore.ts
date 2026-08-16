@@ -11,11 +11,42 @@
 import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
 import { join } from 'path';
 import { app } from 'electron';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync, renameSync, copyFileSync } from 'fs';
 import { IMemoryEntry, IMemorySearchResult, MemoryEntryType } from '../core/types';
+import { getPathManager } from '../config/PathManager';
+
+/**
+ * 默认 MEMORY.md 模板（首次创建时写入）
+ */
+const DEFAULT_MEMORY_INDEX_TEMPLATE = `<!-- 编辑本文件后重启应用生效；或让 AI 通过 memory_save 工具修改 -->
+# 记忆索引
+
+> 这是你的长期记忆。每次启动都会自动加载到对话上下文。
+>
+> 规则：
+> - 本文件超过 200 行后，把详细内容拆分到 topics/*.md，本文件只保留索引和链接
+> - 写入前先用 memory_search 确认是否已存在，避免重复
+> - 通过 memory_save 工具写入，不要用 write_file
+> - 只记录"反复出现的偏好"、"关键决策"、"重要事实"；不要记录临时状态
+
+## 用户偏好
+
+（待补充）
+
+## 项目事实
+
+（待补充）
+
+## 常见问题
+
+（待补充）
+`;
 
 /**
  * Memory Store - long-term memory and daily notes
+ *
+ * P0 重构：存储路径从 app.getPath('userData')/memory 迁移到 PathManager.getMemoryPath()，
+ * 即 {configPath}/memory/。统一目录结构：daily/、topics/、archive/、session_summaries/。
  */
 export class MemoryStore {
   private memoryPath: string;
@@ -23,31 +54,100 @@ export class MemoryStore {
   private initialized: boolean = false;
 
   constructor() {
-    const userDataPath = app.getPath('userData');
-    this.memoryPath = join(userDataPath, 'memory');
-    this.dailyNotesPath = join(this.memoryPath, 'daily_notes');
+    const pathManager = getPathManager();
+    this.memoryPath = pathManager.getMemoryPath();
+    this.dailyNotesPath = join(this.memoryPath, 'daily');
+
+    // 确保子目录存在（同步，constructor 中不能 await）
+    const requiredDirs = [
+      this.memoryPath,
+      this.dailyNotesPath,
+      join(this.memoryPath, 'topics'),
+      join(this.memoryPath, 'archive'),
+      join(this.memoryPath, 'session_summaries'),
+    ];
+    for (const dir of requiredDirs) {
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+    }
+
+    // 一次性迁移：旧 userData/memory/long_term.md → 新位置
+    this.migrateLegacyLongTerm();
+
+    // 确保 MEMORY.md 索引文件存在
+    this.ensureMemoryIndexFile();
   }
 
   /**
-   * Initialize - create necessary directories
+   * 一次性迁移旧版 long_term.md（位于 userData/memory/）到新位置
+   * - 若新位置尚无 long_term.md，且旧位置存在，则复制过来
+   * - 不删除旧文件，避免回滚风险（用户可手动清理）
+   */
+  private migrateLegacyLongTerm(): void {
+    try {
+      const newLongTermPath = join(this.memoryPath, 'long_term.md');
+      if (existsSync(newLongTermPath)) {
+        return; // 新位置已有，跳过
+      }
+      const legacyUserDataPath = app.getPath('userData');
+      const legacyLongTermPath = join(legacyUserDataPath, 'memory', 'long_term.md');
+      if (existsSync(legacyLongTermPath)) {
+        copyFileSync(legacyLongTermPath, newLongTermPath);
+        console.log('[MemoryStore] Migrated legacy long_term.md from userData to', newLongTermPath);
+
+        // 同时尝试迁移旧 daily_notes/ 目录下的 .md 文件到新 daily/
+        const legacyDailyNotesPath = join(legacyUserDataPath, 'memory', 'daily_notes');
+        if (existsSync(legacyDailyNotesPath)) {
+          try {
+            const { readdirSync } = require('fs');
+            const files = readdirSync(legacyDailyNotesPath) as string[];
+            for (const file of files) {
+              if (file.endsWith('.md')) {
+                const src = join(legacyDailyNotesPath, file);
+                const dest = join(this.dailyNotesPath, file);
+                if (!existsSync(dest)) {
+                  copyFileSync(src, dest);
+                }
+              }
+            }
+            console.log('[MemoryStore] Migrated legacy daily_notes/ files');
+          } catch (e) {
+            console.warn('[MemoryStore] Failed to migrate legacy daily_notes:', e);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[MemoryStore] Legacy migration failed (non-fatal):', e);
+    }
+  }
+
+  /**
+   * 确保 MEMORY.md 索引文件存在；不存在则写入默认模板
+   */
+  private ensureMemoryIndexFile(): void {
+    try {
+      const indexPath = join(this.memoryPath, 'MEMORY.md');
+      if (!existsSync(indexPath)) {
+        const { writeFileSync } = require('fs');
+        writeFileSync(indexPath, DEFAULT_MEMORY_INDEX_TEMPLATE, 'utf-8');
+        console.log('[MemoryStore] Created default MEMORY.md at', indexPath);
+      }
+    } catch (e) {
+      console.warn('[MemoryStore] Failed to ensure MEMORY.md:', e);
+    }
+  }
+
+  /**
+   * Initialize - directories now created in constructor; kept for backward compat
    */
   async initialize(): Promise<void> {
     if (this.initialized) {
       return;
     }
-
-    if (!existsSync(this.memoryPath)) {
-      await mkdir(this.memoryPath, { recursive: true });
-      console.log('[MemoryStore] Created memory directory:', this.memoryPath);
-    }
-
-    if (!existsSync(this.dailyNotesPath)) {
-      await mkdir(this.dailyNotesPath, { recursive: true });
-      console.log('[MemoryStore] Created daily notes directory:', this.dailyNotesPath);
-    }
-
+    // 目录已在 constructor 中通过 mkdirSync 创建，这里只做标记
     this.initialized = true;
-    console.log('[MemoryStore] Initialized');
+    console.log('[MemoryStore] Initialized at', this.memoryPath);
   }
 
   /**

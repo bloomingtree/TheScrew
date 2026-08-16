@@ -182,6 +182,21 @@ code {
   }
 }
 
+/* Markdown 块级元素淡入（流式输出时新块"隐隐出现"，OpenWebUI 风格）
+   已存在的 DOM 元素不会重复触发动画，仅新插入的块淡入 */
+@keyframes md-block-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.md-fade-in {
+  animation: md-block-fade-in 0.4s ease-out both;
+}
+
 .animate-float {
   animation: float 6s ease-in-out infinite;
 }

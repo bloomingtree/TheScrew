@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Tool } from './ToolManager';
 import { getPathManager, CONFIG_DIR_NAME } from '../config/PathManager';
+import { execOfficeCLI, isOfficeCLIAvailable } from './OfficeCLITools';
 
 const execFileAsync = promisify(execFile);
 
@@ -16,13 +17,12 @@ const READ_FILE_MAX_LINE_LENGTH = 2000; // 单行最大字符数
 const READ_FILE_MAX_BYTES = 50 * 1024;  // 最大读取 50KB
 const READ_FILE_LINE_SUFFIX = `... (line truncated to ${READ_FILE_MAX_LINE_LENGTH} chars)`;
 
-// 二进制文件扩展名（不含 PDF 和图片，这些有专用读取器）
+// 二进制文件扩展名（不含 PDF / 图片 / Office 文档，这些有专用读取器）
 const BINARY_EXTENSIONS = new Set([
   '.zip', '.exe', '.dll', '.so', '.dylib', '.bin', '.obj', '.o', '.a',
   '.lib', '.pdb', '.dSYM', '.woff', '.woff2', '.ttf', '.eot', '.ico',
   '.svg',
   '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm',
-  '.ppt', '.pptx',
   '.7z', '.tar', '.gz', '.bz2', '.xz', '.rar', '.iso', '.dmg',
   '.sqlite', '.db', '.mdb', '.class', '.jar', '.war', '.pyc',
 ]);
@@ -36,6 +36,115 @@ export function setWorkspacePath(p: string | null) {
 
 export function getWorkspacePath(): string | null {
   return (globalThis as any)[_workspaceKey] ?? null;
+}
+
+/**
+ * Office 文档读取提示：引导 AI 使用 office_* 系列工具进行元素级操作
+ */
+const OFFICE_EDIT_HINT = '\n\n---\n[提示] 如需查看文档结构、查询或修改具体元素（段落/单元格/形状等），请使用 office_view、office_get、office_query 等工具。';
+
+/**
+ * 尝试通过 OfficeCLI（office_view --json）读取 Office 文档结构化大纲。
+ * - 适用于 .docx / .xlsx / .pptx
+ * - 返回 markdown 化的内容 + 编辑 hint；OfficeCLI 不可用或调用失败时返回 null（由调用方回退）
+ */
+async function tryReadOfficeViaCLI(
+  filepath: string,
+  fullPath: string,
+  ext: string,
+  size: number,
+  namespace: string,
+): Promise<any | null> {
+  if (!isOfficeCLIAvailable()) return null;
+  try {
+    const raw = await execOfficeCLI(['view', fullPath, '--json'], 30000);
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // 非 JSON 输出（可能是错误信息或纯文本），直接当作 content
+      return {
+        success: true,
+        content: (typeof raw === 'string' ? raw : '') + OFFICE_EDIT_HINT,
+        path: filepath,
+        namespace,
+        fullPath,
+        fileType: ext.startsWith('.doc') ? 'word' : ext.startsWith('.xls') ? 'excel' : 'ppt',
+        size,
+      };
+    }
+
+    // 把 JSON 结构压成 markdown 大纲（AI 友好）
+    const md = officeJsonToMarkdown(parsed, ext);
+    return {
+      success: true,
+      content: md + OFFICE_EDIT_HINT,
+      path: filepath,
+      namespace,
+      fullPath,
+      fileType: ext.startsWith('.doc') ? 'word' : ext.startsWith('.xls') ? 'excel' : 'ppt',
+      size,
+      structured: parsed,
+    };
+  } catch (error: any) {
+    // CLI 调用失败：返回 null 让调用方走 fallback
+    console.warn(`[FileTools] OfficeCLI view failed for ${filepath}:`, error?.message);
+    return null;
+  }
+}
+
+/**
+ * 把 office_view 的 JSON 输出转换为 AI 友好的 markdown 摘要。
+ * 容错处理：常见字段缺失时退化为 JSON 片段。
+ */
+function officeJsonToMarkdown(parsed: any, ext: string): string {
+  if (!parsed || typeof parsed !== 'object') return '';
+  const lines: string[] = [];
+
+  // PowerPoint：slides[]
+  if (Array.isArray(parsed.slides)) {
+    lines.push(`# PowerPoint 文档（共 ${parsed.slides.length} 张幻灯片）\n`);
+    parsed.slides.forEach((sl: any, i: number) => {
+      lines.push(`## 幻灯片 ${i + 1}${sl?.title ? `：${sl.title}` : ''}`);
+      if (Array.isArray(sl.shapes)) {
+        sl.shapes.forEach((sh: any) => {
+          const text = typeof sh === 'string' ? sh : (sh?.text || sh?.content || '');
+          if (text) lines.push(`- ${text}`);
+        });
+      }
+      if (sl?.notes) lines.push(`_备注：${sl.notes}_`);
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
+  // Excel：sheets[]
+  if (Array.isArray(parsed.sheets)) {
+    lines.push(`# Excel 文档（共 ${parsed.sheets.length} 个工作表）\n`);
+    parsed.sheets.forEach((sh: any) => {
+      lines.push(`## 工作表：${sh?.name || '(未命名)'}（${sh?.rowCount ?? '?'} 行 × ${sh?.colCount ?? '?'} 列）`);
+      lines.push('（详细数据请用 office_get 获取具体范围）');
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
+  // Word：paragraphs[] 或 sections[]
+  if (Array.isArray(parsed.paragraphs) || Array.isArray(parsed.sections)) {
+    const items = parsed.paragraphs || parsed.sections;
+    lines.push(`# Word 文档（共 ${items.length} 个段落/节）\n`);
+    items.forEach((p: any) => {
+      const text = typeof p === 'string' ? p : (p?.text || p?.content || '');
+      const style = typeof p === 'object' ? (p?.style || p?.heading || '') : '';
+      const prefix = style ? `**[${style}]** ` : '';
+      if (text) lines.push(`${prefix}${text}`);
+    });
+    return lines.join('\n');
+  }
+
+  // 兜底：直接打印 JSON（截断到 6000 字符）
+  const json = JSON.stringify(parsed, null, 2);
+  return json.length > 6000 ? json.substring(0, 6000) + '\n... (JSON 已截断，请用 office_get 获取详细元素)' : json;
 }
 
 /**
@@ -182,7 +291,9 @@ export const fileTools: Tool[] = [
 
   {
     name: 'read_file',
-    description: `读取文件内容，支持文本文件、Word 文档（.docx）、Excel 表格（.xlsx）、PDF 文档（.pdf）和图片文件。支持从工作空间或配置目录（${CONFIG_DIR_NAME}）读取文件。
+    description: `读取文件内容，支持文本文件、Office 文档（.docx/.xlsx/.pptx，自动路由到 OfficeCLI 获取结构化大纲）、PDF 文档（.pdf）和图片文件。支持从工作空间或配置目录（${CONFIG_DIR_NAME}）读取文件。
+
+**Office 文档**：本工具会自动识别 .docx/.xlsx/.pptx 并通过 OfficeCLI 读取结构化内容（含 hint 提示后续使用 office_view/office_get 做元素级操作），无需先调用 read_file 再切换到 office_view。
 
 **必需参数**：
 - filepath: 文件路径（如 "README.md" 或 "skills/docx/SKILL.md"）
@@ -201,8 +312,9 @@ export const fileTools: Tool[] = [
 - 分页读取大文件：filepath="large.log", offset=1, limit=100
 - 读取第 200-300 行：filepath="src/index.ts", offset=200, limit=100
 - 读取配置文件：filepath="skills/docx/SKILL.md", namespace="config"
-- 读取 Word 文档：filepath="report.docx"
-- 读取 Excel 指定工作表：filepath="data.xlsx", sheet="Sheet1"
+- 读取 Word 文档：filepath="report.docx"（自动结构化）
+- 读取 Excel：filepath="data.xlsx"（自动结构化）
+- 读取 PowerPoint：filepath="slides.pptx"（自动结构化）
 - 读取 PDF 文件：filepath="document.pdf"
 - 读取 PDF 指定页：filepath="document.pdf", pages="1-5,8"
 - 读取图片信息：filepath="photo.jpg"
@@ -284,11 +396,14 @@ export const fileTools: Tool[] = [
 
         // Word 文档路由
         if (mode !== 'text' && ['.doc', '.docx'].includes(ext)) {
+          // 优先尝试 OfficeCLI（提供结构化大纲）；失败则回退到 Python 提取纯文本
+          const cliResult = await tryReadOfficeViaCLI(filepath, fullPath, ext, stats.size, namespace);
+          if (cliResult) return cliResult;
           try {
             const content = await readWordDocument(fullPath, extract_images);
             return {
               success: true,
-              content,
+              content: content + OFFICE_EDIT_HINT,
               path: filepath,
               namespace,
               fullPath,
@@ -302,11 +417,13 @@ export const fileTools: Tool[] = [
 
         // Excel 文档路由
         if (mode !== 'text' && ['.xls', '.xlsx', '.xlsm'].includes(ext)) {
+          const cliResult = await tryReadOfficeViaCLI(filepath, fullPath, ext, stats.size, namespace);
+          if (cliResult) return cliResult;
           try {
             const content = await readExcelDocument(fullPath, sheet);
             return {
               success: true,
-              content,
+              content: content + OFFICE_EDIT_HINT,
               path: filepath,
               namespace,
               fullPath,
@@ -316,6 +433,17 @@ export const fileTools: Tool[] = [
           } catch (error: any) {
             return { success: false, error: `读取 Excel 文件失败: ${error.message}` };
           }
+        }
+
+        // PowerPoint 文档路由（仅通过 OfficeCLI 读取，Python 不支持）
+        if (mode !== 'text' && ['.ppt', '.pptx'].includes(ext)) {
+          const cliResult = await tryReadOfficeViaCLI(filepath, fullPath, ext, stats.size, namespace);
+          if (cliResult) return cliResult;
+          return {
+            success: false,
+            error: `读取 PowerPoint 文件失败：OfficeCLI 不可用。请确认已安装 officecli-lite 二进制（.config/bin/）`,
+            hint: 'OfficeCLI 未安装时无法读取 .pptx；可让用户使用 PowerPoint 导出 PDF 后再读',
+          };
         }
 
         // PDF 文档路由

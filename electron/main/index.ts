@@ -36,10 +36,15 @@ import { registerFileEditorHandlers } from './ipc/fileEditor';
 import { getTransferService } from './p2p/TransferService';
 import { registerAttachmentHandlers } from './ipc/attachments';
 import { registerPermissionHandlers } from './ipc/permission';
+import { registerTasksHandlers } from './ipc/tasks';
+import { registerMemoryConsolidateJob, checkAndRunConsolidateOnStartup } from './scheduler/MemoryConsolidator';
+import { getSessionSummarizer } from './memory/SessionSummarizer';
+import { getConversationWithMessages } from './db';
 import { attachmentTools } from './tools/AttachmentTools';
 import { officeCLITools, officeCLIToolGroup } from './tools/OfficeCLITools';
 import { knowledgeTools, knowledgeToolGroup } from './tools/KnowledgeTools';
 import { taskTools } from './tools/TaskTools';
+import { memoryTools } from './tools/MemoryTools';
 import { remoteTools, remoteToolGroup } from './tools/RemoteTools';
 import { dbTools, dbToolGroup } from './tools/DbTools';
 import { pdfTools, pdfToolGroup } from './tools/PdfTools';
@@ -170,6 +175,12 @@ app.whenReady().then(async () => {
 
   await cronService.start();
 
+  // P2-3: 注册每日凌晨 3:00 的记忆整理任务（幂等：已存在则跳过）
+  await registerMemoryConsolidateJob(cronService);
+
+  // P2-3: 启动补偿检查——若距上次 consolidate > 24h 立即派发一次（fire-and-forget）
+  await checkAndRunConsolidateOnStartup();
+
   // 初始化 HeartbeatService (如果设置了工作空间)
   const workspacePath = store.get('workspacePath') as string | undefined;
 
@@ -295,6 +306,18 @@ app.whenReady().then(async () => {
     estimatedTokens: 400,
   });
 
+  // 注册长期记忆工具到 ToolManager（memory_save / memory_search / memory_read）
+  for (const tool of memoryTools) {
+    toolManager.registerTool(tool);
+  }
+  registerToolSetMeta({
+    name: 'memory',
+    description: '长期记忆管理（写入/搜索/读取）',
+    capabilities: ['写入记忆', '搜索记忆', '读取记忆', '章节合并'],
+    keywords: ['记忆', 'memory', '记住', '笔记', '偏好', '长期'],
+    estimatedTokens: 500,
+  });
+
   // 注册远程操作工具到 ToolManager
   for (const tool of remoteTools) {
     toolManager.registerTool(tool);
@@ -382,6 +405,7 @@ app.whenReady().then(async () => {
   registerFileEditorHandlers();
   registerAttachmentHandlers();
   registerPermissionHandlers();
+  registerTasksHandlers();
 
   // TODO: P2P 传输服务待调试和完善后再启用
   // 启动 P2P 传输服务（HTTP 服务器）
@@ -411,6 +435,32 @@ app.on('before-quit', () => {
   cronService.stop();
   // Heartbeat 也要停止（之前遗漏）
   getHeartbeatService()?.stop();
+
+  // P2-1: 应用退出时触发当前会话总结（fire-and-forget，不阻塞退出）
+  // 写文件 + 调 LLM 在后台执行，写不完就丢；下次启动还能从对话 DB 重新总结
+  try {
+    const activeId = (globalThis as any)[Symbol.for('zero-employee:activeConversationId')] as string | null;
+    if (activeId) {
+      const conv = getConversationWithMessages(activeId);
+      if (conv && conv.messages && conv.messages.length >= 6) {
+        const messages = conv.messages.map((m: any) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content ?? '',
+          timestamp: m.timestamp ?? Date.now(),
+        }));
+        // fire-and-forget，不 await，让退出立即完成
+        getSessionSummarizer()
+          .summarizeSession(activeId, messages, conv.title)
+          .catch((e: unknown) => {
+            console.error('[Main] Exit summary failed:', e);
+          });
+        console.log(`[Main] Triggered exit summary for conversation ${activeId}`);
+      }
+    }
+  } catch (e: any) {
+    console.error('[Main] Failed to trigger exit summary:', e);
+  }
 });
 
 ipcMain.handle('get-app-version', () => {
