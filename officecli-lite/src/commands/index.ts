@@ -15,6 +15,7 @@ import { DocxHandler } from '../formats/docx';
 import { XlsxHandler } from '../formats/xlsx';
 import { PptxHandler } from '../formats/pptx';
 import type { BaseDocumentHandler } from '../formats/base';
+import { cmdClone, cmdLayouts, cmdNewSlide } from './pptx-template';
 
 // ── Handler lookup ─────────────────────────────────────────────
 
@@ -438,6 +439,27 @@ export const COMMANDS: Record<string, CommandEntry> = {
     handler: cmdValidate,
     minArgs: 0,
     usage: 'validate <file>',
+  },
+  clone: {
+    name: 'clone',
+    description: 'Copy a template .pptx (theme/masters/layouts/media kept, slides cleared)',
+    handler: cmdClone,
+    minArgs: 1,
+    usage: 'clone <target_file> <template_file>',
+  },
+  layouts: {
+    name: 'layouts',
+    description: 'List slide layouts with placeholders, backgrounds, and theme fonts',
+    handler: cmdLayouts,
+    minArgs: 0,
+    usage: 'layouts <file>',
+  },
+  newslide: {
+    name: 'newslide',
+    description: 'Add a slide using a slide layout (placeholders copied from layout)',
+    handler: cmdNewSlide,
+    minArgs: 0,
+    usage: 'newslide <file> --layout <n> [--title t] [--subtitle t] [--texts json-array]',
   },
 };
 

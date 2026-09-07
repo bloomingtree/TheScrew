@@ -5,11 +5,12 @@
  */
 
 import { createReadStream } from 'fs';
-import { opendir, stat as statAsync } from 'fs/promises';
+import { opendir, stat as statAsync, writeFile, mkdir } from 'fs/promises';
 import * as readline from 'readline';
 import * as path from 'path';
 import { Tool } from './ToolManager';
 import { getWorkspacePath, SEARCH_CONFIG } from './FileTools';
+import { getPathManager } from '../config/PathManager';
 
 // ==================== 常量 ====================
 
@@ -20,6 +21,12 @@ const MAX_SEARCH_CONTENT_RESULTS = 20;
 const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024; // 1MB
 const MAX_CONCURRENT_FILE_READS = 5;
 const MAX_TRAVERSAL_DEPTH = 30;
+
+/**
+ * 结果超出 maxResults 时的完整收集上限（用于保存完整结果到文件）。
+ * 超过此上限的匹配放弃收集，但会在 hint 中说明。
+ */
+const FULL_COLLECT_LIMIT = 2000;
 
 const GREP_LINE_SUFFIX = `... (truncated to ${MAX_GREP_LINE_LENGTH} chars)`;
 
@@ -36,6 +43,25 @@ const SKIP_EXTENSIONS = new Set([
 ]);
 
 // ==================== 辅助类型 ====================
+
+/**
+ * 结果被截断时，把完整结果保存到 tool-results 目录（与 OutputTruncator 同一位置），
+ * 每行一条，供 AI 通过 read 的 offset/limit 分页读取。
+ * 保存失败返回 undefined，调用方回退到普通截断提示。
+ */
+async function saveFullResults(lines: string[], toolName: string): Promise<string | undefined> {
+  try {
+    const dir = path.join(getPathManager().getDataPath(), 'tool-results');
+    await mkdir(dir, { recursive: true });
+    const filename = `${toolName}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`;
+    const filePath = path.join(dir, filename);
+    await writeFile(filePath, lines.join('\n'), 'utf-8');
+    return filePath;
+  } catch (error) {
+    console.error(`[SearchTools] Failed to save full ${toolName} results:`, error);
+    return undefined;
+  }
+}
 
 interface GrepMatch {
   file: string;
@@ -64,7 +90,8 @@ const grepTool: Tool = {
 - pattern: 搜索模式（正则表达式或纯文本）
 
 **可选参数**：
-- path: 搜索的目录路径（相对于工作空间，默认为根目录）
+- path: 搜索的目录路径（相对于指定命名空间根目录，默认为根目录）
+- namespace: 命名空间，workspace（工作空间，默认）或 config（.config 配置目录——搜索长期记忆用 namespace="config", path="memory"）
 - include: 文件过滤模式（如 "*.ts"、"*.py"、"*.md"）
 - contextLines: 上下文行数（显示匹配行前后各 N 行，默认 2）
 - maxResults: 最大返回结果数（默认 ${MAX_GREP_RESULTS}）
@@ -74,6 +101,7 @@ const grepTool: Tool = {
 - 每个匹配包含文件路径、行号、匹配内容和上下文行
 - 自动跳过二进制文件和超过 1MB 的大文件
 - 自动忽略 node_modules、.git、dist 等目录
+- 结果超过 maxResults 时，完整结果（最多 ${FULL_COLLECT_LIMIT} 条）自动保存到文件，可用 read 的 offset/limit 分页读取（见返回的 hint）
 
 **使用示例**：
 - 搜索函数定义：pattern="function\\s+\\w+", include="*.ts"
@@ -94,7 +122,13 @@ const grepTool: Tool = {
       },
       path: {
         type: 'string',
-        description: '搜索的目录路径（相对于工作空间根目录，默认为根目录）',
+        description: '搜索的目录路径（相对于指定命名空间根目录，默认为根目录）',
+      },
+      namespace: {
+        type: 'string',
+        description: '命名空间：workspace（工作空间）或 config（.config 配置目录，可搜索 memory/ 长期记忆）',
+        enum: ['workspace', 'config'],
+        default: 'workspace',
       },
       contextLines: {
         type: 'number',
@@ -112,16 +146,16 @@ const grepTool: Tool = {
     required: ['pattern'],
   },
 
-  handler: async ({ pattern, include, path: searchPath, contextLines, maxResults, caseSensitive }) => {
+  handler: async ({ pattern, include, path: searchPath, namespace = 'workspace', contextLines, maxResults, caseSensitive }) => {
     try {
-      const workspace = getWorkspacePath();
-      if (!workspace) {
+      const rootPath = namespace === 'config' ? getPathManager().getConfigPath() : getWorkspacePath();
+      if (!rootPath) {
         return { success: false, error: '工作空间未设置' };
       }
 
       const searchDir = searchPath
-        ? path.resolve(workspace, searchPath)
-        : workspace;
+        ? path.resolve(rootPath, searchPath)
+        : rootPath;
 
       const ctxLines = contextLines ?? 2;
       const maxRes = maxResults ?? MAX_GREP_RESULTS;
@@ -141,36 +175,32 @@ const grepTool: Tool = {
       await collectFiles(searchDir, searchDir, files, includeRegex, 0);
 
       // 搜索文件内容
+      // 注意：收集上限为 FULL_COLLECT_LIMIT 而非 maxRes —— 超出 maxResults 的匹配
+      // 会保存到文件供 read 分页读取，而不是直接丢弃
       const results: GrepMatch[] = [];
-      let truncated = false;
+      let hitCollectLimit = false;
 
       // 限制并发读取
       const batches = batchArray(files, MAX_CONCURRENT_FILE_READS);
 
       for (const batch of batches) {
-        if (results.length >= maxRes) {
-          truncated = true;
+        if (results.length >= FULL_COLLECT_LIMIT) {
+          hitCollectLimit = true;
           break;
         }
 
         const batchResults = await Promise.all(
-          batch.map(filePath => searchFileContent(filePath, searchDir, regex, ctxLines, maxRes - results.length))
+          batch.map(filePath => searchFileContent(filePath, searchDir, regex, ctxLines, FULL_COLLECT_LIMIT - results.length))
         );
 
         for (const batchResult of batchResults) {
-          if (results.length >= maxRes) {
-            truncated = true;
-            break;
-          }
           if (!batchResult) continue;
-
-          const remaining = maxRes - results.length;
-          const toAdd = batchResult.slice(0, remaining);
-          results.push(...toAdd);
-
-          if (batchResult.length > remaining) {
-            truncated = true;
-            break;
+          for (const match of batchResult) {
+            if (results.length >= FULL_COLLECT_LIMIT) {
+              hitCollectLimit = true;
+              break;
+            }
+            results.push(match);
           }
         }
       }
@@ -186,13 +216,28 @@ const grepTool: Tool = {
         };
       }
 
+      const truncated = results.length > maxRes || hitCollectLimit;
+      const displayResults = results.slice(0, maxRes);
+
+      // 截断时保存完整结果到文件（每行一条，格式 文件:行号:内容）
+      let hint: string | undefined;
+      if (truncated) {
+        const savedPath = await saveFullResults(
+          results.map(m => `${m.file}:${m.line}: ${m.content}`),
+          'grep'
+        );
+        hint = savedPath
+          ? `共 ${results.length}${hitCollectLimit ? '+' : ''} 条匹配，仅返回前 ${maxRes} 条。完整结果已保存至 ${savedPath}（每行一条，格式 文件:行号:内容），可用 read 的 offset/limit 参数分页读取`
+          : `结果已截断，仅显示前 ${maxRes} 条匹配。请缩小搜索范围获取更精确的结果。`;
+      }
+
       return {
         success: true,
-        results,
+        results: displayResults,
         totalMatches: results.length,
         filesSearched: files.length,
         truncated,
-        ...(truncated ? { hint: `结果已截断，仅显示前 ${maxRes} 条匹配。请缩小搜索范围获取更精确的结果。` } : {}),
+        ...(hint ? { hint } : {}),
       };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -210,13 +255,15 @@ const globTool: Tool = {
 - pattern: Glob 模式（如 "**/*.ts"、"src/**/*.py"、"docs/*.md"）
 
 **可选参数**：
-- path: 搜索的目录路径（相对于工作空间根目录，默认为根目录）
+- path: 搜索的目录路径（相对于指定命名空间根目录，默认为根目录）
+- namespace: 命名空间，workspace（工作空间，默认）或 config（.config 配置目录——查找长期记忆文件用 namespace="config", path="memory"）
 - exclude: 排除模式（逗号分隔，如 "node_modules,.git,dist"）
 - maxResults: 最大返回文件数（默认 ${MAX_GLOB_RESULTS}）
 
 **结果限制**：
 - 按修改时间排序（最近的在前）
 - 自动忽略常见的无关目录
+- 结果超过 maxResults 时，完整列表（最多 ${FULL_COLLECT_LIMIT} 个）自动保存到文件，可用 read 的 offset/limit 分页读取（见返回的 hint）
 
 **使用示例**：
 - 查找所有 TS 文件：pattern="**/*.ts"
@@ -233,7 +280,13 @@ const globTool: Tool = {
       },
       path: {
         type: 'string',
-        description: '搜索的目录路径（相对于工作空间根目录，默认为根目录）',
+        description: '搜索的目录路径（相对于指定命名空间根目录，默认为根目录）',
+      },
+      namespace: {
+        type: 'string',
+        description: '命名空间：workspace（工作空间）或 config（.config 配置目录，可查找 memory/ 长期记忆文件）',
+        enum: ['workspace', 'config'],
+        default: 'workspace',
       },
       exclude: {
         type: 'string',
@@ -247,16 +300,16 @@ const globTool: Tool = {
     required: ['pattern'],
   },
 
-  handler: async ({ pattern, path: searchPath, exclude, maxResults }) => {
+  handler: async ({ pattern, path: searchPath, namespace = 'workspace', exclude, maxResults }) => {
     try {
-      const workspace = getWorkspacePath();
-      if (!workspace) {
+      const rootPath = namespace === 'config' ? getPathManager().getConfigPath() : getWorkspacePath();
+      if (!rootPath) {
         return { success: false, error: '工作空间未设置' };
       }
 
       const searchDir = searchPath
-        ? path.resolve(workspace, searchPath)
-        : workspace;
+        ? path.resolve(rootPath, searchPath)
+        : rootPath;
 
       const maxRes = maxResults ?? MAX_GLOB_RESULTS;
 
@@ -269,16 +322,28 @@ const globTool: Tool = {
         ? exclude.split(',').map((p: string) => p.trim()).filter(Boolean).map((p: string) => new RegExp(globToRegex(p), 'i'))
         : [];
 
-      // 递归查找匹配的文件
+      // 递归查找匹配的文件（收集上限为 FULL_COLLECT_LIMIT，超出 maxResults 的保存到文件）
       const matches: GlobEntry[] = [];
-      await globSearch(searchDir, searchDir, regex, excludeRegexes, matches, 0, maxRes * 2);
+      const hitCollectLimit = await globSearch(searchDir, searchDir, regex, excludeRegexes, matches, 0, FULL_COLLECT_LIMIT);
 
       // 按修改时间排序（最近的在前）
       matches.sort((a, b) => b.modified - a.modified);
 
       // 截断结果
-      const truncated = matches.length > maxRes;
+      const truncated = matches.length > maxRes || hitCollectLimit;
       const results = matches.slice(0, maxRes);
+
+      // 截断时保存完整结果到文件（每行一个路径）
+      let hint: string | undefined;
+      if (truncated) {
+        const savedPath = await saveFullResults(
+          matches.map(f => f.path),
+          'glob'
+        );
+        hint = savedPath
+          ? `共 ${matches.length}${hitCollectLimit ? '+' : ''} 个文件匹配，仅返回前 ${maxRes} 个（按修改时间排序）。完整列表已保存至 ${savedPath}（每行一个路径），可用 read 的 offset/limit 参数分页读取`
+          : `共 ${matches.length} 个文件匹配，仅显示前 ${maxRes} 个（按修改时间排序）。`;
+      }
 
       return {
         success: true,
@@ -286,7 +351,7 @@ const globTool: Tool = {
         count: results.length,
         totalMatches: matches.length,
         truncated,
-        ...(truncated ? { hint: `共 ${matches.length} 个文件匹配，仅显示前 ${maxRes} 个（按修改时间排序）。` } : {}),
+        ...(hint ? { hint } : {}),
       };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -311,6 +376,7 @@ const searchContentTool: Tool = {
 **与 grep 的区别**：
 - grep 返回每个匹配行的详细信息，适合精确搜索
 - search_content 返回每个匹配文件的摘要，适合快速浏览哪些文件包含目标文本
+- 匹配文件超过 maxResults 时，完整结果（最多 ${FULL_COLLECT_LIMIT} 个文件）自动保存到文件，可用 read 的 offset/limit 分页读取（见返回的 hint）
 
 **使用示例**：
 - 搜索所有代码中的某个函数：query="handleSubmit", fileTypes=["ts","tsx"]
@@ -370,6 +436,7 @@ const searchContentTool: Tool = {
       await collectFiles(searchDir, searchDir, files, null, 0, typeSet);
 
       // 搜索每个文件，收集有匹配的文件摘要
+      // 收集上限为 FULL_COLLECT_LIMIT，超出 maxResults 的保存到文件
       const matchedFiles: Array<{
         file: string;
         matchCount: number;
@@ -379,7 +446,7 @@ const searchContentTool: Tool = {
       const batches = batchArray(files, MAX_CONCURRENT_FILE_READS);
 
       for (const batch of batches) {
-        if (matchedFiles.length >= maxRes) break;
+        if (matchedFiles.length >= FULL_COLLECT_LIMIT) break;
 
         const batchResults = await Promise.all(
           batch.map(filePath => searchFileForSnippets(filePath, searchDir, regex, 3))
@@ -388,7 +455,7 @@ const searchContentTool: Tool = {
         for (const result of batchResults) {
           if (!result) continue;
           matchedFiles.push(result);
-          if (matchedFiles.length >= maxRes) break;
+          if (matchedFiles.length >= FULL_COLLECT_LIMIT) break;
         }
       }
 
@@ -401,11 +468,28 @@ const searchContentTool: Tool = {
         };
       }
 
+      const truncated = matchedFiles.length > maxRes;
+      const displayFiles = matchedFiles.slice(0, maxRes);
+
+      // 截断时保存完整结果到文件（每行一个文件摘要）
+      let hint: string | undefined;
+      if (truncated) {
+        const savedPath = await saveFullResults(
+          matchedFiles.map(f => `${f.file} (${f.matchCount} 处匹配): ${f.snippets.join(' | ')}`),
+          'search_content'
+        );
+        hint = savedPath
+          ? `共 ${matchedFiles.length} 个文件包含匹配，仅返回前 ${maxRes} 个。完整结果已保存至 ${savedPath}（每行一个文件），可用 read 的 offset/limit 参数分页读取`
+          : `结果已截断，仅显示前 ${maxRes} 个文件。请缩小搜索范围获取更精确的结果。`;
+      }
+
       return {
         success: true,
-        files: matchedFiles,
+        files: displayFiles,
         totalFiles: files.length,
         matchedFileCount: matchedFiles.length,
+        truncated,
+        ...(hint ? { hint } : {}),
       };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -503,7 +587,9 @@ async function collectFiles(
       }
     }
   } finally {
-    await dir.close();
+    // for await 循环结束（含 break/异常）时 Node 会自动关闭目录句柄，
+    // 对已关闭句柄再调用 close() 会抛 ERR_DIR_CLOSED，故忽略该错误
+    try { await dir.close(); } catch { /* already closed by iterator */ }
   }
 }
 
@@ -723,6 +809,7 @@ function escapeRegExp(str: string): string {
 /**
  * 递归搜索匹配 glob 模式的文件
  * 使用 opendir 实现更高效的目录遍历
+ * 返回值：是否因达到收集上限而提前停止（用于 hint 标注 "+"）
  */
 async function globSearch(
   currentDir: string,
@@ -732,15 +819,15 @@ async function globSearch(
   results: GlobEntry[],
   depth: number,
   maxCollect: number,
-): Promise<void> {
-  if (results.length >= maxCollect) return;
-  if (depth > MAX_TRAVERSAL_DEPTH) return;
+): Promise<boolean> {
+  if (results.length >= maxCollect) return true;
+  if (depth > MAX_TRAVERSAL_DEPTH) return false;
 
   let dir;
   try {
     dir = await opendir(currentDir);
   } catch {
-    return;
+    return false;
   }
 
   try {
@@ -779,8 +866,10 @@ async function globSearch(
       }
     }
   } finally {
-    await dir.close();
+    // 同上：迭代器会自动关闭句柄，忽略重复 close 的 ERR_DIR_CLOSED
+    try { await dir.close(); } catch { /* already closed by iterator */ }
   }
+  return results.length >= maxCollect;
 }
 
 /**

@@ -130,6 +130,14 @@ export interface CLIOptions {
   cols?: string;
   /** 初始文本（add paragraph 时使用） */
   text?: string;
+  /** 版式编号（newslide 时使用） */
+  layout?: string;
+  /** 标题文本（newslide 时使用） */
+  title?: string;
+  /** 副标题文本（newslide 时使用） */
+  subtitle?: string;
+  /** 正文占位符文本数组，JSON（newslide 时使用） */
+  texts?: string;
 }
 
 // ── Document handler interface ─────────────────────────────────

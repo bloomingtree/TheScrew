@@ -247,7 +247,7 @@ export class SubagentManager {
    *
    * Patterns support glob-style matching:
    * - "bash" matches exactly "bash"
-   * - "file.*" matches "read_file", "write_file", etc.
+   * - "file.*" matches "read", "write", etc.
    * - "*" matches all tools
    */
   private filterTools(allTools: any[], allowedTools: string[]): any[] {

@@ -1,15 +1,19 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { useConversationStore } from '../../store/conversationStore';
 import { useChatStore } from '../../store/chatStore';
 import MessageList from './MessageList';
 import InputArea from './InputArea';
+import UserQuestionDock from './UserQuestionDock';
 import WorkspaceSelector from '../Workspace/WorkspaceSelector';
 import DropZone from './DropZone';
 import EditedFilesBar from './EditedFilesBar';
 
 const ChatArea: React.FC = () => {
   const { currentConversationId, createConversation, updateConversationMessages } = useConversationStore();
-  const { messages, setMessages, clearMessages, isStreaming } = useChatStore();
+  const messages = useChatStore((s) => s.messages);
+  const isStreaming = useChatStore((s) => s.isStreaming);
+  const { setMessages, clearMessages } = useChatStore.getState();
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
@@ -213,8 +217,8 @@ const ChatArea: React.FC = () => {
 
   const handleDismissQuestion = () => {
     if (pendingQuestion) {
-      // 发送空对象表示用户取消
-      window.electronAPI.answerQuestion(pendingQuestion.questionId, {}).catch(() => {});
+      // 发送 null 表示用户主动跳过（区别于空回答，主进程会返回明确的失败信号让 AI 停下）
+      window.electronAPI.answerQuestion(pendingQuestion.questionId, null).catch(() => {});
     }
     setPendingQuestion(null);
   };
@@ -295,16 +299,25 @@ const ChatArea: React.FC = () => {
       <DropZone isActive={isDragOver} />
 
       <div className="flex-1 overflow-hidden min-h-0">
-        <MessageList
-          pendingQuestion={pendingQuestion}
-          onAnswerQuestion={handleAnswerQuestion}
-          onDismissQuestion={handleDismissQuestion}
-        />
+        <MessageList />
       </div>
       {/* 本次对话已编辑文档的快捷访问条 */}
       <EditedFilesBar />
       <div className="flex-shrink-0">
-        <InputArea ref={inputAreaRef} onNewChat={handleNewChat} />
+        {/* 等待用户回答提问时：隐藏输入框（保留草稿状态），底部显示停靠提问面板，阻塞直到回答 */}
+        <div className={pendingQuestion ? 'hidden' : ''}>
+          <InputArea ref={inputAreaRef} onNewChat={handleNewChat} />
+        </div>
+        <AnimatePresence>
+          {pendingQuestion && (
+            <UserQuestionDock
+              key={pendingQuestion.questionId}
+              question={pendingQuestion}
+              onAnswer={handleAnswerQuestion}
+              onDismiss={handleDismissQuestion}
+            />
+          )}
+        </AnimatePresence>
       </div>
       <WorkspaceSelector
         isOpen={showWorkspaceSelector}

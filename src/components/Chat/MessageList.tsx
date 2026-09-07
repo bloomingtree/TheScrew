@@ -5,7 +5,6 @@ import { useChatStore } from '../../store/chatStore';
 import { useConversationStore } from '../../store/conversationStore';
 import UserMessage from './messages/UserMessage';
 import AssistantMessage from './messages/AssistantMessage';
-import UserQuestionInline from './UserQuestionInline';
 
 /** 流式状态指示器：思考中 / 工具调用中 —— 醒目可见 */
 const StreamingStatusBar: React.FC = () => {
@@ -45,7 +44,12 @@ const StreamingStatusBar: React.FC = () => {
     office_batch: '批量操作',
     office_merge: '合并数据',
     office_apply_style: '应用样式',
-    edit_file: '编辑文件',
+    edit: '编辑文件',
+    ls: '列出目录',
+    write: '写入文件',
+    read: '读取文件',
+    edit_file: '编辑文件', // 以下为旧工具名兼容映射（历史会话）
+    list_directory: '列出目录',
     write_file: '写入文件',
     read_file: '读取文件',
     execute_command: '执行命令',
@@ -140,27 +144,12 @@ const StreamingStatusBar: React.FC = () => {
   );
 };
 
-interface MessageListProps {
-  pendingQuestion?: {
-    questionId: string;
-    questions: Array<{
-      question: string;
-      header: string;
-      options: Array<{ label: string; description?: string }>;
-      multiSelect: boolean;
-      allowOther: boolean;
-    }>;
-  } | null;
-  onAnswerQuestion?: (questionId: string, answers: Record<string, string | string[]>) => void;
-  onDismissQuestion?: () => void;
-}
+interface MessageListProps {}
 
-const MessageList: React.FC<MessageListProps> = ({
-  pendingQuestion,
-  onAnswerQuestion,
-  onDismissQuestion,
-}) => {
-  const { messages, isStreaming } = useChatStore();
+const MessageList: React.FC<MessageListProps> = () => {
+  // 精确订阅：避免 toolCallWritingMap 等高频状态变化触发消息列表全量重渲染
+  const messages = useChatStore((s) => s.messages);
+  const isStreaming = useChatStore((s) => s.isStreaming);
   const currentConversationId = useConversationStore((s) => s.currentConversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
   // 是否钉在底部（用户未上滑离开）
@@ -200,8 +189,8 @@ const MessageList: React.FC<MessageListProps> = ({
     const el = scrollRef.current;
     if (!el) return;
     const last = messages[messages.length - 1];
-    // 用户发送新消息 / AI 提问出现 → 强制回到底部
-    if (last?.role === 'user' || pendingQuestion) {
+    // 用户发送新消息 → 强制回到底部
+    if (last?.role === 'user') {
       isPinnedRef.current = true;
       setHasNewReply(false);
     }
@@ -210,7 +199,7 @@ const MessageList: React.FC<MessageListProps> = ({
       el.scrollTop = el.scrollHeight;
       setShowJumpButton(false);
     }
-  }, [messages, isStreaming, pendingQuestion]);
+  }, [messages, isStreaming]);
 
   // 流式结束：若用户当时不在底部，显示新回复提示（配合右下角按钮）
   useEffect(() => {
@@ -265,7 +254,7 @@ const MessageList: React.FC<MessageListProps> = ({
       >
         {/* 居中布局容器 */}
         <div className="max-w-[1600px] mx-auto min-h-full">
-          {messages.length === 0 && !pendingQuestion && (
+          {messages.length === 0 && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -280,13 +269,6 @@ const MessageList: React.FC<MessageListProps> = ({
 
           {/* 顺序渲染每条消息 */}
           {messages.map((message, index) => renderMessage(message, index))}
-
-          {/* 聊天内联的用户提问卡片：回答提交后自动消失 */}
-          <UserQuestionInline
-            question={pendingQuestion || null}
-            onAnswer={onAnswerQuestion || (() => {})}
-            onDismiss={onDismissQuestion || (() => {})}
-          />
 
           {/* 流式状态指示器：思考/工具调用/等待 —— 取代之前只对空消息显示的跳点 */}
           <StreamingStatusBar />

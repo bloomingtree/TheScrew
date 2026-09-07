@@ -9,7 +9,7 @@
  *
  * 实现要点：
  *   - 用 CronService.addJob 注册内置任务，幂等（jobId 固定，已存在则跳过）
- *   - 用 target='agent' + message 让 AI 通过 memory_save / memory_read 工具自行整理
+ *   - 用 target='agent' + message 让 AI 通过通用文件工具（read / edit / write / grep）自行整理
  *   - 不直接调 LLM：借 JobDispatcher → AgentRunner 走完整的工具循环
  *   - 状态文件 .lastConsolidate 仅存一个数字时间戳（ms），便于读取判断
  */
@@ -18,6 +18,7 @@ import { CronService } from './CronService';
 import { dispatchJob } from './JobDispatcher';
 import { CronJob } from './types';
 import { getPathManager } from '../config/PathManager';
+import { MEMORY_INDEX_MAX_LINES } from '../memory/MemoryStore';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
@@ -34,18 +35,29 @@ function getLastConsolidatePath(): string {
 }
 
 /** Agent 要执行的 consolidate prompt */
-const CONSOLIDATE_PROMPT = `请检查近 7 天的 daily 笔记（daily/*.md），把反复出现的内容（用户偏好、项目事实、调试经验等）通过 memory_save 工具提炼到对应的 topics/ 文件：
+const CONSOLIDATE_PROMPT = `【每日记忆复盘】请整理长期记忆（全部位于配置目录 memory/ 下，文件工具统一传 namespace="config"），按以下步骤执行：
 
-- 用户姓名、职业、语言/工具偏好 → topics/user-profile.md
-- 项目路径、架构、关键文件 → topics/project-facts.md
-- 反复出现的 bug 和修复方案 → topics/recurring-bugs.md
-- 调试技巧和经验 → topics/debugging-notes.md
+**第 1 步：盘点素材**
+- 用 glob（pattern="daily/*.md", namespace="config", path="memory"）列出近 7 天的 daily 笔记，再逐个 read 查看
+- 若 daily 笔记很少或为空：回看当前对话历史中近期的用户消息和任务结果，从中提取值得长期记住的内容（这不是偷懒的借口——对话历史本身就是记忆素材）
+
+**第 2 步：提炼到主题文件**（topics/ 目录，用 edit 原地更新已有条目，新主题可用 write 创建）
+- 用户姓名、职业、语言/工具偏好、交互习惯 → topics/user-profile.md
+- 项目路径、架构、关键文件、重要决策 → topics/project-facts.md
+- 反复出现的 bug：症状 + 根因 + 解决方案 → topics/recurring-bugs.md
+- 调试技巧、踩坑经验 → topics/debugging-notes.md
+
+**第 3 步：维护索引**
+- 新提炼的条目若足够重要，在 memory/MEMORY.md 索引中补充对应的一行摘要（edit 锚点插入）
+- 检查 MEMORY.md 是否有过时、矛盾的条目，有则用 edit 更新或删除
+- 索引保持精简（一行一条），超过 ${MEMORY_INDEX_MAX_LINES} 行时把低频内容下沉到 topics/ 文件
 
 **要求**：
-1. 先用 memory_search 确认是否已有相关条目，已存在则用 mode=merge-section 更新
-2. 不要复制临时状态或工具调用细节，只提炼"反复出现"和"重要事实"
-3. 完成后，把已提炼的 daily 内容压缩或归档到 archive/YYYY-MM/ 目录（保留原始文件备份）
-4. 最后更新 .lastConsolidate 文件为当前时间戳（用 write_file 写入 Date.now() 的字符串）`;
+1. 先用 grep（namespace="config", path="memory"）确认是否已有相关条目，已存在则用 edit 更新原条目，禁止追加重复内容
+2. 不提炼临时状态、工具调用细节等一次性信息，只提炼"反复出现"和"重要事实"
+3. 若本次确实没有任何值得提炼的内容（连对话历史也没有），直接跳到收尾步骤，不要编造记忆
+4. 收尾：把已提炼的 daily 文件移动到 memory/archive/YYYY-MM/ 目录归档（用 bash 的 mv，保留备份）
+5. 最后更新状态文件（namespace=config，filepath="memory/.lastConsolidate"，content 为当前毫秒时间戳字符串）。注意：该文件每日覆盖，须先 read 一次再 write，否则会被文件工具的过期内容防护拦截`;
 
 /** cron 表达式：每天凌晨 3:00 */
 const CONSOLIDATE_CRON_EXPR = '0 3 * * *';
@@ -68,8 +80,15 @@ export async function registerMemoryConsolidateJob(cronService: CronService): Pr
     const allJobs = await cronService.listJobs(true);
     const existing = allJobs.find(j => j.name === CONSOLIDATE_JOB_NAME);
     if (existing) {
-      console.log(`[MemoryConsolidator] 内置 consolidate 任务已存在 (id=${existing.id})，跳过注册`);
-      return;
+      // prompt 有更新时重建任务（任务里的旧 message 已持久化，不重建则新 prompt 永远不生效）
+      if (existing.payload.message !== CONSOLIDATE_PROMPT) {
+        console.log('[MemoryConsolidator] consolidate prompt 已更新，重建内置任务');
+        await cronService.removeJob(existing.id);
+        // 继续走下方的注册流程
+      } else {
+        console.log(`[MemoryConsolidator] 内置 consolidate 任务已存在 (id=${existing.id})，跳过注册`);
+        return;
+      }
     }
 
     // 注册：cron 表达式每天 3:00 执行

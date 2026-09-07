@@ -12,7 +12,7 @@ import { withFileLock } from './core/file-lock';
 import type { CLIOptions } from './types';
 
 /** 写命令集合：会修改文件，需要加锁防并发覆盖 */
-const WRITE_COMMANDS = new Set(['create', 'set', 'add', 'remove', 'replace', 'merge', 'batch', 'applyStyle']);
+const WRITE_COMMANDS = new Set(['create', 'set', 'add', 'remove', 'replace', 'merge', 'batch', 'applyStyle', 'clone', 'newslide']);
 
 const VERSION = '1.0.0';
 
@@ -146,6 +146,39 @@ program
   .description('Validate document structure (checks OOXML compliance)')
   .action(async (filePath: string) => {
     await runCommand('validate', filePath, [], collectOptions());
+  });
+
+// clone — 复制模板 pptx 并清空 slides，保留主题/版式/母版/媒体
+program
+  .command('clone <target> <template>')
+  .description('Create a new .pptx that copies a template\'s theme/masters/layouts/media but contains no slides')
+  .action(async (targetPath: string, templatePath: string) => {
+    await runCommand('clone', targetPath, [templatePath], collectOptions());
+  });
+
+// layouts — 列出版式及占位符
+program
+  .command('layouts <file>')
+  .description('List slide layouts with placeholders, backgrounds, and theme fonts')
+  .action(async (filePath: string) => {
+    await runCommand('layouts', filePath, [], collectOptions());
+  });
+
+// newslide — 按版式新增一页
+program
+  .command('newslide <file>')
+  .description('Add a slide using a slide layout (placeholders copied from layout, text inherits layout styles)')
+  .requiredOption('--layout <n>', 'Layout number (see layouts command)')
+  .option('--title <t>', 'Text for title/ctrTitle placeholder')
+  .option('--subtitle <t>', 'Text for subTitle placeholder')
+  .option('--texts <json>', 'JSON array (or single string) of texts for body placeholders, in order; \\n splits paragraphs')
+  .action(async (filePath: string, cmdOpts: { layout: string; title?: string; subtitle?: string; texts?: string }) => {
+    const opts = collectOptions();
+    opts.layout = cmdOpts.layout;
+    if (cmdOpts.title !== undefined) opts.title = cmdOpts.title;
+    if (cmdOpts.subtitle !== undefined) opts.subtitle = cmdOpts.subtitle;
+    if (cmdOpts.texts !== undefined) opts.texts = cmdOpts.texts;
+    await runCommand('newslide', filePath, [], opts);
   });
 
 // ── Helpers ────────────────────────────────────────────────────

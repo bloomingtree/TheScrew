@@ -24,13 +24,17 @@ export enum ToolRiskLevel {
 const TOOL_RISK_LEVELS: Record<string, ToolRiskLevel> = {
   // 文件工具 - 安全
   'get_workspace': ToolRiskLevel.SAFE,
-  'list_directory': ToolRiskLevel.SAFE,
-  'read_file': ToolRiskLevel.SAFE,
+  'ls': ToolRiskLevel.SAFE,
+  'list_directory': ToolRiskLevel.SAFE, // 兼容旧会话中已持久化的工具名
+  'read': ToolRiskLevel.SAFE,
+  'read_file': ToolRiskLevel.SAFE, // 兼容旧会话中已持久化的工具名
   'get_file_info': ToolRiskLevel.SAFE,
 
   // 文件工具 - 中风险
-  'edit_file': ToolRiskLevel.MEDIUM,
-  'write_file': ToolRiskLevel.MEDIUM,
+  'edit': ToolRiskLevel.MEDIUM,
+  'edit_file': ToolRiskLevel.MEDIUM, // 兼容旧会话中已持久化的工具名
+  'write': ToolRiskLevel.MEDIUM,
+  'write_file': ToolRiskLevel.MEDIUM, // 兼容旧会话中已持久化的工具名
 
   // 搜索工具 - 安全
   'grep': ToolRiskLevel.SAFE,
@@ -46,6 +50,11 @@ const TOOL_RISK_LEVELS: Record<string, ToolRiskLevel> = {
   'office_create': ToolRiskLevel.LOW,
   'office_view': ToolRiskLevel.LOW,
   'office_query': ToolRiskLevel.LOW,
+
+  // Office 一键生成 - 创建低风险，追加修改中风险
+  'docx_build': ToolRiskLevel.LOW,
+  'xlsx_build': ToolRiskLevel.LOW,
+  'docx_append': ToolRiskLevel.MEDIUM,
 
   // 远程工具
   'ssh': ToolRiskLevel.MEDIUM,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -170,20 +170,21 @@ const ThinkingBlock: React.FC<{ content: string }> = ({ content }) => {
   );
 };
 
-const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
-  const { toolResults } = useChatStore();
+const AssistantMessageImpl: React.FC<AssistantMessageProps> = ({ message }) => {
+  const toolResults = useChatStore((s) => s.toolResults);
 
   // 提取思考内容：优先使用 thinkingContent 字段，其次从 content 中解析 <think > 标签
-  let thinkingContent = message.thinkingContent || null;
-  let displayContent = message.content;
-
-  if (!thinkingContent) {
+  // useMemo：流式期间本组件因 toolResults 变化重渲染时，避免重复跑正则提取
+  const { thinkingContent, displayContent } = useMemo(() => {
+    if (message.thinkingContent) {
+      return { thinkingContent: message.thinkingContent, displayContent: message.content };
+    }
     const extracted = extractThinkingFromContent(message.content);
     if (extracted.thinking) {
-      thinkingContent = extracted.thinking;
-      displayContent = extracted.cleanContent;
+      return { thinkingContent: extracted.thinking, displayContent: extracted.cleanContent };
     }
-  }
+    return { thinkingContent: null, displayContent: message.content };
+  }, [message.thinkingContent, message.content]);
 
   const formatTime = (timestamp?: number) => {
     if (!timestamp) return '';
@@ -193,22 +194,32 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
     });
   };
 
-  // 获取此消息的工具调用结果
-  const getThreadToolResults = () => {
+  // 获取此消息的工具调用结果（useMemo 缓存 filter 结果）
+  const threadToolResults = useMemo(() => {
     if (!message.tool_calls || message.tool_calls.length === 0) return [];
     const toolCallIds = message.tool_calls.map((tc: any) => tc.id);
     return toolResults.filter(tr => toolCallIds.includes(tr.toolCallId));
-  };
+  }, [message.tool_calls, toolResults]);
 
   // 判断工具执行状态
-  const getToolStatus = (): 'running' | 'completed' | 'error' => {
-    const results = getThreadToolResults();
-    if (results.length === 0) {
+  const toolStatus: 'running' | 'completed' | 'error' = useMemo(() => {
+    if (threadToolResults.length === 0) {
       return 'running';
     }
-    const hasError = results.some(r => !r.success);
+    const hasError = threadToolResults.some(r => !r.success);
     return hasError ? 'error' : 'completed';
-  };
+  }, [threadToolResults]);
+
+  // Markdown 渲染结果缓存：内容不变时复用同一元素引用，React 会跳过重解析/重高亮。
+  // 这是流式期间性能关键 —— 历史消息 content 引用稳定，永远不会重新解析。
+  const markdownElement = useMemo(() => (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={markdownComponents}
+    >
+      {displayContent}
+    </ReactMarkdown>
+  ), [displayContent]);
 
   const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
   const hasContent = displayContent && displayContent.trim();
@@ -233,12 +244,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
             <div className="rounded-xl border bg-white border-gray-200 shadow-lg">
               <div className="px-3 py-2">
                 <div className="prose prose-sm max-w-none prose-p:max-w-none prose-headings:max-w-none">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={markdownComponents}
-                  >
-                    {displayContent}
-                  </ReactMarkdown>
+                  {markdownElement}
                 </div>
               </div>
             </div>
@@ -256,12 +262,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message }) => {
       {hasToolCalls && (
         <ToolCallSimple
           toolCalls={message.tool_calls || []}
-          toolResults={getThreadToolResults()}
-          status={getToolStatus()}
+          toolResults={threadToolResults}
+          status={toolStatus}
         />
       )}
     </div>
   );
 };
 
+// React.memo：消息列表重渲染时，props 未变的历史消息直接跳过（流式期间只有最后一条在变）
+const AssistantMessage = React.memo(AssistantMessageImpl);
 export default AssistantMessage;

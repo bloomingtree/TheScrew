@@ -74,7 +74,9 @@ export const askUserTools: Tool[] = [
 
 **返回**：
 - 单问题：返回 { success, answer }（answer 为选中选项的 label 或自定义文本）
-- 多问题：返回 { success, answers }（answers 为 { [问题文本]: 答案 } 对象）`,
+- 多问题：返回 { success, answers }（answers 为 { [问题文本]: 答案 } 对象）
+
+**⚠️ 关键规则**：本工具会一直阻塞直到用户回答。如果返回 success:false（用户跳过或超时），**必须停止当前任务**，用文字告知用户你在等待他的回答，**严禁自行假设用户的回答继续执行**。`,
     parameters: {
       type: 'object',
       properties: {
@@ -194,6 +196,17 @@ export const askUserTools: Tool[] = [
       try {
         const answers = await answerPromise;
 
+        // 用户跳过（前端 Esc/X 发送 null）或异常空回答：返回明确的失败信号，阻止 AI 自行假设继续执行
+        const hasAnswers = answers && typeof answers === 'object'
+          && Object.values(answers).some((v) =>
+            (Array.isArray(v) && v.length > 0) || (typeof v === 'string' && v.trim().length > 0));
+        if (!hasAnswers) {
+          return {
+            success: false,
+            error: '用户跳过了回答。请停止当前任务，用文字告知用户需要他的回答才能继续，严禁自行假设用户的回答继续执行。',
+          };
+        }
+
         // 单问题 → 旧格式返回（answer 字段）
         if (normalizedQuestions.length === 1) {
           const q = normalizedQuestions[0];
@@ -204,7 +217,10 @@ export const askUserTools: Tool[] = [
         // 多问题 → 返回 answers 对象
         return { success: true, answers, questionCount: normalizedQuestions.length };
       } catch (error: any) {
-        return { success: false, error: error.message || '用户取消了回答' };
+        return {
+          success: false,
+          error: `${error.message || '用户取消了回答'}。请停止当前任务，用文字告知用户你在等待他的回答，严禁自行假设继续执行。`,
+        };
       }
     },
   },
@@ -221,7 +237,7 @@ function normalizeOptions(raw: any): { label: string; description?: string }[] {
   else if (typeof raw === 'string') return [{ label: raw }];
 
   return arr
-    .map((o) => {
+    .map((o): { label: string; description?: string } | null => {
       if (typeof o === 'string') return { label: o };
       if (!o || typeof o !== 'object') return null;
       const label = o.label || o.value || o.name || String(o);

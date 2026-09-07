@@ -16,17 +16,23 @@ import { IMemoryEntry, IMemorySearchResult, MemoryEntryType } from '../core/type
 import { getPathManager } from '../config/PathManager';
 
 /**
+ * MEMORY.md 索引的行数上限（超过即应瘦身，把低频内容下沉到 topics/）。
+ * 统一来源：ContextBuilder 行为规范、HeartbeatService 超长检测、默认模板均引用此常量。
+ */
+export const MEMORY_INDEX_MAX_LINES = 200;
+
+/**
  * 默认 MEMORY.md 模板（首次创建时写入）
  */
-const DEFAULT_MEMORY_INDEX_TEMPLATE = `<!-- 编辑本文件后重启应用生效；或让 AI 通过 memory_save 工具修改 -->
+const DEFAULT_MEMORY_INDEX_TEMPLATE = `<!-- 长期记忆索引：每次会话自动注入上下文。用文件工具直接编辑（namespace="config"） -->
 # 记忆索引
 
-> 这是你的长期记忆。每次启动都会自动加载到对话上下文。
+> 这是你的长期记忆索引。每次启动都会自动加载到对话上下文。
 >
 > 规则：
-> - 本文件超过 200 行后，把详细内容拆分到 topics/*.md，本文件只保留索引和链接
-> - 写入前先用 memory_search 确认是否已存在，避免重复
-> - 通过 memory_save 工具写入，不要用 write_file
+> - 一行一条浓缩摘要，细节放在 topics/*.md 对应文件中，本文件只保留索引和链接
+> - 超过 ${MEMORY_INDEX_MAX_LINES} 行时把低频内容下沉到 topics/ 文件
+> - 写入前先用 grep（namespace="config", path="memory"）查重，已有条目用 edit 原地更新
 > - 只记录"反复出现的偏好"、"关键决策"、"重要事实"；不要记录临时状态
 
 ## 用户偏好

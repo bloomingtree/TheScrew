@@ -9,6 +9,7 @@ import { app } from 'electron';
 import * as path from 'path';
 import { ExecuteOptions, InternalExecuteResult } from '../types';
 import { getTempFileManager } from '../utils/TempFileManager';
+import { killProcessTree } from './killTree';
 
 /**
  * 获取应用根路径
@@ -76,7 +77,7 @@ export class ResponseFileExecutor {
       const timer = setTimeout(() => {
         killed = true;
         wasTimeout = true;
-        child.kill('SIGKILL');
+        killProcessTree(child);
       }, timeout);
 
       // 收集输出

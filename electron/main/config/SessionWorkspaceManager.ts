@@ -238,13 +238,13 @@ class SessionWorkspaceManagerClass {
   getToolRecommendation(category: string, ext: string): string {
     const TOOL_RECOMMENDATIONS: Record<string, string> = {
       image: '已内嵌，可直接查看',
-      text: '使用 read_file 读取全文',
-      code: '使用 read_file 读取源码',
+      text: '使用 read 读取全文',
+      code: '使用 read 读取源码',
       docx: '使用 office_view 查看大纲，office_get 读取具体段落',
       xlsx: '使用 office_view text 查看数据，office_get 获取单元格',
       pptx: '使用 office_view outline 查看结构，office_get 读取幻灯片',
-      pdf: '使用 read_file 读取文本内容',
-      other: '使用 read_file 尝试读取，或 get_file_info 查看详情',
+      pdf: '使用 read 读取文本内容',
+      other: '使用 read 尝试读取，或 get_file_info 查看详情',
     };
 
     // 先用扩展名精确匹配

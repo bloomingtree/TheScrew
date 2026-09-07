@@ -28,7 +28,10 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(({ onNewChat }, re
   const [pendingImageFiles, setPendingImageFiles] = useState<File[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, setTokenUsage, setToolCallWriting } = useChatStore();
+// 精确订阅状态；action 是稳定引用，从 getState() 取即可，不触发重渲染
+const messages = useChatStore((s) => s.messages);
+const isStreaming = useChatStore((s) => s.isStreaming);
+const { addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, setStreaming, setToolCalls, setToolResults, startToolExecution, completeToolExecution, setTokenUsage, setToolCallWriting } = useChatStore.getState();
   const { apiKey, appSettings, setThinkingMode, loadAppSettings } = useConfigStore();
   const { currentConversationId, generateTitle } = useConversationStore();
 
@@ -204,9 +207,9 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
       const TOOL_RECOMMENDATIONS: Record<string, string> = {
         image: '已内嵌，可直接查看',
         document: '使用 office_view 查看大纲，office_get 读取内容',
-        code: '使用 read_file 读取源码',
-        data: '使用 read_file 读取数据',
-        other: '使用 read_file 尝试读取',
+        code: '使用 read 读取源码',
+        data: '使用 read 读取数据',
+        other: '使用 read 尝试读取',
       };
       const TYPE_LABELS: Record<string, string> = {
         image: '图片',
@@ -335,6 +338,8 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
         // 先同步刷掉已累积的文本，确保文本先于工具调用显示
         cancelPendingFlush();
         flushAccumulated();
+        // 清掉这些工具调用的待刷入 writing 状态，避免延迟刷入把 written 覆盖回 writing
+        toolCalls.forEach(tc => pendingWritingUpdates.delete(tc.id));
         // 使用 flushSync 强制立即渲染（一次性，事件频率低）
         flushSync(() => {
           // Clear writing state for these tool calls (mark as written)
@@ -375,9 +380,22 @@ const { messages, isStreaming, addMessage, updateLastMessage, updateLastMessageT
         setTokenUsage(usage);
       };
 
-      const handleToolCallWriting = (_data: any) => {
-        // 工具参数写入事件同样高频，交给 zustand/React 自动批处理即可
-        setToolCallWriting(_data);
+      // 工具参数写入事件与正文 chunk 同样高频（每个参数 token 一条 IPC），
+      // 但跨 IPC 消息到达时 React 自动批处理不生效 —— 每条都会触发 store 更新
+      // 和全组件树重渲染，导致 UI 卡死。按 50ms 批量刷入（同 scheduleFlush 模式），
+      // 同一 toolCallId 只保留最新状态。
+      const pendingWritingUpdates = new Map<string, any>();
+      let writingFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const handleToolCallWriting = (data: any) => {
+        pendingWritingUpdates.set(data.toolCallId, data);
+        if (writingFlushTimer === null) {
+          writingFlushTimer = setTimeout(() => {
+            writingFlushTimer = null;
+            pendingWritingUpdates.forEach(upd => setToolCallWriting(upd));
+            pendingWritingUpdates.clear();
+          }, 50);
+        }
       };
 
       const removeChunkListener = window.electronAPI.onChatChunk(handleChunk);

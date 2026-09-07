@@ -12,6 +12,7 @@ import { readFile } from 'fs/promises';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { getPathManager } from '../config/PathManager';
+import { MEMORY_INDEX_MAX_LINES } from '../memory/MemoryStore';
 import {
   HeartbeatConfig,
   HeartbeatCallback,
@@ -25,21 +26,21 @@ import {
 // 常量（P2-4）
 // ============================================================================
 
-/** MEMORY.md 超长阈值（行数） */
-const MEMORY_INDEX_MAX_LINES = 200;
+/** MEMORY.md 超长阈值（行数），统一来源 MemoryStore */
+// MEMORY_INDEX_MAX_LINES 从 MemoryStore 导入
 
 /** MEMORY.md 超长时注入的触发消息（替代 HEARTBEAT_PROMPT） */
-const MEMORY_OVERSIZE_PROMPT = `MEMORY.md 已超过 200 行（当前 {N} 行），请把详细内容拆分到 topics/*.md，本文件只保留索引和链接。
+const MEMORY_OVERSIZE_PROMPT = `MEMORY.md 已超过 ${MEMORY_INDEX_MAX_LINES} 行（当前 {N} 行），请把详细内容拆分到 topics/*.md，本文件只保留索引和链接。（记忆文件都在配置目录 memory/ 下，文件工具统一传 namespace="config"）
 
 **步骤**：
-1. 先用 memory_read(target: 'index') 读取当前 MEMORY.md 全文
+1. 先用 read 读取当前 memory/MEMORY.md 全文（namespace="config"）
 2. 识别哪些章节过于详细（如整段的调试日志、完整的项目说明）
-3. 把详细内容用 memory_save 写到对应的 topics/*.md：
+3. 把详细内容移到对应的 topics/*.md（edit 更新已有文件，write 创建新文件）：
    - 用户偏好 → topics/user-profile.md
    - 项目事实 → topics/project-facts.md
    - 反复出现的 bug → topics/recurring-bugs.md
    - 调试经验 → topics/debugging-notes.md
-4. 用 memory_save(topic: 'memory-index', mode: 'replace') 重写 MEMORY.md 为精简索引，每章节只保留 2-3 行总结 + 链接到 topics/*.md 的相对路径
+4. 用 write 重写 memory/MEMORY.md 为精简索引，每章节只保留 2-3 行总结 + 指向 topics/*.md 的链接
 5. 重写后 MEMORY.md 应 < 100 行
 
 **注意**：不要丢失任何关键信息，只是从 MEMORY.md 移到 topics/。`;

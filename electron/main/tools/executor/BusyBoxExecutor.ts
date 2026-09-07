@@ -38,6 +38,7 @@ import { app } from 'electron';
 import crossSpawn from 'cross-spawn';
 import { ExecuteOptions, InternalExecuteResult } from '../types';
 import { getPathManager } from '../../config/PathManager';
+import { killProcessTree } from './killTree';
 
 /**
  * 检测系统 ANSI 代码页对应的编码名（供 TextDecoder 使用）
@@ -205,7 +206,7 @@ export class BusyBoxExecutor {
         killed = true;
         wasTimeout = true;
         try {
-          child.kill('SIGKILL');
+          killProcessTree(child);
         } catch {
           // ignore
         }

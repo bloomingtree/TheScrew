@@ -9,6 +9,7 @@ import crossSpawn from 'cross-spawn';
 import { app } from 'electron';
 import * as path from 'path';
 import { ExecuteOptions, InternalExecuteResult } from '../types';
+import { killProcessTree } from './killTree';
 
 /**
  * 获取应用根路径
@@ -108,7 +109,7 @@ export class PowerShellExecutor {
       const timer = setTimeout(() => {
         killed = true;
         wasTimeout = true;
-        child.kill('SIGKILL');
+        killProcessTree(child);
       }, timeout);
 
       // 收集输出
@@ -170,7 +171,7 @@ export class PowerShellExecutor {
       const timer = setTimeout(() => {
         killed = true;
         wasTimeout = true;
-        child.kill('SIGKILL');
+        killProcessTree(child);
       }, timeout);
 
       child.stdout?.on('data', (data: Buffer) => {

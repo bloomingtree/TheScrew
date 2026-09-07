@@ -61,10 +61,10 @@ AI 可以调用的工具：
 | 工具 | 功能 |
 |------|------|
 | `bash` | 执行命令（支持内置 Python 3.8.10） |
-| `read_file` | 读取文件 |
-| `write_file` | 写入文件 |
-| `edit_file` | 编辑文件（字符串替换） |
-| `list_directory` | 列出目录内容 |
+| `read` | 读取文件 |
+| `write` | 写入文件 |
+| `edit` | 编辑文件（字符串替换） |
+| `ls` | 列出目录内容 |
 | `get_file_info` | 获取文件信息 |
 | `cron_add/list` | 定时任务管理 |
 

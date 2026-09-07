@@ -4,7 +4,7 @@ import { History, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useChatStore } from '../../../store/chatStore';
 
 const HistoryTab: React.FC = () => {
-  const { toolExecutions } = useChatStore();
+  const toolExecutions = useChatStore((s) => s.toolExecutions);
 
   // 将 Map 转换为数组并排序
   const executions = useMemo(() => {

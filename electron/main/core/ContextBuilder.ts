@@ -16,7 +16,7 @@ import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { getSimpleSkillManager } from './SimpleSkillManager';
-import { getMemoryStore } from '../memory/MemoryStore';
+import { getMemoryStore, MEMORY_INDEX_MAX_LINES } from '../memory/MemoryStore';
 import { getToolManager } from '../tools/ToolManager';
 import { CONFIG_DIR_NAME, getPathManager } from '../config/PathManager';
 
@@ -41,6 +41,55 @@ const BOOTSTRAP_FILES = {
   USER: 'USER.md',
   TOOLS: 'TOOLS.md',
 };
+
+/**
+ * 主动记忆规范（常驻注入）
+ *
+ * 这是记忆系统的行为驱动层：记忆本质是普通文件 + 路径约定，
+ * 没有这段规范，AI 永远不会主动读写它们——daily 笔记为空，复盘任务也就无米下锅。
+ * 参照 Claude Code 的 auto memory 指令逻辑复刻（记忆直接用通用文件工具操作）。
+ */
+const MEMORY_BEHAVIOR_RULES = `## 记忆维护规范（主动执行，极其重要）
+
+你拥有跨会话的持久记忆系统，就是一组普通的 markdown 文件（位于配置目录 memory/ 下，所有文件工具传 namespace="config"）：
+
+- \`memory/MEMORY.md\`：常驻索引（每次会话自动注入你的上下文，见下方），一行一条浓缩摘要
+- \`memory/topics/*.md\`：主题文件，按语义命名（user-profile.md / project-facts.md / recurring-bugs.md / debugging-notes.md，也可按需自建任意主题文件）
+- \`memory/daily/YYYY-MM-DD.md\`：每日笔记（当天日期）
+
+**记忆就是普通文件，直接用通用文件工具读写**：
+- 读：read filepath="memory/topics/user-profile.md", namespace="config"
+- 改条目：edit（old_text 为原条目，new_text 为新条目；删除条目则 new_text 传空）
+- 插条目：edit（old_text 为锚点行，new_text = 锚点行 + 新条目）
+- 建新主题文件 / 新每日笔记：write
+- 查重 / 检索：grep pattern="关键词", namespace="config", path="memory"
+
+**记忆不是自动的，全靠你主动写入。**
+
+### 必须主动写入记忆的时机（不要等用户要求，也不要等复盘任务）
+
+1. **用户明确表达**：用户说"记住这个"、"以后都这样"、"别再..." → 立即写入，一次就记
+2. **修复了 bug**：定位到根因并解决后 → 把「症状 + 根因 + 解决方案」写入 topics/recurring-bugs.md
+3. **发现关键事实**：项目路径、架构约定、配置位置、账号规则、文件格式要求等 → topics/project-facts.md
+4. **识别用户偏好**：用户对格式、工具、流程、语言的任何偏好表达（哪怕只出现一次）→ topics/user-profile.md
+5. **被纠正时**：你根据记忆说错了某事、被用户纠正 → **必须立即用 edit 修正记忆源头**，否则下次还会犯同样的错
+
+### 禁止写入
+
+- 当前会话的临时状态（正在编辑哪个文件、中间结果、工具调用细节）
+- 未经验证的猜测、只出现一次且不重要的细节
+- 与现有条目重复的内容（写前先 grep 查重）
+
+### 写入规则
+
+- **先查后写**：用 grep（namespace="config", path="memory"）确认无重复；已有相关条目则用 edit 原地更新，绝不追加重复内容
+- **索引与详情分离**：MEMORY.md 只放一行一条的浓缩索引；细节写入 topics/ 对应文件，索引中可注明来源文件
+- **索引瘦身**：MEMORY.md 超过 ${MEMORY_INDEX_MAX_LINES} 行时，用 edit 删除过时条目或把低频内容下沉到 topics/
+- **每日小结**：完成复杂任务后（生成了文件、解决了问题、做了决策），立即写入 memory/daily/当日日期.md 2-3 行小结（做了什么 + 关键决策 + 遗留问题）
+
+### 为什么必须养成这个习惯
+
+每日凌晨的复盘任务只能整理你平时写入的 daily 笔记和 topics 文件——**你不记，复盘就是空转**。写记忆的成本是一次工具调用，收益是下次会话直接站在经验之上。`;
 
 /**
  * Context Builder - 构建中文系统提示词
@@ -218,16 +267,18 @@ export class ContextBuilder {
   /**
    * 4. 内存部分
    *
-   * P0 重构后读取顺序（硬截断，按字符数）：
+   * 结构：
+   *   0. 主动记忆规范（常驻行为指令，驱动 AI 主动写入记忆）
    *   1. MEMORY.md 索引（常驻，最多 4000 字符）
    *   2. 近 3 天 daily 笔记（最多 2000 字符，按日期倒序拼接）
    *   3. 今日笔记（最多 1000 字符；若已包含在近 3 天中则跳过重复）
-   *
-   * 不再调用 SessionSummarizer.buildRecentMemoryText，直接读 daily/*.md markdown 文件。
    */
   private async _buildMemorySection(_options: ContextBuilderOptions): Promise<string | null> {
     try {
       const sections: string[] = [];
+
+      // === 0. 主动记忆规范（无论是否已有记忆内容都必须注入，用于养成记忆习惯） ===
+      sections.push(MEMORY_BEHAVIOR_RULES);
 
       // === 1. MEMORY.md 核心索引 ===
       const memoryIndexPath = join(getPathManager().getMemoryPath(), 'MEMORY.md');
@@ -235,7 +286,7 @@ export class ContextBuilder {
         try {
           const indexContent = await readFile(memoryIndexPath, 'utf-8');
           const truncated = indexContent.length > 4000
-            ? indexContent.slice(0, 4000) + '\n\n... (MEMORY.md 已截断，完整内容请用 memory_read 读取)'
+            ? indexContent.slice(0, 4000) + '\n\n... (MEMORY.md 已截断，完整内容请用 read 读取，namespace="config")'
             : indexContent;
           sections.push(`## 核心记忆（常驻索引）\n\n${truncated}`);
         } catch (e) {
@@ -362,7 +413,8 @@ export class ContextBuilder {
           category = '批量操作';
         } else if (tool.name.startsWith('get_') || tool.name.startsWith('list_') ||
                    tool.name.startsWith('read_') || tool.name.startsWith('search_') ||
-                   tool.name === 'write_file' || tool.name === 'edit_file') {
+                   tool.name === 'read' || tool.name === 'ls' ||
+                   tool.name === 'write' || tool.name === 'edit') {
           category = '文件操作';
         } else if (tool.name.startsWith('get_template') || tool.name.startsWith('use_template') ||
                    tool.name.startsWith('add_template') || tool.name.startsWith('apply_prompt')) {

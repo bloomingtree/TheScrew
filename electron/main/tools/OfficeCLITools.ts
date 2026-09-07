@@ -279,17 +279,20 @@ const officeQueryTool: Tool = {
 
 const officeValidateTool: Tool = {
   name: 'office_validate',
-  description: '校验文档 OOXML 结构合法性（cell 块级性、表格列对齐、tblGrid 存在性等）',
+  description: '校验文档 OOXML 结构合法性（cell 块级性、表格列对齐、tblGrid 存在性等）。仅支持 .docx；.pptx/.xlsx 暂不支持',
   parameters: {
     type: 'object',
     properties: {
-      filename: { type: 'string', description: '文件路径' },
+      filename: { type: 'string', description: '文件路径（仅 .docx）' },
     },
     required: ['filename'],
   },
   handler: async (args: any) => {
-    const result = await execOfficeCLI(['validate', args.filename, '--json']);
-    return { success: true, output: truncateOfficeOutput(result, 'office_validate') };
+    if (/\.(docx)$/i.test(args.filename ?? '')) {
+      const result = await execOfficeCLI(['validate', args.filename, '--json']);
+      return { success: true, output: truncateOfficeOutput(result, 'office_validate') };
+    }
+    return { success: false, error: `office_validate 目前仅支持 .docx 文件（校验表格结构等 OOXML 规则），收到的是 "${args.filename ?? ''}"。.pptx/.xlsx 及其他格式暂不支持。` };
   },
 };
 
@@ -434,6 +437,77 @@ const officeApplyStyleTool: Tool = {
   },
 };
 
+// ==================== L5: PPT 样式模板复用 ====================
+
+const officeCloneTemplateTool: Tool = {
+  name: 'office_clone_template',
+  description: `以一个已有 .pptx 为样式模板，创建新的空白演示文稿。
+完整复制模板的主题字体、配色、幻灯片母版、所有版式（含背景图）和媒体资源，但不含任何幻灯片页。
+之后用 office_layouts 查看可用版式，用 office_newslide 按版式逐页添加内容。
+这是"按某个 PPT 的样式做新 PPT"的标准做法：先 clone 模板，再逐页 newslide。
+工作区模板库位于 .config/templates/pptx/（用户收藏的模板及其用法档案 .profile.md），优先从库中选取模板源；学习新模板入库的流程见 pptx-template 技能。
+注意：目标文件不能已存在（不会覆盖）。`,
+  parameters: {
+    type: 'object',
+    properties: {
+      target: { type: 'string', description: '新文件路径（不能已存在）' },
+      template: { type: 'string', description: '样式来源模板 .pptx 路径' },
+    },
+    required: ['target', 'template'],
+  },
+  handler: async (args: any) => {
+    const result = await execOfficeCLI(['clone', args.target, args.template, '--json']);
+    return { success: true, output: truncateOfficeOutput(result, 'office_clone_template') };
+  },
+};
+
+const officeLayoutsTool: Tool = {
+  name: 'office_layouts',
+  description: `列出 .pptx 的所有幻灯片版式：编号、名称、类型、背景、占位符（标题/正文等）及主题字体。
+配合 office_newslide 使用：先本命令查看版式编号和占位符结构，再选合适版式加页。仅支持 .pptx。`,
+  parameters: {
+    type: 'object',
+    properties: {
+      filename: { type: 'string', description: 'pptx 文件路径' },
+    },
+    required: ['filename'],
+  },
+  handler: async (args: any) => {
+    const result = await execOfficeCLI(['layouts', args.filename, '--json']);
+    return { success: true, output: truncateOfficeOutput(result, 'office_layouts') };
+  },
+};
+
+const officeNewSlideTool: Tool = {
+  name: 'office_newslide',
+  description: `为 .pptx 按指定版式添加一页幻灯片，自动复制版式中的占位符并填入文本。
+文字的字体、字号、颜色、位置全部由版式/母版/主题继承，无需手动设置样式。
+先用 office_layouts 查版式编号。仅支持 .pptx。`,
+  parameters: {
+    type: 'object',
+    properties: {
+      filename: { type: 'string', description: 'pptx 文件路径' },
+      layout: { type: 'number', description: '版式编号（见 office_layouts 输出的 layout 字段）' },
+      title: { type: 'string', description: '标题占位符文本（title/ctrTitle 类型）' },
+      subtitle: { type: 'string', description: '副标题占位符文本（subTitle 类型）' },
+      texts: { type: 'string', description: '其余占位符文本，按顺序填充。JSON 数组（如 ["要点一","要点二"]）或单个字符串；文本内 \\n 分段' },
+    },
+    required: ['filename', 'layout'],
+  },
+  handler: async (args: any) => {
+    const cmdArgs = ['newslide', args.filename, '--layout', String(args.layout)];
+    if (args.title !== undefined) cmdArgs.push('--title', args.title);
+    if (args.subtitle !== undefined) cmdArgs.push('--subtitle', args.subtitle);
+    let texts = args.texts;
+    if (texts !== undefined && typeof texts !== 'string') {
+      texts = JSON.stringify(texts);
+    }
+    if (texts !== undefined) cmdArgs.push('--texts', texts);
+    const result = await execOfficeCLI(cmdArgs, 60000);
+    return { success: true, output: truncateOfficeOutput(result, 'office_newslide') };
+  },
+};
+
 // 所有 OfficeCLI 工具
 export const officeCLITools: Tool[] = [
   // L1: 读取/查看
@@ -456,6 +530,10 @@ export const officeCLITools: Tool[] = [
   officeRawSetTool,
   // L4: 模板格式
   officeApplyStyleTool,
+  // L5: PPT 样式模板复用
+  officeCloneTemplateTool,
+  officeLayoutsTool,
+  officeNewSlideTool,
 ];
 
 // 注册到 ToolManager 的工具组

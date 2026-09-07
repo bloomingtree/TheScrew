@@ -40,16 +40,17 @@ import { registerTasksHandlers } from './ipc/tasks';
 import { registerMemoryConsolidateJob, checkAndRunConsolidateOnStartup } from './scheduler/MemoryConsolidator';
 import { getSessionSummarizer } from './memory/SessionSummarizer';
 import { getConversationWithMessages } from './db';
+import { maybeStartAgentBridge } from './bridge/AgentBridgeServer';
 import { attachmentTools } from './tools/AttachmentTools';
 import { officeCLITools, officeCLIToolGroup } from './tools/OfficeCLITools';
 import { knowledgeTools, knowledgeToolGroup } from './tools/KnowledgeTools';
 import { taskTools } from './tools/TaskTools';
-import { memoryTools } from './tools/MemoryTools';
 import { remoteTools, remoteToolGroup } from './tools/RemoteTools';
 import { dbTools, dbToolGroup } from './tools/DbTools';
 import { pdfTools, pdfToolGroup } from './tools/PdfTools';
 import { reportTools, reportToolGroup } from './tools/ReportTools';
 import { pptxDesignTools, pptxDesignToolGroup } from './tools/PptxDesignTools';
+import { officeGenTools, officeGenToolGroup } from './tools/OfficeGenTools';
 
 const store = new Store();
 
@@ -153,6 +154,9 @@ app.whenReady().then(async () => {
 
   // 初始化技能管理器
   await getSkillManager().initialize();
+
+  // 启动本地 HTTP 桥（教练接口，默认关闭；settings.agentBridge.enabled 开启）
+  maybeStartAgentBridge();
 
   // ============================================================================
   // 初始化定时任务系统 (CronService + HeartbeatService)
@@ -306,18 +310,6 @@ app.whenReady().then(async () => {
     estimatedTokens: 400,
   });
 
-  // 注册长期记忆工具到 ToolManager（memory_save / memory_search / memory_read）
-  for (const tool of memoryTools) {
-    toolManager.registerTool(tool);
-  }
-  registerToolSetMeta({
-    name: 'memory',
-    description: '长期记忆管理（写入/搜索/读取）',
-    capabilities: ['写入记忆', '搜索记忆', '读取记忆', '章节合并'],
-    keywords: ['记忆', 'memory', '记住', '笔记', '偏好', '长期'],
-    estimatedTokens: 500,
-  });
-
   // 注册远程操作工具到 ToolManager
   for (const tool of remoteTools) {
     toolManager.registerTool(tool);
@@ -381,6 +373,19 @@ app.whenReady().then(async () => {
     capabilities: ['配色方案', '数据图表', '主题应用'],
     keywords: pptxDesignToolGroup.keywords,
     estimatedTokens: 400,
+  });
+
+  // 注册 Office 一键生成工具到 ToolManager
+  for (const tool of officeGenTools) {
+    toolManager.registerTool(tool);
+  }
+  toolManager.registerToolGroup(officeGenToolGroup);
+  registerToolSetMeta({
+    name: officeGenToolGroup.name,
+    description: officeGenToolGroup.description,
+    capabilities: ['Word 一键生成', 'Excel 多表生成', '内容块追加'],
+    keywords: officeGenToolGroup.keywords,
+    estimatedTokens: 600,
   });
 
   // 注册 IPC 处理器

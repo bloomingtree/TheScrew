@@ -231,13 +231,13 @@ export class ToolManager {
       // 自动将相对路径解析为工作区绝对路径
       if (args && typeof args === 'object') {
         // 仅对这些明确是文件系统的参数做路径解析（跳过 element_path 等文档内部路径）
-        const filePathKeys = ['path', 'filepath', 'filename', 'file_path', 'dir_path', 'directory', 'template', 'output'];
+        const filePathKeys = ['path', 'filepath', 'filename', 'file_path', 'dir_path', 'directory', 'template', 'output', 'target'];
         // 直接通过 globalThis + Symbol.for 读取工作区路径
         // 不能用 require('./FileTools')，因为 Vite 打包后不存在独立模块文件，require 会静默失败
         const _workspaceKey = Symbol.for('zero-employee:getWorkspacePath()');
         const workspacePath = (globalThis as any)[_workspaceKey] ?? null;
         // namespace=config 时路径是相对于 .config 配置目录的，不应拼接到 workspace
-        // 否则 read_file({filepath:"skills/x/SKILL.md", namespace:"config"}) 会被错误解析到 workspace 下
+        // 否则 read({filepath:"skills/x/SKILL.md", namespace:"config"}) 会被错误解析到 workspace 下
         const skipWorkspaceResolution = args.namespace === 'config';
         console.log(`[ToolManager] Path resolution check - workspace: ${workspacePath}, tool: ${toolCall.function.name}, skipWorkspace: ${skipWorkspaceResolution}`);
         for (const key of filePathKeys) {
@@ -544,7 +544,7 @@ async function truncateToolOutput(
 
     // 在结果中添加截断标记
     const hint = truncated.metadata.savedPath
-      ? `\n\n[输出已截断（原始大小 ${(resultStr.length / 1024).toFixed(1)}KB），完整内容已保存至: ${truncated.metadata.savedPath}，可用 read_file 查看]`
+      ? `\n\n[输出已截断（原始大小 ${(resultStr.length / 1024).toFixed(1)}KB），完整内容已保存至: ${truncated.metadata.savedPath}，可用 read 查看]`
       : `\n\n[输出已截断（原始大小 ${(resultStr.length / 1024).toFixed(1)}KB）]`;
 
     // 对有 content 字段的结果，直接截断 content

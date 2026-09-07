@@ -148,7 +148,7 @@ function safeStringify(obj: any, indent?: number | string): string {
  * 这会触发 "System message must be at the beginning of the conversation" 400 错误。
  * 这里将任何非首位的 system 消息降级为 user 消息作为兜底。
  */
-function sanitizeMessages(messages: any[]): any[] {
+function sanitizeMessages(messages: any[], isDeepSeek = false): any[] {
   return messages.map((msg, idx) => {
     // 兜底：非首位的 system 消息降级为 user，避免 400 错误
     let role = msg.role;
@@ -172,6 +172,13 @@ function sanitizeMessages(messages: any[]): any[] {
           clean.tool_calls = msg.tool_calls;
         } else {
           clean.content = msg.content;
+        }
+        // DeepSeek 思考模式（官方文档）：只要请求带 tools 参数，历史中所有
+        // assistant 消息（包括无 tool_calls 的最终答复）都必须回传
+        // reasoning_content，否则 400。
+        // 仅对 DeepSeek 生效，其他 provider 剥离该字段。
+        if (isDeepSeek) {
+          clean.reasoning_content = (msg.reasoning_content ?? msg.thinkingContent) || '';
         }
         return clean;
       }
@@ -409,7 +416,11 @@ export class OpenAIClient {
 
   async *streamChat(messages: any[], signal?: AbortSignal, tools?: any[], thinkingMode?: ThinkingMode): AsyncGenerator<string> {
     // 清理消息：移除非标准字段（id、thinkingContent 等），防止 DashScope 400 错误
-    const sanitizedMessages = sanitizeMessages(messages);
+    const isDeepSeek = /deepseek/i.test(this.baseUrl) || /deepseek/i.test(this.model);
+    // DeepSeek 对 reasoning_content 的回传要求仅在请求携带 tools 时生效；
+    // 无 tools 的纯对话请求携带该字段可能被 API 拒绝
+    const needReasoning = isDeepSeek && !!tools && tools.length > 0;
+    const sanitizedMessages = sanitizeMessages(messages, needReasoning);
 
     // 粗略估算请求体大小（使用 safeStringify 防止循环引用崩溃）
     const messagesStr = safeStringify(sanitizedMessages);

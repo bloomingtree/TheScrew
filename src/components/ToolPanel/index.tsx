@@ -6,7 +6,11 @@ import { useChatStore } from '../../store/chatStore';
 import { ToolExecution } from '../../types';
 
 const ToolPanel: React.FC = () => {
-  const { toolCalls, toolResults, isStreaming, toolExecutions } = useChatStore();
+  // 精确订阅，避免 toolCallWritingMap 等无关状态变化拖入重渲染
+  const toolCalls = useChatStore((s) => s.toolCalls);
+  const toolResults = useChatStore((s) => s.toolResults);
+  const isStreaming = useChatStore((s) => s.isStreaming);
+  const toolExecutions = useChatStore((s) => s.toolExecutions);
   const [expandedExecutions, setExpandedExecutions] = useState<Set<string>>(new Set());
 
   const toggleExpansion = (toolCallId: string) => {

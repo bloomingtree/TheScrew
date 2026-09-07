@@ -17,8 +17,10 @@ const EDIT_TOOL_PATH_KEY: Record<string, string> = {
   office_move: 'filename',
   office_swap: 'filename',
   office_replace: 'filename',
-  edit_file: 'filepath',
-  write_file: 'filepath',
+  edit: 'filepath',
+  edit_file: 'filepath', // 兼容旧会话中已持久化的工具名
+  write: 'filepath',
+  write_file: 'filepath', // 兼容旧会话中已持久化的工具名
   create_file: 'filepath',
 };
 
@@ -68,6 +70,14 @@ interface EditedFile {
 function useEditedFiles(): EditedFile[] {
   const messages = useChatStore((s) => s.messages);
 
+  // 流式期间 messages 引用每 50ms 变一次，但 tool_calls 结构很少变；
+  // 以签名作为 useMemo 依赖，避免重复 JSON.parse 全部工具参数
+  const toolCallsSignature = messages
+    .map(m => (m.role === 'assistant' && m.tool_calls)
+      ? m.tool_calls.map((tc: any) => `${tc.id}:${tc?.function?.name}:${tc?.function?.arguments?.length ?? 0}`).join(';')
+      : '')
+    .join('|');
+
   return useMemo(() => {
     const fileMap = new Map<string, EditedFile>(); // key: normalized path
 
@@ -109,7 +119,8 @@ function useEditedFiles(): EditedFile[] {
       const bOffice = OFFICE_EXTS.has(b.ext) ? 0 : 1;
       return aOffice - bOffice;
     });
-  }, [messages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toolCallsSignature]);
 }
 
 /** 本次对话已编辑文档的快捷访问条 */

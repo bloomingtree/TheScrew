@@ -11,6 +11,7 @@
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 
 // 配置目录名称常量
 export const CONFIG_DIR_NAME = '.config';
@@ -249,14 +250,28 @@ export class PathManager {
   /**
    * 获取内嵌 BusyBox 解释器路径
    * BusyBox-w32 提供 UTF-8 兼容的 Unix 命令环境（ash shell + 100+ 命令）
-   * - 开发环境：项目根目录/electron/main/busybox/busybox.exe
-   * - 生产环境：resources/busybox/busybox.exe
+   * - 开发环境：项目根目录/electron/main/busybox/
+   * - 生产环境：resources/busybox/
+   *
+   * 双二进制策略（2026-09-07）：
+   * 标准 busybox-w32 无原生 Unicode 支持——中文路径会被按 ANSI(GBK) 解析，
+   * 导致 ls/cd 对实际存在的中文路径报 "No such file or directory"（假 FileNotFound，
+   * 会误导 AI 推翻正确的执行结果）。官方 Unicode 变体 busybox64u.exe 通过
+   * activeCodePage=UTF-8 清单修复此问题，但仅 Win10 1903+ 生效；Win7 回退标准版。
    */
   getBusyBoxPath(): string {
-    if (app.isPackaged) {
-      return path.join(process.resourcesPath, 'busybox', 'busybox.exe');
+    const dir = app.isPackaged
+      ? path.join(process.resourcesPath, 'busybox')
+      : path.join(this.appRootPath, 'electron', 'main', 'busybox');
+
+    if (process.platform === 'win32') {
+      const major = parseInt(os.release().split('.')[0], 10);
+      const unicodePath = path.join(dir, 'busybox64u.exe');
+      if (major >= 10 && fs.existsSync(unicodePath)) {
+        return unicodePath;
+      }
     }
-    return path.join(this.appRootPath, 'electron', 'main', 'busybox', 'busybox.exe');
+    return path.join(dir, 'busybox.exe');
   }
 
   /**

@@ -305,7 +305,7 @@ export class SimpleSkillManager {
   /**
    * 构建技能摘要（用于系统提示词）
    * nanobot 风格：不接受参数，始终返回所有 skills 的摘要
-   * 包含文件路径，让 agent 可以通过 read_file 工具读取完整内容
+   * 包含文件路径，让 agent 可以通过 read 工具读取完整内容
    */
   async build_skills_summary(): Promise<string> {
     const skills = await this.listSkills();
@@ -333,11 +333,11 @@ export class SimpleSkillManager {
     return `## 可用技能
 
 以下技能扩展了你的能力。使用技能时：
-1. 使用 \`read_file\` 工具读取技能的 SKILL.md 文件，设置 \`namespace: "config"\`
-   - 示例：\`read_file({ filepath: "skills/技能名/SKILL.md", namespace: "config" })\`
+1. 使用 \`read\` 工具读取技能的 SKILL.md 文件，设置 \`namespace: "config"\`
+   - 示例：\`read({ filepath: "skills/技能名/SKILL.md", namespace: "config" })\`
    - **注意**：返回结果包含 \`fullPath\`（绝对路径），可直接用于脚本执行
-2. 需要时使用 \`list_directory\` 探索技能目录（如 scripts/*.py），同样设置 \`namespace: "config"\`
-   - 示例：\`list_directory({ directory: "skills/技能名/scripts", namespace: "config" })\`
+2. 需要时使用 \`ls\` 探索技能目录（如 scripts/*.py），同样设置 \`namespace: "config"\`
+   - 示例：\`ls({ directory: "skills/技能名/scripts", namespace: "config" })\`
    - **注意**：返回结果包含 \`fullPath\`（绝对路径），可直接用于脚本执行
 3. 阅读文档中的示例和说明后再执行操作
 
@@ -389,7 +389,7 @@ ${sections.join('\n\n')}`;
           const relativePath = relative(this.workspaceSkillsDir, skill.path);
           const skillPath = `${CONFIG_DIR_NAME}/skills/${relativePath}`;
           content = content.slice(0, MAX_SKILL_CONTENT_LENGTH) +
-            `\n\n... (内容过长，已截断。使用 read_file 工具读取完整内容: filepath="${skillPath}", namespace="config")`;
+            `\n\n... (内容过长，已截断。使用 read 工具读取完整内容: filepath="${skillPath}", namespace="config")`;
         }
 
         sections.push(`## ${emoji}${skill.name}\n\n${content}`);

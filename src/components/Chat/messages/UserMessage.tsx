@@ -185,4 +185,5 @@ const UserMessage: React.FC<UserMessageProps> = ({ message }) => {
   );
 };
 
-export default UserMessage;
+// React.memo：消息列表重渲染时，props 未变的历史消息直接跳过
+export default React.memo(UserMessage);

@@ -42,6 +42,14 @@ export function abortCurrentTurn(): void {
   currentClient = null;
 }
 
+/**
+ * 是否有 agent turn 正在执行（供 bridge 等外部入口做互斥，
+ * 避免并发 turn 触发单例 AbortController 静默打断用户进行中的对话）
+ */
+export function isAgentTurnRunning(): boolean {
+  return currentAbortController !== null;
+}
+
 // ============================================================================
 // 常量
 // ============================================================================
@@ -184,17 +192,52 @@ export async function buildNanobotStyleSystemPrompt(conversationId?: string): Pr
 
 /**
  * 格式化工具结果为发送给 LLM 的 content 字符串
+ *
+ * 2026-09-07 重写（opencode 风格）：不再把整个结果对象 safeStringify 成带转义
+ * 引号的 JSON 瀑布（信噪比低、浪费 token 且模型易看漏关键信息），改为：
+ *   1. 主内容字段（content/output/stdout/message）直接作为正文
+ *   2. 关键元数据（文件路径/大小/exitCode 等）压缩为一行脚注
+ *   3. 无主内容字段时兜底紧凑序列化（剔除 structured 等大块噪音）
  */
 function formatToolResultContent(result: any): string {
   if (!result.success) {
-    return `Error: ${result.error || 'Unknown error'}`;
+    const err = result.error ?? result.stderr ?? 'Unknown error';
+    return `Error: ${typeof err === 'string' ? err : safeStringify(err)}`;
   }
   const r = result.result;
   if (r?._truncated && r._preview) {
     return r._preview;
   }
-  const serialized = safeStringify(r);
-  return typeof serialized === 'string' ? serialized : JSON.stringify(r ?? 'done');
+  if (r == null) return 'done';
+  if (typeof r === 'string') return r || 'done';
+  if (typeof r !== 'object') return String(r);
+
+  const parts: string[] = [];
+
+  // 1. 主内容字段：优先级 content > output > stdout > message
+  const main = r.content ?? r.output ?? r.stdout ?? r.message;
+  if (typeof main === 'string' && main.length > 0) {
+    parts.push(main);
+  } else {
+    // 没有主内容字段：紧凑序列化其余字段（剔除主内容字段和 structured）
+    const { content, output, stdout, message, structured, _preview, _truncated, ...rest } = r;
+    const keys = Object.keys(rest);
+    if (keys.length > 0) parts.push(safeStringify(rest));
+  }
+
+  // 2. stderr 即使成功也可能带警告信息，非空则附上
+  if (typeof r.stderr === 'string' && r.stderr.length > 0) {
+    parts.push(`[stderr] ${r.stderr}`);
+  }
+
+  // 3. 元数据脚注（单行）
+  const metaKeys = ['fullPath', 'file', 'path', 'count', 'totalMatches', 'exitCode', 'executionMethod', 'size'];
+  const meta = metaKeys
+    .filter(k => r[k] !== undefined && r[k] !== null && typeof r[k] !== 'object')
+    .map(k => `${k}=${r[k]}`);
+  if (meta.length > 0) parts.push(`(${meta.join(' | ')})`);
+
+  return parts.join('\n') || 'done';
 }
 
 /**
@@ -238,7 +281,7 @@ export interface AgentTurnOptions {
   /** 流式推送目标（通常是 event.sender 或 mainWindow.webContents） */
   sender: WebContents;
   /** 触发来源 */
-  source?: 'user' | 'cron' | 'heartbeat';
+  source?: 'user' | 'cron' | 'heartbeat' | 'bridge';
 }
 
 export interface AgentTurnResult {
@@ -255,6 +298,9 @@ export interface AgentTurnResult {
  *  - assistant 消息：camelCase `toolCalls` → snake_case `tool_calls`
  *  - 丢弃没有 tool_call_id 的孤儿 tool 消息（否则 API 报 400 missing field `tool_call_id`）
  *  - 丢弃前导/孤立的 tool 消息（前面没有对应 assistant tool_calls）
+ *  - 悬空 tool_calls 补占位结果：turn 被 abort/网络中断时，assistant 的 tool_calls
+ *    已入历史但 tool 结果缺失，API 会报 400 "insufficient tool messages following
+ *    tool_calls message"——为缺失的 tool_call_id 注入占位 tool 消息
  */
 function normalizeMessagesForLLM(input: any[]): any[] {
   if (!Array.isArray(input)) return [];
@@ -296,13 +342,50 @@ function normalizeMessagesForLLM(input: any[]): any[] {
       }
     }
   }
-  return (normalized as any[]).filter((m: any) => {
+  const filtered = (normalized as any[]).filter((m: any) => {
     if (m.role === 'tool' && !validToolCallIds.has(m.tool_call_id)) {
       console.warn(`[AgentRunner] Drop orphan tool message tool_call_id=${m.tool_call_id}`);
       return false;
     }
     return true;
   });
+
+  // 第三遍：保证每个 assistant tool_calls 后紧跟完整的 tool 结果
+  // - tool 结果缺失（turn 被 abort/断网中断）→ 注入占位 tool 消息
+  // - 错位的 tool 消息（不紧跟在对应 assistant 之后，如被 user 消息隔开）→ 丢弃
+  const result: any[] = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const m = filtered[i];
+    if (m.role === 'tool') {
+      console.warn(`[AgentRunner] Drop misplaced tool message tool_call_id=${m.tool_call_id}`);
+      continue;
+    }
+    result.push(m);
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+      // 收集紧随其后的连续 tool 消息
+      const responded = new Set<string>();
+      let j = i + 1;
+      while (j < filtered.length && filtered[j].role === 'tool') {
+        responded.add(filtered[j].tool_call_id);
+        j++;
+      }
+      // 为缺失的 tool_call_id 补占位结果
+      for (const tc of m.tool_calls) {
+        if (tc?.id && !responded.has(tc.id)) {
+          console.warn(`[AgentRunner] Inject placeholder tool result for missing tool_call_id=${tc.id}`);
+          result.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: '[工具执行被中断，没有返回结果]',
+          });
+        }
+      }
+      // 已有的 tool 结果按原顺序放回
+      for (let k = i + 1; k < j; k++) result.push(filtered[k]);
+      i = j - 1;
+    }
+  }
+  return result;
 }
 
 /**
@@ -330,11 +413,14 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
     }
 
     // -------- 中断上一个 turn，建立新的 AbortController --------
+    // 注意：bridge/cron/heartbeat 可能并发跑 turn，此单例只用于"中断上一个"；
+    // 本 turn 必须用局部引用，避免并发 turn 把单例置空后读到 null
     if (currentAbortController) {
       currentAbortController.abort();
       currentAbortController = null;
     }
-    currentAbortController = new AbortController();
+    const turnController = new AbortController();
+    currentAbortController = turnController;
 
     // 把 WebContents 存到 globalThis，供 ask_user 等工具向渲染进程发事件
     (globalThis as any)[Symbol.for('zero-employee:chatWebContents')] = sender;
@@ -369,13 +455,17 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
       : toolManager.getOpenAIFunctionDefinitions();
 
     // -------- 工具调用计数与历史 --------
-    const toolCallHistory: string[] = [];
+    // 重复失败检测：只记录"执行失败"的相同调用（相同参数且成功属正常轮询，不告警）
+    const failedToolCalls: string[] = [];
     let totalToolCalls = 0;
     let iteration = 0;
     const MAX_SINGLE_TOOL_CALLS = appConfigStore.getMaxSingleToolCalls();
     const toolCallCounter = new Map<string, number>();
 
     let roundChunks: string[] = [];
+    // 本轮思考内容（reasoning_content）：DeepSeek 思考模式要求所有 assistant
+    // 消息（含最终答复）续传时回传 reasoning_content，因此每轮都要收集
+    let roundThinking: string[] = [];
 
     // -------- 工具调用主循环 --------
     while (true) {
@@ -413,19 +503,26 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
 
       let hasToolCalls = false;
       roundChunks = [];
+      roundThinking = [];
       const roundNumber = iteration;
       let chunkCount = 0;
 
-      // 清理 thinkingContent（不发给 LLM）
+      // 清理思考内容：
+      // - DeepSeek 等思考模式模型要求：只要请求带 tools，历史中所有 assistant
+      //   消息（包括无 tool_calls 的最终答复）续传时都必须带回 reasoning_content，
+      //   否则 400（官方文档："even if the model did not perform a tool call in that turn"）
+      // - 非 assistant 消息剥离思考字段；assistant 消息统一转成 reasoning_content
+      //   是否真正发送由 openai.ts 的 sanitizeMessages 按 provider 决定
       const cleanedMessages = messages.map(m => {
-        if ((m as any).thinkingContent) {
-          const { thinkingContent, ...rest } = m as any;
-          return rest;
-        }
-        return m;
+        const msg = m as any;
+        if (msg.role !== 'assistant') return m;
+        const thinking = msg.thinkingContent ?? msg.reasoning_content;
+        const { thinkingContent, reasoning_content, ...rest } = msg;
+        if (!thinking) return rest;
+        return { ...rest, reasoning_content: thinking };
       });
 
-      for await (const chunk of client.streamChat(cleanedMessages, currentAbortController.signal, tools, thinkingMode)) {
+      for await (const chunk of client.streamChat(cleanedMessages, turnController.signal, tools, thinkingMode)) {
         chunkCount++;
 
         // tool_call_delta 中间事件
@@ -454,14 +551,27 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
               const textContent = roundChunks.length > 0 ? roundChunks.join('') : '';
               roundChunks = [];
 
-              // 重复调用检测（仅记录）
+              // 重复调用检测（相同参数且每次都失败时注入强提醒，防止死循环空转）
+              // 仅统计失败的调用：task_list 等轮询型工具被正常重复调用不应被误伤
+              // 2026-09-07：干预阈值从 5 次收紧到 2 次（评测发现 3 连败时模型已在盲试），
+              // 第 4 次起升级为"换方法或停下"，避免烧上下文
+              const roundCallKeys: string[] = [];
+              let warnedThisRound = false;
               for (const toolCall of parsed.toolCalls) {
                 const callKey = `${toolCall.function.name}:${JSON.stringify(toolCall.function.arguments)}`;
-                const sameCallCount = toolCallHistory.filter(k => k === callKey).length;
-                if (sameCallCount >= 3 && sameCallCount % 3 === 0) {
-                  console.warn(`${sourceTag} Repeated tool call: ${callKey} (${sameCallCount} times)`);
+                roundCallKeys.push(callKey);
+                const failedCount = failedToolCalls.filter(k => k === callKey).length;
+                if (failedCount >= 2 && !warnedThisRound) {
+                  warnedThisRound = true;
+                  console.warn(`${sourceTag} Repeated failed tool call: ${callKey} (${failedCount} times)`);
+                  const hint = failedCount >= 4
+                    ? '已连续多次失败，禁止再用相同方式重试。请改用完全不同的实现方法（例如改用 bash + python 脚本完成），或如实向用户说明卡点后停止。'
+                    : '请：1) 仔细阅读最近一次工具返回的错误信息（含出错位置和建议）；2) 改变参数写法（如把嵌套 JSON 字符串改为直接数组、补齐缺失的必填参数）；3) 缩小规模分步完成（先建 1 个 sheet，再用追加方式加内容）。';
+                  messages.push({
+                    role: 'user',
+                    content: `[系统警告] "${toolCall.function.name}" 用完全相同的参数已连续失败 ${failedCount} 次，禁止再提交相同参数。${hint}`,
+                  });
                 }
-                toolCallHistory.push(callKey);
               }
 
               // 单工具/总工具调用次数追踪（单工具超阈值时仅注入柔性提醒，不强制中断）
@@ -542,12 +652,23 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
 
                 sender.send('chat:tool_results', results);
 
+                // 记录失败调用（供重复失败检测；results[i] 与 parsed.toolCalls[i] 按 toolCallId 对应）
+                results.forEach((result, i) => {
+                  if (!result.success && roundCallKeys[i]) {
+                    failedToolCalls.push(roundCallKeys[i]);
+                  }
+                });
+
                 // assistant 消息：文本 + tool_calls 合并（OpenAI 规范）
+                // 思考模式的 reasoning_content 必须随消息保留：本轮续传时回传给 API（DeepSeek 要求），
+                // 同时存为 thinkingContent 字段便于持久化
+                const roundThinkingText = roundThinking.join('');
                 messages.push({
                   id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                   role: 'assistant',
                   content: textContent || null,
                   tool_calls: parsed.toolCalls,
+                  ...(roundThinkingText ? { reasoning_content: roundThinkingText, thinkingContent: roundThinkingText } : {}),
                 });
 
                 for (const result of results) {
@@ -570,6 +691,7 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
         } else {
           // 非工具调用：普通文本或思考内容
           if (chunk.startsWith('\x01THINKING\x02')) {
+            roundThinking.push(chunk.substring('\x01THINKING\x02'.length));
             sender.send('chat:chunk', chunk);
           } else {
             roundChunks.push(chunk);
@@ -589,12 +711,16 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<AgentTurnRes
     }
 
     // 最终 assistant 消息
+    // DeepSeek 思考模式：只要请求带 tools，最终答复（无 tool_calls）也必须带
+    // reasoning_content 回传，否则下一轮 400（官方文档明确要求）
     if (roundChunks.length > 0) {
       const finalContent = roundChunks.join('');
+      const finalThinking = roundThinking.join('');
       messages.push({
         id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         role: 'assistant',
         content: finalContent,
+        ...(finalThinking ? { reasoning_content: finalThinking, thinkingContent: finalThinking } : {}),
       });
     }
 

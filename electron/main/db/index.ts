@@ -46,6 +46,7 @@ export interface MessageRow {
   images?: string; // JSON string
   toolCalls?: string; // JSON string
   tool_call_id?: string;
+  thinkingContent?: string; // 思考模式 reasoning_content（DeepSeek 思考模式多轮回传必需）
 }
 
 export type MessageInsert = Omit<MessageRow, 'conversation_id'> & {

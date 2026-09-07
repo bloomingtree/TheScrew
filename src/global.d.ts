@@ -486,7 +486,7 @@ interface ElectronAPI {
       allowOther: boolean;
     }>;
   }) => void) => () => void;
-  answerQuestion: (questionId: string, answers: Record<string, string | string[]>) => Promise<{
+  answerQuestion: (questionId: string, answers: Record<string, string | string[]> | null) => Promise<{
     success: boolean;
     error?: string;
   }>;
