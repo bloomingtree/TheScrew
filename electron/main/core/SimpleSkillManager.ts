@@ -276,33 +276,6 @@ export class SimpleSkillManager {
   }
 
   /**
-   * 获取 config 目录结构（仅顶层，非递归）
-   */
-  private async get_config_structure(): Promise<string> {
-    try {
-      const configRoot = join(this.workspacePath, CONFIG_DIR_NAME);
-      if (!existsSync(configRoot)) {
-        return '  (config 目录不存在)';
-      }
-
-      const entries = await readdir(configRoot, { withFileTypes: true });
-      const items: string[] = [];
-
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          items.push(`  📁 ${entry.name}/`);
-        } else if (entry.isFile()) {
-          items.push(`  📄 ${entry.name}`);
-        }
-      }
-
-      return items.length > 0 ? items.join('\n') : '  (空目录)';
-    } catch (error) {
-      return `  (无法读取: ${error})`;
-    }
-  }
-
-  /**
    * 构建技能摘要（用于系统提示词）
    * nanobot 风格：不接受参数，始终返回所有 skills 的摘要
    * 包含文件路径，让 agent 可以通过 read 工具读取完整内容
@@ -316,10 +289,9 @@ export class SimpleSkillManager {
       // 计算相对于 .config/skills 的路径
       const relativePath = relative(this.workspaceSkillsDir, skill.path);
       const skillPath = `${CONFIG_DIR_NAME}/skills/${relativePath}`;
-      const skillDir = `${CONFIG_DIR_NAME}/skills/${skill.category}`;
 
       sections.push(
-        `### ${emoji}${skill.name}\n\n${skill.description}\n\n**SKILL.md**: \`${skillPath}\`\n**技能目录**: \`${skillDir}/\``
+        `### ${emoji}${skill.name}\n\n${skill.description}\n\n**SKILL.md**: \`${skillPath}\``
       );
     }
 
@@ -327,33 +299,12 @@ export class SimpleSkillManager {
       return '';
     }
 
-    // 获取 config 目录的实际结构
-    const configStructure = await this.get_config_structure();
-
     return `## 可用技能
 
-以下技能扩展了你的能力。使用技能时：
-1. 使用 \`read\` 工具读取技能的 SKILL.md 文件，设置 \`namespace: "config"\`
-   - 示例：\`read({ filepath: "skills/技能名/SKILL.md", namespace: "config" })\`
-   - **注意**：返回结果包含 \`fullPath\`（绝对路径），可直接用于脚本执行
-2. 需要时使用 \`ls\` 探索技能目录（如 scripts/*.py），同样设置 \`namespace: "config"\`
-   - 示例：\`ls({ directory: "skills/技能名/scripts", namespace: "config" })\`
-   - **注意**：返回结果包含 \`fullPath\`（绝对路径），可直接用于脚本执行
-3. 阅读文档中的示例和说明后再执行操作
-
-**文件路径说明**：
-- 技能文件位于 \`${CONFIG_DIR_NAME}/skills/\` 目录下
-- 使用 \`namespace: "config"\` 参数访问配置目录下的文件
-- \`filepath\` 或 \`directory\` 是相对于 \`${CONFIG_DIR_NAME}/\` 根目录的路径
-- **所有文件操作工具都返回 \`fullPath\`（绝对路径）**
-
-**当前 config 目录结构**（${CONFIG_DIR_NAME}/）：
-${configStructure}
-
-**脚本执行说明**：
-- bash 工具的默认工作目录是用户的 **workspace**
-- 执行技能脚本时使用 \`fullPath\`（绝对路径），不依赖当前工作目录
-- 示例：\`bash({ command: "python E:/path/to/${CONFIG_DIR_NAME}/skills/docx/scripts/accept_changes.py input.docx output.docx" })\`
+以下技能扩展了你的能力。使用前先读取 SKILL.md（文件工具传 \`namespace: "config"\`，返回结果含 \`fullPath\` 绝对路径）：
+- 示例：\`read({ filepath: "skills/技能名/SKILL.md", namespace: "config" })\`
+- 需要时用 \`ls\` 探索技能目录（如 scripts/*.py）
+- bash 默认工作目录是 workspace，执行技能脚本时用 fullPath 绝对路径
 
 你有以下技能可用：
 
@@ -623,19 +574,17 @@ ${sections.join('\n\n')}`;
   async importSkillFromBuffer(buffer: Buffer | Uint8Array): Promise<SkillMeta> {
     // IPC 从渲染层传入的 Uint8Array 不是 Node Buffer，
     // adm-zip 依赖 Buffer 的方法，直接传入会静默解析失败返回 0 个 entry
-    if (!Buffer.isBuffer(buffer)) {
-      buffer = Buffer.from(buffer);
-    }
+    const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
     // 尝试检测是否为 zip 文件（zip 文件以 PK 签名开头）
-    const isZip = buffer.length >= 4 &&
-      buffer[0] === 0x50 && buffer[1] === 0x4B; // 'PK'
+    const isZip = buf.length >= 4 &&
+      buf[0] === 0x50 && buf[1] === 0x4B; // 'PK'
 
     if (isZip) {
-      return this.importSkillFromZip(buffer);
+      return this.importSkillFromZip(buf);
     }
 
     // 尝试作为 JSON 解析
-    const content = buffer.toString('utf-8');
+    const content = buf.toString('utf-8');
     return this.importSkillFromContent(content);
   }
 

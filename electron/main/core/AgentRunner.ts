@@ -322,6 +322,13 @@ function normalizeMessagesForLLM(input: any[]): any[] {
       };
     }
     if (role === 'assistant') {
+      // 丢弃空壳 assistant 消息（前端为流式渲染预创建、无 content 无 tool_calls）：
+      // 若随历史回传，本 turn 会在其后追加新回复，前端 setMessages 后出现两条
+      // assistant 消息，各自的 thinkingContent 会在 UI 渲染两次相同的思考过程
+      const hasContent = m.content != null && String(m.content).trim() !== '';
+      if (!hasContent && !(Array.isArray(m.tool_calls ?? m.toolCalls) && (m.tool_calls ?? m.toolCalls).length > 0)) {
+        return null;
+      }
       const toolCalls = m.tool_calls ?? m.toolCalls;
       const out: any = {
         ...m,

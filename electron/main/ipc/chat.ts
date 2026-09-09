@@ -9,11 +9,9 @@ import { askUserTools, registerAskUserIpc } from '../tools/AskUserTools';
 import { searchTools } from '../tools/SearchTools';
 import { knowledgeTools } from '../tools/KnowledgeTools';
 import { taskTools } from '../tools/TaskTools';
-import { remoteTools } from '../tools/RemoteTools';
-import { dbTools } from '../tools/DbTools';
-import { pdfTools } from '../tools/PdfTools';
-import { reportTools } from '../tools/ReportTools';
-import { pptxDesignTools } from '../tools/PptxDesignTools';
+import { cronTools, heartbeatTools } from '../tools/SchedulerTools';
+import { attachmentTools } from '../tools/AttachmentTools';
+import { officeGenTools } from '../tools/OfficeGenTools';
 import { getContextBuilder } from '../core/ContextBuilder';
 import { runAgentTurn, abortCurrentTurn } from '../core/AgentRunner';
 import { getAppConfigStore } from '../config/AppConfigStore';
@@ -23,13 +21,28 @@ import { getAppConfigStore } from '../config/AppConfigStore';
  *
  * 注意：chat:stream 的核心执行逻辑已抽取到 AgentRunner.runAgentTurn，
  * 供用户对话、定时任务（cron）、后台巡检（heartbeat）三条路径复用。
+ *
+ * 2026-09-09 工具收敛（Claude Code 式 22 工具）：文件6 + 搜索2 + bash +
+ * ask_user + task + kb2 + cron + heartbeat + 附件3 + office + officegen3。
+ * pdf/db/remote 领域能力已 skill 化（bash 调 python 脚本）。
  */
 export function registerChatHandlers(store: Store) {
   // 注册 ask_user 的 IPC handler（用户回答问题时触发）
   registerAskUserIpc();
 
-  // 注册基础工具组（包含文件操作工具、Bash 工具、ask_user 工具）
-  const baseTools: any[] = [...fileTools, ...bashTools, ...searchTools, ...askUserTools, ...knowledgeTools, ...taskTools, ...remoteTools, ...dbTools, ...pdfTools, ...reportTools, ...pptxDesignTools];
+  // 注册基础工具组（22 个常驻工具）
+  const baseTools: any[] = [
+    ...fileTools,        // get_workspace, ls, read, get_file_info, write, edit
+    ...bashTools,        // bash
+    ...searchTools,      // grep, glob
+    ...askUserTools,     // ask_user
+    ...knowledgeTools,   // kb, kb_search
+    ...taskTools,        // task
+    ...cronTools,        // cron
+    ...heartbeatTools,   // heartbeat
+    ...attachmentTools,  // list_attachments, get_attachment_content, upload_file
+    ...officeGenTools,   // docx_build, xlsx_build, docx_append
+  ];
 
   // 如果 OfficeCLI 已安装，注册 Office 工具
   if (isOfficeCLIAvailable()) {

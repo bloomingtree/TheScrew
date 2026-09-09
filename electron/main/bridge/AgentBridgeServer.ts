@@ -207,9 +207,16 @@ async function handleChatInner(payload: { message: string; conversationId?: stri
     source: 'bridge',
   });
 
-  // 4. 持久化 agent 产生的消息（跳过首条 user，已持久化）
+  // 4. 持久化 agent 产生的消息（只入库本轮新增部分）
+  // result.messages 是完整历史 + 本轮新消息：从最后一条与本轮 user 内容相同的
+  // 消息之后截取，之前的历史已在库中，重复入库会导致会话消息成倍膨胀
   if (result.success && result.messages && result.messages.length > 1) {
-    const newMessages = result.messages.slice(1)
+    let userIdx = -1;
+    for (let i = result.messages.length - 1; i >= 0; i--) {
+      const m = result.messages[i];
+      if (m.role === 'user' && m.content === message) { userIdx = i; break; }
+    }
+    const newMessages = result.messages.slice(userIdx + 1)
       .filter((m: any) => m.role === 'assistant' || m.role === 'tool')
       .map((m: any) => ({
         id: (typeof m.id === 'string' && m.id.startsWith('assistant-')) ? m.id : genId('m'),

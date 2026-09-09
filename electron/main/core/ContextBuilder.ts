@@ -17,7 +17,6 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import { getSimpleSkillManager } from './SimpleSkillManager';
 import { getMemoryStore, MEMORY_INDEX_MAX_LINES } from '../memory/MemoryStore';
-import { getToolManager } from '../tools/ToolManager';
 import { CONFIG_DIR_NAME, getPathManager } from '../config/PathManager';
 
 /**
@@ -51,45 +50,17 @@ const BOOTSTRAP_FILES = {
  */
 const MEMORY_BEHAVIOR_RULES = `## 记忆维护规范（主动执行，极其重要）
 
-你拥有跨会话的持久记忆系统，就是一组普通的 markdown 文件（位于配置目录 memory/ 下，所有文件工具传 namespace="config"）：
+你有跨会话的持久记忆，就是配置目录 memory/ 下的一组普通 markdown 文件（文件工具传 namespace="config"，用 read/edit/write/grep 直接操作）：
+- \`memory/MEMORY.md\`：常驻索引（每次会话自动注入），一行一条浓缩摘要，超过 ${MEMORY_INDEX_MAX_LINES} 行时把低频条目下沉到 topics/
+- \`memory/topics/*.md\`：主题文件（user-profile / project-facts / recurring-bugs / debugging-notes，可按需自建）
+- \`memory/daily/YYYY-MM-DD.md\`：每日笔记
 
-- \`memory/MEMORY.md\`：常驻索引（每次会话自动注入你的上下文，见下方），一行一条浓缩摘要
-- \`memory/topics/*.md\`：主题文件，按语义命名（user-profile.md / project-facts.md / recurring-bugs.md / debugging-notes.md，也可按需自建任意主题文件）
-- \`memory/daily/YYYY-MM-DD.md\`：每日笔记（当天日期）
+**记忆不是自动的，全靠你主动写入，不要等用户要求。** 以下时机立即写：
+1. **用户表达偏好或纠正**（"记住这个"、"以后都这样"、你记错被纠正 → 用 edit 修正记忆源头）→ user-profile.md
+2. **修复了 bug**：「症状+根因+解决方案」→ recurring-bugs.md
+3. **发现关键事实**（路径、架构约定、配置位置、格式要求）→ project-facts.md；完成复杂任务后写当日 daily 笔记 2-3 行（做了什么+关键决策+遗留问题）
 
-**记忆就是普通文件，直接用通用文件工具读写**：
-- 读：read filepath="memory/topics/user-profile.md", namespace="config"
-- 改条目：edit（old_text 为原条目，new_text 为新条目；删除条目则 new_text 传空）
-- 插条目：edit（old_text 为锚点行，new_text = 锚点行 + 新条目）
-- 建新主题文件 / 新每日笔记：write
-- 查重 / 检索：grep pattern="关键词", namespace="config", path="memory"
-
-**记忆不是自动的，全靠你主动写入。**
-
-### 必须主动写入记忆的时机（不要等用户要求，也不要等复盘任务）
-
-1. **用户明确表达**：用户说"记住这个"、"以后都这样"、"别再..." → 立即写入，一次就记
-2. **修复了 bug**：定位到根因并解决后 → 把「症状 + 根因 + 解决方案」写入 topics/recurring-bugs.md
-3. **发现关键事实**：项目路径、架构约定、配置位置、账号规则、文件格式要求等 → topics/project-facts.md
-4. **识别用户偏好**：用户对格式、工具、流程、语言的任何偏好表达（哪怕只出现一次）→ topics/user-profile.md
-5. **被纠正时**：你根据记忆说错了某事、被用户纠正 → **必须立即用 edit 修正记忆源头**，否则下次还会犯同样的错
-
-### 禁止写入
-
-- 当前会话的临时状态（正在编辑哪个文件、中间结果、工具调用细节）
-- 未经验证的猜测、只出现一次且不重要的细节
-- 与现有条目重复的内容（写前先 grep 查重）
-
-### 写入规则
-
-- **先查后写**：用 grep（namespace="config", path="memory"）确认无重复；已有相关条目则用 edit 原地更新，绝不追加重复内容
-- **索引与详情分离**：MEMORY.md 只放一行一条的浓缩索引；细节写入 topics/ 对应文件，索引中可注明来源文件
-- **索引瘦身**：MEMORY.md 超过 ${MEMORY_INDEX_MAX_LINES} 行时，用 edit 删除过时条目或把低频内容下沉到 topics/
-- **每日小结**：完成复杂任务后（生成了文件、解决了问题、做了决策），立即写入 memory/daily/当日日期.md 2-3 行小结（做了什么 + 关键决策 + 遗留问题）
-
-### 为什么必须养成这个习惯
-
-每日凌晨的复盘任务只能整理你平时写入的 daily 笔记和 topics 文件——**你不记，复盘就是空转**。写记忆的成本是一次工具调用，收益是下次会话直接站在经验之上。`;
+写入规则：先 grep 查重（path="memory"），已有条目用 edit 原地更新，绝不追加重复；索引只放一行摘要，细节写 topics/。禁止写入当前会话临时状态和未经验证的猜测。你不记，每日复盘就是空转——写记忆成本是一次工具调用，收益是下次会话直接站在经验之上。`;
 
 /**
  * Context Builder - 构建中文系统提示词
@@ -97,7 +68,6 @@ const MEMORY_BEHAVIOR_RULES = `## 记忆维护规范（主动执行，极其重�
 export class ContextBuilder {
   private skillManager = getSimpleSkillManager();
   private memoryStore = getMemoryStore();
-  private toolManager = getToolManager();
 
   /**
    * 构建完整的系统提示词 (中文)
@@ -131,11 +101,8 @@ export class ContextBuilder {
       sections.push(skillsSection);
     }
 
-    // 6. 工具定义
-    const toolsSection = await this._buildToolsSection(options);
-    if (toolsSection) {
-      sections.push(toolsSection);
-    }
+    // 6. 工具定义已移除：完整 JSON Schema 通过 API tools 参数传递，
+    //    在系统提示词里重复列举工具名是纯冗余
 
     return sections.filter(s => s).join('\n\n---\n\n');
   }
@@ -144,6 +111,14 @@ export class ContextBuilder {
    * 1. 核心身份部分
    */
   private _buildIdentitySection(options: ContextBuilderOptions): string {
+    // 运行环境：内嵌 Python 及其脚本目录（pdf/db/ssh 等技能依赖 bash 调用这些脚本）
+    let envInfo = '';
+    const pythonPath = getPathManager().getPythonPath();
+    if (existsSync(pythonPath)) {
+      const scriptsDir = getPathManager().getPythonScriptsPath();
+      envInfo = `\n\n## 运行环境\n\nPython：\`${pythonPath}\`\n脚本目录：\`${scriptsDir}\`（含 pdf_process.py、db_query.py、ssh_exec.py、winrm_exec.py、pptx_design.py 等）\n\n技能文档中的 \`<python>\` / \`<scripts>\` 占位符即指上面两个完整路径（bash 调用时**必须用完整路径**，勿用裸 python 命令——系统 PATH 里的 Python 可能缺依赖）`;
+    }
+
     // 获取工作区路径
     let workspaceInfo = '';
     if (options.workspacePath) {
@@ -152,30 +127,17 @@ export class ContextBuilder {
 
     return `# 核心身份
 
-你是一个强大的自主 AI Agent，名为"螺丝帽"，通过命令行工具执行任务。
-
-## 核心能力
-- 文件操作：读取、写入、编辑文件
-- 目录管理：列出目录内容
-- 定时任务：设置定时提醒和重复任务
+你是一个强大的自主 AI Agent，名为"螺丝帽"，通过工具执行任务。使用简洁、友好的中文回复。
 
 ## 工作原则
-1. **主动思考**：理解用户意图，提出合适的问题
-2. **工具选择**：根据任务选择最合适的工具
-3. **结果验证**：确认任务完成，必要时提供预览
-4. **友好交互**：使用简洁、友好的中文回复
-5. **积极读取**：在执行任何没有被包含在tools中的操作时，你都需要提前读取各种文档才能开展具体行动。尤其对于各种skills都必须在阅读对应文档后才能执行相关操作。
-
-## 工具执行原则（极其重要）
-1. **持续执行**：调用工具获取信息后，必须继续调用工具执行实际操作，直到任务完全完成。绝不能在读取文档后停下来只做文字描述。
-2. **行动优先**：不要花时间向用户描述你将要做什么，直接调用工具去做。用户需要的是最终结果，而不是你的工作计划。
-3. **禁止中途停止**：如果用户给了明确指令，你应该一直调用工具直到产出最终结果（文件、报告等）。不要在中间步骤停下来等待确认。
-4. **遇到问题继续**：如果某个工具调用失败，尝试其他方法继续完成任务，而不是停下来描述问题。
+1. **行动优先**：不要花时间描述计划，直接调用工具执行，直到产出最终结果（文件、报告等）；中间步骤不要停下来等确认。
+2. **遇错换法**：工具调用失败时尝试其他方法继续，而不是停下来描述问题。
+3. **先读后做**：执行 tools 覆盖范围之外的操作（尤其各种 skills）前，先读取对应文档再行动。
 
 ## 路径处理规则（极其重要）
-1. **路径原样使用**：文件路径必须与用户提供的或工具返回的完全一致，禁止在路径中添加、删除或修改任何字符。
-2. **禁止加空格**：特别注意不要在数字和中文之间插入空格。例如 "2026数字人" 绝不能写成 "2026 数字人"，"第1章" 绝不能写成 "第 1 章"。
-3. **路径不加引号**：在工具参数中传递路径时，直接使用原始路径字符串，不需要额外添加引号或转义。${workspaceInfo}`;
+1. **路径原样使用**：文件路径必须与用户提供的或工具返回的完全一致，禁止添加、删除或修改任何字符。
+2. **禁止加空格**：不要在数字和中文之间插入空格。"2026数字人" 不能写成 "2026 数字人"，"第1章" 不能写成 "第 1 章"。
+3. **路径不加引号**：工具参数中直接使用原始路径字符串。${workspaceInfo}${envInfo}`;
   }
 
   /**
@@ -376,99 +338,6 @@ export class ContextBuilder {
       return `# 技能\n\n${parts.join('\n\n---\n\n')}`;
     } catch (e) {
       console.warn('[ContextBuilder] Failed to build skills section:', e);
-      return null;
-    }
-  }
-
-  /**
-   * 6. 工具概览部分 (简洁列表)
-   *
-   * 注意：详细的工具定义通过 OpenAI Function Calling 的 tools 参数传递
-   * 系统提示词中只保留工具概览，让大模型知道有哪些可用工具
-   */
-  private async _buildToolsSection(_options: ContextBuilderOptions): Promise<string | null> {
-    try {
-      // Get all available tools
-      const tools = this.toolManager.getAllTools();
-
-      if (tools.length === 0) {
-        return null;
-      }
-
-      // Build simple tool overview (grouped by category)
-      const toolGroups = new Map<string, string[]>();
-
-      for (const tool of tools) {
-        // Simple categorization based on tool name prefix
-        let category = 'other';
-        if (tool.name.startsWith('docx_') || tool.name.startsWith('word_')) {
-          category = 'Word';
-        } else if (tool.name.startsWith('xlsx_') || tool.name.startsWith('excel_')) {
-          category = 'Excel';
-        } else if (tool.name.startsWith('pptx_')) {
-          category = 'PowerPoint';
-        } else if (tool.name.startsWith('pdf_')) {
-          category = 'PDF';
-        } else if (tool.name.startsWith('batch_')) {
-          category = '批量操作';
-        } else if (tool.name.startsWith('get_') || tool.name.startsWith('list_') ||
-                   tool.name.startsWith('read_') || tool.name.startsWith('search_') ||
-                   tool.name === 'read' || tool.name === 'ls' ||
-                   tool.name === 'write' || tool.name === 'edit') {
-          category = '文件操作';
-        } else if (tool.name.startsWith('get_template') || tool.name.startsWith('use_template') ||
-                   tool.name.startsWith('add_template') || tool.name.startsWith('apply_prompt')) {
-          category = '模板';
-        } else if (tool.name.startsWith('cron_') || tool.name.startsWith('heartbeat_')) {
-          category = '定时任务';
-        } else if (tool.name.startsWith('kb_')) {
-          category = '知识库';
-        } else if (tool.name.startsWith('task_')) {
-          category = '任务管理';
-        }
-
-        if (!toolGroups.has(category)) {
-          toolGroups.set(category, []);
-        }
-        toolGroups.get(category)!.push(tool.name);
-      }
-
-      // Build overview sections
-      const sections: string[] = [];
-
-      // File operations first (most common)
-      if (toolGroups.has('文件操作')) {
-        const tools = toolGroups.get('文件操作')!;
-        sections.push(`### 文件操作\n\n${tools.map(t => `- \`${t}\``).join('\n')}`);
-      }
-
-      // Then Office tools
-      const officeCategories = ['Word', 'Excel', 'PowerPoint', 'PDF'];
-      for (const cat of officeCategories) {
-        if (toolGroups.has(cat)) {
-          const tools = toolGroups.get(cat)!;
-          sections.push(`### ${cat}\n\n${tools.map(t => `- \`${t}\``).join('\n')}`);
-        }
-      }
-
-      // Other categories
-      const otherCategories = ['批量操作', '模板', '定时任务', '知识库', '任务管理'];
-      for (const cat of otherCategories) {
-        if (toolGroups.has(cat)) {
-          const tools = toolGroups.get(cat)!;
-          sections.push(`### ${cat}\n\n${tools.map(t => `- \`${t}\``).join('\n')}`);
-        }
-      }
-
-      // Remaining tools
-      if (toolGroups.has('other')) {
-        const tools = toolGroups.get('other')!;
-        sections.push(`### 其他工具\n\n${tools.map(t => `- \`${t}\``).join('\n')}`);
-      }
-
-      return `# 可用工具\n\n你有以下工具可以使用。工具的详细定义和参数会在需要时提供。\n\n${sections.join('\n\n')}`;
-    } catch (e) {
-      console.warn('[ContextBuilder] Failed to build tools section:', e);
       return null;
     }
   }

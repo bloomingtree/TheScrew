@@ -206,7 +206,7 @@ const { addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, 
       const tableHeader = '| # | 文件名 | 类型 | 大小 | 推荐读取方式 |\n|---|--------|------|------|-------------|\n';
       const TOOL_RECOMMENDATIONS: Record<string, string> = {
         image: '已内嵌，可直接查看',
-        document: '使用 office_view 查看大纲，office_get 读取内容',
+        document: '使用 office({command:"view"}) 查看大纲，read 直接读取文档内容',
         code: '使用 read 读取源码',
         data: '使用 read 读取数据',
         other: '使用 read 尝试读取',
@@ -289,7 +289,13 @@ const { addMessage, updateLastMessage, updateLastMessageToolCalls, setMessages, 
 
     try {
       // 获取最新的 messages 状态（确保包含刚添加的用户消息）
-      const latestMessages = useChatStore.getState().messages;
+      // 过滤掉刚预创建的空壳 assistant 消息（无 content 无 tool_calls）：
+      // 若发给后端，最终回复会追加在其后，导致 UI 渲染两条 assistant 消息（思考过程显示两次）
+      const latestMessages = useChatStore.getState().messages.filter(
+        (m: any) => m.role !== 'assistant' ||
+          (m.content != null && String(m.content).trim() !== '') ||
+          (Array.isArray(m.tool_calls) && m.tool_calls.length > 0)
+      );
       console.log('[InputArea] Sending', latestMessages.length, 'messages to backend');
 
       // 累积思考内容

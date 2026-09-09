@@ -45,11 +45,6 @@ import { attachmentTools } from './tools/AttachmentTools';
 import { officeCLITools, officeCLIToolGroup } from './tools/OfficeCLITools';
 import { knowledgeTools, knowledgeToolGroup } from './tools/KnowledgeTools';
 import { taskTools } from './tools/TaskTools';
-import { remoteTools, remoteToolGroup } from './tools/RemoteTools';
-import { dbTools, dbToolGroup } from './tools/DbTools';
-import { pdfTools, pdfToolGroup } from './tools/PdfTools';
-import { reportTools, reportToolGroup } from './tools/ReportTools';
-import { pptxDesignTools, pptxDesignToolGroup } from './tools/PptxDesignTools';
 import { officeGenTools, officeGenToolGroup } from './tools/OfficeGenTools';
 
 const store = new Store();
@@ -258,6 +253,10 @@ app.whenReady().then(async () => {
     toolManager.registerTool(tool);
   }
 
+  // 注册远程/数据库/PDF/报表/PPT设计工具的注册块已删除（2026-09-09 工具收敛：
+  // pdf/db/remote 全部 skill 化，AI 用 bash 调 python 脚本；report/pptxDesign 与
+  // OfficeGen/pptx 技能重叠。工具文件已删除）
+
   // 注册附件工具到 ToolManager
   for (const tool of attachmentTools) {
     toolManager.registerTool(tool);
@@ -274,8 +273,8 @@ app.whenReady().then(async () => {
   registerToolSetMeta({
     name: 'attachments',
     description: '附件管理工具',
-    capabilities: ['列出附件', '获取附件内容', '保存附件到工作空间', '多文件工作流处理'],
-    keywords: ['附件', '上传', '文件', '文档', '工作流'],
+    capabilities: ['列出附件', '获取附件内容', '保存附件到工作空间'],
+    keywords: ['附件', '上传', '文件', '文档'],
     estimatedTokens: 300,
   });
   registerToolSetMeta({
@@ -307,71 +306,6 @@ app.whenReady().then(async () => {
     description: '任务管理工具（创建、列表、更新、完成）',
     capabilities: ['任务创建', '状态追踪', '优先级管理', '子任务'],
     keywords: ['任务', '待办', 'TODO', 'task', '管理', '追踪'],
-    estimatedTokens: 400,
-  });
-
-  // 注册远程操作工具到 ToolManager
-  for (const tool of remoteTools) {
-    toolManager.registerTool(tool);
-  }
-  toolManager.registerToolGroup(remoteToolGroup);
-  registerToolSetMeta({
-    name: remoteToolGroup.name,
-    description: 'SSH/WinRM 远程服务器管理',
-    capabilities: ['SSH远程执行', 'WinRM远程执行', '服务器列表'],
-    keywords: remoteToolGroup.keywords,
-    estimatedTokens: 500,
-  });
-
-  // 注册数据库工具到 ToolManager
-  for (const tool of dbTools) {
-    toolManager.registerTool(tool);
-  }
-  toolManager.registerToolGroup(dbToolGroup);
-  registerToolSetMeta({
-    name: dbToolGroup.name,
-    description: '数据库操作（Oracle/SQLite）',
-    capabilities: ['SQL查询', '数据执行', '表结构', '连接管理'],
-    keywords: dbToolGroup.keywords,
-    estimatedTokens: 600,
-  });
-
-  // 注册 PDF 工具到 ToolManager
-  for (const tool of pdfTools) {
-    toolManager.registerTool(tool);
-  }
-  toolManager.registerToolGroup(pdfToolGroup);
-  registerToolSetMeta({
-    name: pdfToolGroup.name,
-    description: 'PDF 处理（合并/拆分/水印/旋转）',
-    capabilities: ['PDF合并', 'PDF拆分', 'PDF水印', 'PDF旋转', 'PDF提取'],
-    keywords: pdfToolGroup.keywords,
-    estimatedTokens: 500,
-  });
-
-  // 注册报表工具到 ToolManager
-  for (const tool of reportTools) {
-    toolManager.registerTool(tool);
-  }
-  toolManager.registerToolGroup(reportToolGroup);
-  registerToolSetMeta({
-    name: reportToolGroup.name,
-    description: '报表生成（周报/月报/数据汇总）',
-    capabilities: ['周报', '月报', '数据汇总', '模板渲染'],
-    keywords: reportToolGroup.keywords,
-    estimatedTokens: 400,
-  });
-
-  // 注册 PPT 设计工具到 ToolManager
-  for (const tool of pptxDesignTools) {
-    toolManager.registerTool(tool);
-  }
-  toolManager.registerToolGroup(pptxDesignToolGroup);
-  registerToolSetMeta({
-    name: pptxDesignToolGroup.name,
-    description: 'PPT 设计（配色方案、数据图表）',
-    capabilities: ['配色方案', '数据图表', '主题应用'],
-    keywords: pptxDesignToolGroup.keywords,
     estimatedTokens: 400,
   });
 

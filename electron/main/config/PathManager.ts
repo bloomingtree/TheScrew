@@ -240,11 +240,24 @@ export class PathManager {
   /**
    * 获取内嵌 Python 解释器路径
    * - 开发环境：项目根目录/electron/main/python/python-3.8.10-embed-amd64/python.exe
-   * - 生产环境：exe 同目录/electron/main/python/python-3.8.10-embed-amd64/python.exe
+   * - 生产环境：extraResources 打包到 exe/resources/python/python-3.8.10-embed-amd64/python.exe
    */
   getPythonPath(): string {
-    const pythonRelDir = path.join('electron', 'main', 'python', 'python-3.8.10-embed-amd64');
-    return path.join(this.appRootPath, pythonRelDir, 'python.exe');
+    const devPath = path.join(this.appRootPath, 'electron', 'main', 'python', 'python-3.8.10-embed-amd64', 'python.exe');
+    if (fs.existsSync(devPath)) {
+      return devPath;
+    }
+    // 生产环境：electron-builder extraResources → resources/python/
+    return path.join(this.appRootPath, 'resources', 'python', 'python-3.8.10-embed-amd64', 'python.exe');
+  }
+
+  /**
+   * 获取内嵌 Python 脚本目录（与 python 目录同级的 scripts/）
+   * 含 pdf_process.py、db_query.py、ssh_exec.py、winrm_exec.py、pptx_design.py 等，
+   * 技能（pdf-tools/database-ops/ssh-ops/winrm-ops）通过 bash 调用
+   */
+  getPythonScriptsPath(): string {
+    return path.join(path.dirname(this.getPythonPath()), '..', 'scripts');
   }
 
   /**

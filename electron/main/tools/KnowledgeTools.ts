@@ -1055,6 +1055,67 @@ const kbRemoveTool: Tool = {
   },
 };
 
+// ==================== 单工具封装（2026-09-09 四工具合并） ====================
+
+/**
+ * kb - 知识库管理单工具，operation 分发到 train/remove/status
+ */
+const kbTool: Tool = {
+  name: 'kb',
+  description: `本地知识库管理（零依赖索引引擎）。operation 取值：
+
+- **train**：索引文件/目录到知识库。paths（路径数组，相对工作空间根）；可选 recursive=true / force=false（强制重建未变更文件）。跳过二进制与 node_modules/.git；按 MD5 增量索引；内容切成 ~500 字符知识块存入 .config/data/kb/
+- **remove**：移除索引。paths（文件精确匹配，目录前缀匹配）
+- **status**：查看统计（文件数/块数/大小/类型分布）
+
+支持文本（.txt/.md/.json/.py/.js 等）与 Office 文档（.docx/.xlsx/.pptx/.pdf，需 officecli）。
+
+示例：
+- kb({operation:"train", paths:["docs", "src"]})
+- kb({operation:"train", paths:["."], force:true})
+- kb({operation:"remove", paths:["docs/archive"]})
+- kb({operation:"status"})`,
+  parameters: {
+    type: 'object',
+    properties: {
+      operation: {
+        type: 'string',
+        enum: ['train', 'remove', 'status'],
+        description: '操作类型，见上方速查表',
+      },
+      paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '（train/remove）文件或目录路径数组（相对工作空间根目录）',
+      },
+      recursive: {
+        type: 'boolean',
+        description: '（train）是否递归子目录，默认 true',
+        default: true,
+      },
+      force: {
+        type: 'boolean',
+        description: '（train）是否强制重新索引未变更的文件，默认 false',
+        default: false,
+      },
+    },
+    required: ['operation'],
+  },
+  handler: async (args: any) => {
+    const { operation, ...rest } = args;
+    switch (operation) {
+      case 'train':
+        return kbTrainTool.handler(rest);
+      case 'remove':
+        return kbRemoveTool.handler(rest);
+      case 'status':
+        return kbStatusTool.handler(rest);
+      default:
+        return { success: false, error: `未知 operation "${operation}"。可用：train / remove / status（搜索请用 kb_search）` };
+    }
+  },
+};
+
 // ==================== 辅助函数 ====================
 
 /**
@@ -1080,10 +1141,8 @@ function formatBytes(bytes: number): string {
 // ==================== 导出 ====================
 
 export const knowledgeTools: Tool[] = [
-  kbTrainTool,
+  kbTool,
   kbSearchTool,
-  kbStatusTool,
-  kbRemoveTool,
 ];
 
 /**
@@ -1095,7 +1154,7 @@ export const knowledgeToolGroup = {
   tools: knowledgeTools,
   keywords: ['知识库', '搜索', '索引', '训练', 'kb', 'knowledge', 'RAG', '检索'],
   triggers: {
-    keywords: ['知识库', '索引', '搜索文件内容', 'kb_train', 'kb_search', 'kb_status', 'kb_remove'],
+    keywords: ['知识库', '索引', '搜索文件内容', 'kb', 'kb_search'],
     fileExtensions: [],
     dependentTools: [],
   },

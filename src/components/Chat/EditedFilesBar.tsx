@@ -6,6 +6,12 @@ import { useTabStore } from '../../store/tabStore';
 
 /** 编辑类工具及其文件路径在参数中的字段名 */
 const EDIT_TOOL_PATH_KEY: Record<string, string> = {
+  // 2026-09-09 工具收敛后的新工具名
+  office: 'filename',
+  docx_build: 'filename',
+  xlsx_build: 'filename',
+  docx_append: 'filename',
+  // 旧工具名兼容（旧会话中已持久化的 tool_calls 回放）
   office_create: 'filename',
   office_set: 'filename',
   office_add: 'filename',
@@ -92,7 +98,10 @@ function useEditedFiles(): EditedFile[] {
         let rawPath: string | undefined;
         try {
           const args = JSON.parse(tc.function.arguments || '{}');
-          rawPath = args[pathKey];
+          // office 单工具：clone/apply_style 的目标文档在 params.target，其余在 filename
+          rawPath = toolName === 'office' && !args.filename
+            ? args?.params?.target
+            : args[pathKey];
         } catch {
           continue;
         }

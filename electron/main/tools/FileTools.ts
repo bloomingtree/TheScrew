@@ -105,7 +105,7 @@ async function checkFileFreshness(fullPath: string, filepath: string): Promise<s
 - 上次读取时：${formatSnapshotTime(snapshot.mtimeMs)}，${snapshot.size} 字节
 - 当前状态：${formatSnapshotTime(stats.mtimeMs)}，${stats.size} 字节
 可能的修改来源：bash / officecli 命令、其他工具调用或用户手动编辑。
-请重新执行 read 获取最新内容后再编辑（如使用 edit_lines 按行号编辑，务必以最新行号为准）。`;
+请重新执行 read 获取最新内容后再编辑（如使用 edit mode="lines" 按行号编辑，务必以最新行号为准）。`;
   }
 
   return null;
@@ -114,7 +114,7 @@ async function checkFileFreshness(fullPath: string, filepath: string): Promise<s
 /**
  * Office 文档读取提示：引导 AI 使用 office_* 系列工具进行元素级操作
  */
-const OFFICE_EDIT_HINT = '\n\n---\n[提示] 如需查看文档结构、查询或修改具体元素（段落/单元格/形状等），请使用 office_view、office_get、office_query 等工具。';
+const OFFICE_EDIT_HINT = '\n\n---\n[提示] 如需查看文档结构、查询或修改具体元素（段落/单元格/形状等），请使用 office 工具（command 取 view/get/find/set 等）。';
 
 /**
  * 尝试通过 OfficeCLI（office_view --json）读取 Office 文档结构化大纲。
@@ -196,7 +196,7 @@ function officeJsonToMarkdown(parsed: any, ext: string): string {
     lines.push(`# Excel 文档（共 ${parsed.sheets.length} 个工作表）\n`);
     parsed.sheets.forEach((sh: any) => {
       lines.push(`## 工作表：${sh?.name || '(未命名)'}（${sh?.rowCount ?? '?'} 行 × ${sh?.colCount ?? '?'} 列）`);
-      lines.push('（详细数据请用 office_get 获取具体范围）');
+      lines.push('（详细数据请用 office({command:"get"}) 获取具体元素）');
       lines.push('');
     });
     return lines.join('\n');
@@ -217,7 +217,7 @@ function officeJsonToMarkdown(parsed: any, ext: string): string {
 
   // 兜底：直接打印 JSON（截断到 6000 字符）
   const json = JSON.stringify(parsed, null, 2);
-  return json.length > 6000 ? json.substring(0, 6000) + '\n... (JSON 已截断，请用 office_get 获取详细元素)' : json;
+  return json.length > 6000 ? json.substring(0, 6000) + '\n... (JSON 已截断，请用 office({command:"get"}) 获取详细元素)' : json;
 }
 
 /**
@@ -252,6 +252,108 @@ export const SEARCH_CONFIG = {
   MAX_DEPTH: 50,
   MAX_FILES: 5000,
 };
+
+/**
+ * 行级编辑实现（edit 工具 mode="lines" 时委托调用；
+ * 原独立的 edit_lines 工具已于 2026-09-09 合并进 edit，schema 见 edit 工具）
+ */
+async function handleEditLines({ filepath, namespace = 'workspace', operation, start_line, end_line, insert_after, text }: any): Promise<any> {
+      try {
+        if (!getWorkspacePath()) {
+          return { success: false, error: '工作空间未设置' };
+        }
+
+        let rootPath: string;
+        if (namespace === 'config') {
+          rootPath = getPathManager().getConfigPath();
+        } else {
+          rootPath = getWorkspacePath();
+        }
+
+        const fullPath = path.resolve(rootPath, filepath);
+
+        // 过期内容防护：文件在上次读取后被修改过则拦截（行号尤其容易漂移）
+        const staleError = await checkFileFreshness(fullPath, filepath);
+        if (staleError) return { success: false, error: staleError };
+
+        const content = await readFile(fullPath, 'utf-8');
+
+        // 保持原文件换行风格
+        const eol = content.includes('\r\n') ? '\r\n' : '\n';
+        const lines = content.split(eol);
+
+        // 参数校验
+        if (operation === 'insert') {
+          if (insert_after === undefined || insert_after === null) {
+            return { success: false, error: 'insert 操作必须提供 insert_after 参数（0 = 文件开头）' };
+          }
+          // 实际行数：文件不以换行结尾时 split 不会产生尾部空串，行数 = lines.length
+          // （此时 insert_after = 行数 N 表示"在最后一行之后追加"，slice 天然支持）
+          const actualLines = lines.length - (content.endsWith(eol) ? 1 : 0);
+          if (insert_after < 0 || insert_after > actualLines) {
+            return { success: false, error: `insert_after 超出范围：文件共 ${actualLines} 行（有效范围 0-${actualLines}，0 = 文件开头，${actualLines} = 末尾追加）` };
+          }
+          if (!text) {
+            return { success: false, error: 'insert 操作必须提供 text 参数' };
+          }
+        } else {
+          if (!start_line || start_line < 1) {
+            return { success: false, error: `${operation} 操作必须提供有效的 start_line（≥1）` };
+          }
+          const end = end_line ?? start_line;
+          const maxLine = lines.length - (content.endsWith(eol) ? 1 : 0);
+          if (end < start_line) {
+            return { success: false, error: `end_line (${end}) 不能小于 start_line (${start_line})` };
+          }
+          if (end > maxLine) {
+            return { success: false, error: `行号超出范围：文件共 ${maxLine} 行，end_line=${end} 超出` };
+          }
+          if (operation === 'replace' && text === undefined) {
+            return { success: false, error: 'replace 操作必须提供 text 参数（删除行请用 delete 操作）' };
+          }
+        }
+
+        let newLines: string[];
+        let summary: string;
+
+        if (operation === 'delete') {
+          const end = end_line ?? start_line;
+          newLines = [...lines.slice(0, start_line - 1), ...lines.slice(end)];
+          summary = `删除第 ${start_line}-${end} 行（共 ${end - start_line + 1} 行）`;
+        } else if (operation === 'insert') {
+          const insertLines = (text as string).split('\n');
+          newLines = [...lines.slice(0, insert_after), ...insertLines, ...lines.slice(insert_after)];
+          summary = `在第 ${insert_after} 行后插入 ${insertLines.length} 行`;
+        } else {
+          const end = end_line ?? start_line;
+          const replaceLines = (text as string).split('\n');
+          newLines = [...lines.slice(0, start_line - 1), ...replaceLines, ...lines.slice(end)];
+          summary = `将第 ${start_line}-${end} 行（${end - start_line + 1} 行）替换为 ${replaceLines.length} 行`;
+        }
+
+        const newContent = newLines.join(eol);
+        if (newContent === content) {
+          return { success: true, message: '内容无变化', filepath, namespace, diff: '(无改动)' };
+        }
+
+        await writeFile(fullPath, newContent, 'utf-8');
+
+        // 刷新快照，连续编辑同一文件不会误报
+        try { recordReadSnapshot(fullPath, await stat(fullPath)); } catch { /* 忽略 */ }
+
+        return {
+          success: true,
+          message: `成功编辑文件: ${filepath}（${summary}）`,
+          filepath,
+          namespace,
+          operation,
+          diff: makeDiff(content, newContent),
+          totalLines: newLines.length - (newContent.endsWith(eol) ? 1 : 0),
+        };
+      } catch (error: any) {
+        return { success: false, error: error.message };
+      }
+}
 
 export const fileTools: Tool[] = [
   {
@@ -366,7 +468,7 @@ export const fileTools: Tool[] = [
     name: 'read',
     description: `读取文件内容，支持文本文件、Office 文档（.docx/.xlsx/.pptx，自动路由到 OfficeCLI 获取结构化大纲）、PDF 文档（.pdf）和图片文件。支持从工作空间或配置目录（${CONFIG_DIR_NAME}）读取文件。
 
-**Office 文档**：本工具会自动识别 .docx/.xlsx/.pptx 并通过 OfficeCLI 读取结构化内容（含 hint 提示后续使用 office_view/office_get 做元素级操作），无需先调用 read 再切换到 office_view。
+**Office 文档**：本工具会自动识别 .docx/.xlsx/.pptx 并通过 OfficeCLI 读取结构化内容（含 hint 提示后续使用 office 工具做元素级操作），无需先调用 read 再切换到 office 工具。
 
 **必需参数**：
 - filepath: 文件路径（如 "README.md" 或 "skills/docx/SKILL.md"）
@@ -671,29 +773,25 @@ export const fileTools: Tool[] = [
 
   {
     name: 'edit',
-    description: `通过文本替换精确编辑文件（精确字符串替换工具）。
+    description: `精确编辑文件，两种模式：
 
-**工作方式**：默认要求 old_text 在文件中**恰好出现一次**，将其替换为 new_text。多处匹配会报错并列出行号，此时请在 old_text 中包含更多上下文（前后几行）使其唯一。
+**mode="replace"（默认，文本替换）**：old_text 在文件中**恰好出现一次**时替换为 new_text。多处匹配会报错并列出行号，此时请在 old_text 中包含更多上下文使其唯一。
+- 修改：old_text = 原文本，new_text = 新文本
+- 删除行：old_text = 整行内容（含换行），new_text = ""
+- 插入行：old_text = 锚点行（唯一），new_text = 锚点行 + 新增内容
+- 可选 replace_all: true 替换所有匹配
+- CRLF（\\r\\n）文件 old_text 用 \\n 也能自动适配
 
-**三种编辑模式**：
-1. 修改：old_text = 原文本，new_text = 新文本
-2. 删除行：old_text = 要删除的整行内容（含换行），new_text = ""
-3. 插入行：old_text = 插入位置的锚点行（唯一），new_text = 锚点行 + 新增内容
-
-**必需参数**：
-- filepath: 文件路径
-- old_text: 要被替换的文本（必须与文件内容完全一致，包括缩进）
-- new_text: 替换后的文本（删除时传空字符串）
-
-**可选参数**：
-- replace_all: 替换所有匹配（默认 false，仅替换唯一匹配）
-- namespace: workspace 或 config（默认 workspace）
+**mode="lines"（按行号编辑）**：适合目标行内容在文件中重复出现的场景。
+- operation="delete"：删除 start_line 到 end_line（含边界）
+- operation="insert"：在 insert_after 行后插入 text（0 = 文件开头）
+- operation="replace"：start_line 到 end_line 替换为 text
+- 行号以 read 输出的行号为准（从 1 开始）；文件被修改后行号会漂移，务必以最新 read 为准
 
 **注意**：
-- old_text 必须完全匹配（区分大小写、区分缩进）——建议先 read 再复制粘贴
-- 替换成功后返回 diff 预览（- 表示删除行，+ 表示新增行），请检查是否符预期
-- 文件为 CRLF（\\r\\n）换行时，old_text 用 \\n 也能自动适配
-- 编辑前请务必先用 read 读过该文件，不要凭记忆编辑（系统会强制校验：未读取过或文件在读取后被外部修改过，编辑会被拦截并要求重新 read）`,
+- 编辑前必须先 read 过该文件（系统强制校验：未读取或读取后被外部修改过会被拦截要求重新 read）
+- 成功后返回 diff 预览（- 删除行 / + 新增行），请核对
+- namespace: workspace（默认）或 config`,
     parameters: {
       type: 'object',
       properties: {
@@ -707,24 +805,55 @@ export const fileTools: Tool[] = [
           enum: ['workspace', 'config'],
           default: 'workspace',
         },
+        mode: {
+          type: 'string',
+          description: '编辑模式：replace（默认，文本替换）或 lines（按行号编辑）',
+          enum: ['replace', 'lines'],
+          default: 'replace',
+        },
         old_text: {
           type: 'string',
-          description: '要被替换的文本（必须完全匹配，包含足够上下文使其在文件中唯一）',
+          description: '（mode=replace）要被替换的文本（必须完全匹配，包含足够上下文使其在文件中唯一）',
         },
         new_text: {
           type: 'string',
-          description: '替换后的新文本（删除时传空字符串）',
+          description: '（mode=replace）替换后的新文本（删除时传空字符串）',
         },
         replace_all: {
           type: 'boolean',
-          description: '是否替换所有匹配（默认 false：要求唯一匹配，多处匹配时报错）',
+          description: '（mode=replace）是否替换所有匹配（默认 false：要求唯一匹配，多处匹配时报错）',
           default: false,
         },
+        operation: {
+          type: 'string',
+          description: '（mode=lines）操作类型：delete（删除行）、insert（插入行）、replace（替换行）',
+          enum: ['delete', 'insert', 'replace'],
+        },
+        start_line: {
+          type: 'number',
+          description: '（mode=lines）起始行号（1 开始，含边界；delete/replace 必填）',
+        },
+        end_line: {
+          type: 'number',
+          description: '（mode=lines）结束行号（含边界；可省略则等于 start_line）',
+        },
+        insert_after: {
+          type: 'number',
+          description: '（mode=lines insert）在该行之后插入内容（0 表示插入到文件开头）',
+        },
+        text: {
+          type: 'string',
+          description: '（mode=lines）要插入/替换为的内容（支持多行 \\n 分隔；delete 不需要）',
+        },
       },
-      required: ['filepath', 'old_text', 'new_text'],
+      required: ['filepath'],
     },
-    handler: async ({ filepath, namespace = 'workspace', old_text, new_text, replace_all = false }) => {
+    handler: async ({ filepath, namespace = 'workspace', mode = 'replace', old_text, new_text, replace_all = false, operation, start_line, end_line, insert_after, text }) => {
       try {
+        // 按行号编辑模式：委托给行级编辑逻辑（原 edit_lines 工具）
+        if (mode === 'lines') {
+          return handleEditLines({ filepath, namespace, operation, start_line, end_line, insert_after, text });
+        }
         if (!getWorkspacePath()) {
           return { success: false, error: '工作空间未设置' };
         }
@@ -803,172 +932,6 @@ export const fileTools: Tool[] = [
           replaceCount: replace_all ? occurrenceLines.length : 1,
           diff: makeDiff(content, newContent),
           totalLines: newContent.split('\n').length,
-        };
-      } catch (error: any) {
-        return { success: false, error: error.message };
-      }
-    },
-  },
-
-  {
-    name: 'edit_lines',
-    description: `按行号编辑文件（行级编辑工具），适合精确删除/插入/替换某几行，尤其适合目标行内容在文件中重复出现的场景。
-
-**三种操作（operation 参数）**：
-1. delete: 删除 start_line 到 end_line 的行（含边界）
-2. insert: 在 insert_after 行之后插入 text（insert_after=0 表示插入到文件开头）
-3. replace: 将 start_line 到 end_line 的行替换为 text
-
-**必需参数**：
-- filepath: 文件路径
-- operation: "delete" | "insert" | "replace"
-- text: 要插入/替换为的内容（insert 和 replace 必填，delete 不需要；支持多行）
-
-**条件必需参数**：
-- start_line, end_line: operation 为 delete/replace 时必填（1 开始，含边界）
-- insert_after: operation 为 insert 时必填（在该行之后插入，0 = 文件开头）
-
-**可选参数**：
-- namespace: workspace 或 config（默认 workspace）
-
-**使用示例**：
-- 删除第 10-15 行：operation="delete", start_line=10, end_line=15
-- 在第 5 行后插入 3 行：operation="insert", insert_after=5, text="第一行\\n第二行\\n第三行"
-- 替换第 8-9 行为 1 行：operation="replace", start_line=8, end_line=9, text="新内容"
-
-**注意**：
-- 行号以 read 输出的行号为准（从 1 开始）；read 输出格式为 "行号│ 内容"，│ 前面的数字就是行号
-- 文件被其他操作修改后行号会变化，编辑前建议重新 read（系统会强制校验：未读取过或文件在读取后被外部修改过，编辑会被拦截）
-- 成功后返回 diff 预览（- 删除行 / + 新增行），请核对`,
-    parameters: {
-      type: 'object',
-      properties: {
-        filepath: {
-          type: 'string',
-          description: '要编辑的文件路径（相对于指定命名空间的根目录）',
-        },
-        namespace: {
-          type: 'string',
-          description: `命名空间：workspace（工作空间）或 config（${CONFIG_DIR_NAME} 配置目录）`,
-          enum: ['workspace', 'config'],
-          default: 'workspace',
-        },
-        operation: {
-          type: 'string',
-          description: '操作类型：delete（删除行）、insert（插入行）、replace（替换行）',
-          enum: ['delete', 'insert', 'replace'],
-        },
-        start_line: {
-          type: 'number',
-          description: '起始行号（1 开始，含边界；delete/replace 必填）',
-        },
-        end_line: {
-          type: 'number',
-          description: '结束行号（含边界；delete/replace 必填，可省略则等于 start_line）',
-        },
-        insert_after: {
-          type: 'number',
-          description: '在该行之后插入内容（insert 必填；0 表示插入到文件开头）',
-        },
-        text: {
-          type: 'string',
-          description: '要插入/替换为的内容（支持多行，用 \\n 分隔；delete 不需要）',
-        },
-      },
-      required: ['filepath', 'operation'],
-    },
-    handler: async ({ filepath, namespace = 'workspace', operation, start_line, end_line, insert_after, text }) => {
-      try {
-        if (!getWorkspacePath()) {
-          return { success: false, error: '工作空间未设置' };
-        }
-
-        let rootPath: string;
-        if (namespace === 'config') {
-          rootPath = getPathManager().getConfigPath();
-        } else {
-          rootPath = getWorkspacePath();
-        }
-
-        const fullPath = path.resolve(rootPath, filepath);
-
-        // 过期内容防护：文件在上次读取后被修改过则拦截（行号尤其容易漂移）
-        const staleError = await checkFileFreshness(fullPath, filepath);
-        if (staleError) return { success: false, error: staleError };
-
-        const content = await readFile(fullPath, 'utf-8');
-
-        // 保持原文件换行风格
-        const eol = content.includes('\r\n') ? '\r\n' : '\n';
-        const lines = content.split(eol);
-
-        // 参数校验
-        if (operation === 'insert') {
-          if (insert_after === undefined || insert_after === null) {
-            return { success: false, error: 'insert 操作必须提供 insert_after 参数（0 = 文件开头）' };
-          }
-          // 实际行数：文件不以换行结尾时 split 不会产生尾部空串，行数 = lines.length
-          // （此时 insert_after = 行数 N 表示"在最后一行之后追加"，slice 天然支持）
-          const actualLines = lines.length - (content.endsWith(eol) ? 1 : 0);
-          if (insert_after < 0 || insert_after > actualLines) {
-            return { success: false, error: `insert_after 超出范围：文件共 ${actualLines} 行（有效范围 0-${actualLines}，0 = 文件开头，${actualLines} = 末尾追加）` };
-          }
-          if (!text) {
-            return { success: false, error: 'insert 操作必须提供 text 参数' };
-          }
-        } else {
-          if (!start_line || start_line < 1) {
-            return { success: false, error: `${operation} 操作必须提供有效的 start_line（≥1）` };
-          }
-          const end = end_line ?? start_line;
-          const maxLine = lines.length - (content.endsWith(eol) ? 1 : 0);
-          if (end < start_line) {
-            return { success: false, error: `end_line (${end}) 不能小于 start_line (${start_line})` };
-          }
-          if (end > maxLine) {
-            return { success: false, error: `行号超出范围：文件共 ${maxLine} 行，end_line=${end} 超出` };
-          }
-          if (operation === 'replace' && text === undefined) {
-            return { success: false, error: 'replace 操作必须提供 text 参数（删除行请用 delete 操作）' };
-          }
-        }
-
-        let newLines: string[];
-        let summary: string;
-
-        if (operation === 'delete') {
-          const end = end_line ?? start_line;
-          newLines = [...lines.slice(0, start_line - 1), ...lines.slice(end)];
-          summary = `删除第 ${start_line}-${end} 行（共 ${end - start_line + 1} 行）`;
-        } else if (operation === 'insert') {
-          const insertLines = (text as string).split('\n');
-          newLines = [...lines.slice(0, insert_after), ...insertLines, ...lines.slice(insert_after)];
-          summary = `在第 ${insert_after} 行后插入 ${insertLines.length} 行`;
-        } else {
-          const end = end_line ?? start_line;
-          const replaceLines = (text as string).split('\n');
-          newLines = [...lines.slice(0, start_line - 1), ...replaceLines, ...lines.slice(end)];
-          summary = `将第 ${start_line}-${end} 行（${end - start_line + 1} 行）替换为 ${replaceLines.length} 行`;
-        }
-
-        const newContent = newLines.join(eol);
-        if (newContent === content) {
-          return { success: true, message: '内容无变化', filepath, namespace, diff: '(无改动)' };
-        }
-
-        await writeFile(fullPath, newContent, 'utf-8');
-
-        // 刷新快照，连续编辑同一文件不会误报
-        try { recordReadSnapshot(fullPath, await stat(fullPath)); } catch { /* 忽略 */ }
-
-        return {
-          success: true,
-          message: `成功编辑文件: ${filepath}（${summary}）`,
-          filepath,
-          namespace,
-          operation,
-          diff: makeDiff(content, newContent),
-          totalLines: newLines.length - (newContent.endsWith(eol) ? 1 : 0),
         };
       } catch (error: any) {
         return { success: false, error: error.message };

@@ -45,25 +45,24 @@ const TOOL_RISK_LEVELS: Record<string, ToolRiskLevel> = {
   'bash': ToolRiskLevel.MEDIUM,
 
   // Office 工具 - 低风险
-  'word_create': ToolRiskLevel.LOW,
-  'word_edit': ToolRiskLevel.LOW,
-  'office_create': ToolRiskLevel.LOW,
-  'office_view': ToolRiskLevel.LOW,
-  'office_query': ToolRiskLevel.LOW,
+  'office': ToolRiskLevel.LOW,
+  'word_create': ToolRiskLevel.LOW, // 旧名兼容（已合并进 office）
+  'word_edit': ToolRiskLevel.LOW,   // 旧名兼容（已合并进 office）
+  'office_create': ToolRiskLevel.LOW, // 旧名兼容（已合并进 office）
+  'office_view': ToolRiskLevel.LOW,   // 旧名兼容（已合并进 office）
+  'office_query': ToolRiskLevel.LOW,  // 旧名兼容（已合并进 office）
 
   // Office 一键生成 - 创建低风险，追加修改中风险
   'docx_build': ToolRiskLevel.LOW,
   'xlsx_build': ToolRiskLevel.LOW,
   'docx_append': ToolRiskLevel.MEDIUM,
 
-  // 远程工具
+  // 远程工具（2026-09-09 已 skill 化，条目保留用于旧会话回放）
   'ssh': ToolRiskLevel.MEDIUM,
   'winrm': ToolRiskLevel.MEDIUM,
   'server_list': ToolRiskLevel.SAFE,
-  'ssh_upload': ToolRiskLevel.HIGH,
-  'deploy': ToolRiskLevel.HIGH,
 
-  // 数据库工具
+  // 数据库工具（已 skill 化，条目保留用于旧会话回放）
   'db_query': ToolRiskLevel.LOW,
   'db_execute': ToolRiskLevel.HIGH,
   'db_schema': ToolRiskLevel.LOW,
@@ -91,10 +90,14 @@ const TOOL_RISK_LEVELS: Record<string, ToolRiskLevel> = {
   'pptx_list_themes': ToolRiskLevel.SAFE,
 
   // 知识库 - 安全
+  'kb': ToolRiskLevel.LOW,
   'kb_search': ToolRiskLevel.SAFE,
-  'kb_train': ToolRiskLevel.LOW,
+  'kb_train': ToolRiskLevel.LOW, // 旧名兼容（已合并进 kb）
+  'kb_status': ToolRiskLevel.SAFE, // 旧名兼容（已合并进 kb）
+  'kb_remove': ToolRiskLevel.MEDIUM, // 旧名兼容（已合并进 kb）
 
-  // 任务工具 - 安全
+  // 任务工具 - 安全（旧名 task_* 兼容回放）
+  'task': ToolRiskLevel.SAFE,
   'task_create': ToolRiskLevel.SAFE,
   'task_list': ToolRiskLevel.SAFE,
   'task_update': ToolRiskLevel.SAFE,
@@ -102,14 +105,21 @@ const TOOL_RISK_LEVELS: Record<string, ToolRiskLevel> = {
 
   // 附件工具 - 安全
   'list_attachments': ToolRiskLevel.SAFE,
-  'get_attachment': ToolRiskLevel.SAFE,
-  'save_attachment': ToolRiskLevel.LOW,
+  'get_attachment_content': ToolRiskLevel.SAFE,
+  'upload_file': ToolRiskLevel.LOW,
+  'get_attachment': ToolRiskLevel.SAFE,   // 旧名兼容
+  'save_attachment': ToolRiskLevel.LOW,   // 旧名兼容
+  'process_workflow': ToolRiskLevel.LOW,  // 旧名兼容（工具已删除）
 
-  // 定时任务工具 - 低风险
+  // 定时任务工具 - 低风险（旧名 cron_* 兼容回放）
+  'cron': ToolRiskLevel.SAFE,
+  'heartbeat': ToolRiskLevel.SAFE,
   'cron_create': ToolRiskLevel.LOW,
   'cron_list': ToolRiskLevel.SAFE,
   'cron_delete': ToolRiskLevel.MEDIUM,
-  'heartbeat_status': ToolRiskLevel.SAFE,
+  'heartbeat_status': ToolRiskLevel.SAFE,     // 旧名兼容（已合并进 heartbeat）
+  'heartbeat_get_tasks': ToolRiskLevel.SAFE,  // 旧名兼容（已合并进 heartbeat）
+  'heartbeat_trigger': ToolRiskLevel.SAFE,    // 旧名兼容（已合并进 heartbeat）
 
   // 交互工具 - 安全
   'ask_user': ToolRiskLevel.SAFE,

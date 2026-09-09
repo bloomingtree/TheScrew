@@ -673,6 +673,121 @@ const taskCompleteTool: Tool = {
   },
 };
 
+// ==================== 单工具封装（2026-09-09 四工具合并） ====================
+
+/**
+ * task - 任务管理单工具，operation 分发到上述四个实现
+ */
+const taskTool: Tool = {
+  name: 'task',
+  description: `待办任务管理。operation 取值：
+
+- **create**：创建任务。必需 title；可选 description / priority(high|medium|low) / tags[] / dueDate(YYYY-MM-DD) / subtasks[](标题列表)
+- **list**：列出任务（默认 status=pending）。可选 status(pending|in_progress|completed|cancelled|all) / priority / tag / sortBy(createdAt|priority|dueDate) / sortOrder(asc|desc) / limit(默认 20)
+- **update**：更新任务字段（仅更新提供的字段）。必需 id；可选 title / description / status / priority / dueDate / tags(整体替换) / note(追加备注) / toggleSubtask(子任务 ID，切换完成状态)
+- **complete**：标记任务完成（未完成的子任务会一并完成，可带 completionNote）。必需 id
+
+任务 ID 用人类可读格式 T-XXX（list/create 返回）或 UUID。
+
+示例：
+- task({operation:"create", title:"写周报", priority:"high", dueDate:"2026-09-15"})
+- task({operation:"list", status:"all", sortBy:"priority"})
+- task({operation:"update", id:"T-001", status:"in_progress", note:"开始处理"})
+- task({operation:"complete", id:"T-001", completionNote:"已提交"})`,
+  parameters: {
+    type: 'object',
+    properties: {
+      operation: {
+        type: 'string',
+        enum: ['create', 'list', 'update', 'complete'],
+        description: '操作类型，见上方速查表',
+      },
+      id: {
+        type: 'string',
+        description: '（update/complete）任务 ID（T-XXX 或 UUID）',
+      },
+      title: {
+        type: 'string',
+        description: '（create 必填 / update 可选）任务标题',
+      },
+      description: {
+        type: 'string',
+        description: '（create/update）任务详细描述',
+      },
+      status: {
+        type: 'string',
+        enum: ['pending', 'in_progress', 'completed', 'cancelled', 'all'],
+        description: '（list 筛选 / update 新状态；list 时可用 all）',
+      },
+      priority: {
+        type: 'string',
+        enum: ['high', 'medium', 'low'],
+        description: '（create/update/list）优先级',
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '（create/update）标签列表',
+      },
+      tag: {
+        type: 'string',
+        description: '（list）按标签筛选',
+      },
+      dueDate: {
+        type: 'string',
+        description: '（create/update）截止日期 YYYY-MM-DD（update 传空字符串清除）',
+      },
+      subtasks: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '（create）子任务标题列表',
+      },
+      note: {
+        type: 'string',
+        description: '（update）追加的备注内容',
+      },
+      toggleSubtask: {
+        type: 'string',
+        description: '（update）要切换完成状态的子任务 ID',
+      },
+      completionNote: {
+        type: 'string',
+        description: '（complete）完成备注',
+      },
+      sortBy: {
+        type: 'string',
+        enum: ['createdAt', 'priority', 'dueDate'],
+        description: '（list）排序字段，默认 createdAt',
+      },
+      sortOrder: {
+        type: 'string',
+        enum: ['asc', 'desc'],
+        description: '（list）排序方向，默认 desc',
+      },
+      limit: {
+        type: 'number',
+        description: '（list）最多返回任务数，默认 20',
+      },
+    },
+    required: ['operation'],
+  },
+  handler: async (args: any) => {
+    const { operation, ...rest } = args;
+    switch (operation) {
+      case 'create':
+        return taskCreateTool.handler(rest);
+      case 'list':
+        return taskListTool.handler(rest);
+      case 'update':
+        return taskUpdateTool.handler(rest);
+      case 'complete':
+        return taskCompleteTool.handler(rest);
+      default:
+        return { success: false, error: `未知 operation "${operation}"。可用：create / list / update / complete` };
+    }
+  },
+};
+
 // ==================== 格式化辅助 ====================
 
 /**
@@ -724,9 +839,4 @@ function formatTaskFull(task: Task) {
 
 // ==================== 导出 ====================
 
-export const taskTools: Tool[] = [
-  taskCreateTool,
-  taskListTool,
-  taskUpdateTool,
-  taskCompleteTool,
-];
+export const taskTools: Tool[] = [taskTool];

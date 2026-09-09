@@ -1,5 +1,5 @@
 /**
- * SearchTools - 纯 Node.js 实现的 grep/glob/search_content 搜索工具
+ * SearchTools - 纯 Node.js 实现的 grep/glob 搜索工具
  * 不依赖外部命令（findstr/grep），原生支持 Unicode/中文
  * 提供上下文行、大小写控制、排除模式等高级功能
  */
@@ -17,7 +17,6 @@ import { getPathManager } from '../config/PathManager';
 const MAX_GREP_RESULTS = 100;
 const MAX_GREP_LINE_LENGTH = 2000;
 const MAX_GLOB_RESULTS = 200;
-const MAX_SEARCH_CONTENT_RESULTS = 20;
 const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024; // 1MB
 const MAX_CONCURRENT_FILE_READS = 5;
 const MAX_TRAVERSAL_DEPTH = 30;
@@ -359,144 +358,6 @@ const globTool: Tool = {
   },
 };
 
-// ==================== search_content 工具（组合搜索） ====================
-
-const searchContentTool: Tool = {
-  name: 'search_content',
-  description: `组合文件搜索 + 内容搜索，快速定位包含指定文本的文件
-
-**必需参数**：
-- query: 搜索查询文本
-
-**可选参数**：
-- fileTypes: 文件类型过滤（如 ["ts", "js", "md"]）
-- path: 搜索的目录路径（相对于工作空间根目录，默认为根目录）
-- maxResults: 最多返回多少个包含匹配的文件（默认 ${MAX_SEARCH_CONTENT_RESULTS}）
-
-**与 grep 的区别**：
-- grep 返回每个匹配行的详细信息，适合精确搜索
-- search_content 返回每个匹配文件的摘要，适合快速浏览哪些文件包含目标文本
-- 匹配文件超过 maxResults 时，完整结果（最多 ${FULL_COLLECT_LIMIT} 个文件）自动保存到文件，可用 read 的 offset/limit 分页读取（见返回的 hint）
-
-**使用示例**：
-- 搜索所有代码中的某个函数：query="handleSubmit", fileTypes=["ts","tsx"]
-- 搜索文档中的关键词：query="部署指南", fileTypes=["md"]
-- 全局搜索：query="deprecated"`,
-
-  parameters: {
-    type: 'object',
-    properties: {
-      query: {
-        type: 'string',
-        description: '搜索查询文本',
-      },
-      fileTypes: {
-        type: 'array',
-        items: { type: 'string' },
-        description: '文件扩展名列表（不含点号），如 ["ts", "js", "md"]',
-      },
-      path: {
-        type: 'string',
-        description: '搜索的目录路径（相对于工作空间根目录，默认为根目录）',
-      },
-      maxResults: {
-        type: 'number',
-        description: `最多返回多少个包含匹配的文件（默认 ${MAX_SEARCH_CONTENT_RESULTS}）`,
-      },
-    },
-    required: ['query'],
-  },
-
-  handler: async ({ query, fileTypes, path: searchPath, maxResults }) => {
-    try {
-      const workspace = getWorkspacePath();
-      if (!workspace) {
-        return { success: false, error: '工作空间未设置' };
-      }
-
-      const searchDir = searchPath
-        ? path.resolve(workspace, searchPath)
-        : workspace;
-
-      const maxRes = maxResults ?? MAX_SEARCH_CONTENT_RESULTS;
-
-      // 构建搜索正则（默认不区分大小写）
-      const regex = buildSearchRegex(query, false);
-      if (!regex) {
-        return { success: false, error: `无效的搜索查询: "${query}"` };
-      }
-
-      // 构建文件类型过滤
-      const typeSet: Set<string> | null = fileTypes
-        ? new Set(fileTypes.map((t: string) => t.startsWith('.') ? t : `.${t}`))
-        : null;
-
-      // 收集文件
-      const files: string[] = [];
-      await collectFiles(searchDir, searchDir, files, null, 0, typeSet);
-
-      // 搜索每个文件，收集有匹配的文件摘要
-      // 收集上限为 FULL_COLLECT_LIMIT，超出 maxResults 的保存到文件
-      const matchedFiles: Array<{
-        file: string;
-        matchCount: number;
-        snippets: string[];
-      }> = [];
-
-      const batches = batchArray(files, MAX_CONCURRENT_FILE_READS);
-
-      for (const batch of batches) {
-        if (matchedFiles.length >= FULL_COLLECT_LIMIT) break;
-
-        const batchResults = await Promise.all(
-          batch.map(filePath => searchFileForSnippets(filePath, searchDir, regex, 3))
-        );
-
-        for (const result of batchResults) {
-          if (!result) continue;
-          matchedFiles.push(result);
-          if (matchedFiles.length >= FULL_COLLECT_LIMIT) break;
-        }
-      }
-
-      if (matchedFiles.length === 0) {
-        return {
-          success: true,
-          files: [],
-          totalFiles: files.length,
-          message: '未找到包含指定文本的文件',
-        };
-      }
-
-      const truncated = matchedFiles.length > maxRes;
-      const displayFiles = matchedFiles.slice(0, maxRes);
-
-      // 截断时保存完整结果到文件（每行一个文件摘要）
-      let hint: string | undefined;
-      if (truncated) {
-        const savedPath = await saveFullResults(
-          matchedFiles.map(f => `${f.file} (${f.matchCount} 处匹配): ${f.snippets.join(' | ')}`),
-          'search_content'
-        );
-        hint = savedPath
-          ? `共 ${matchedFiles.length} 个文件包含匹配，仅返回前 ${maxRes} 个。完整结果已保存至 ${savedPath}（每行一个文件），可用 read 的 offset/limit 参数分页读取`
-          : `结果已截断，仅显示前 ${maxRes} 个文件。请缩小搜索范围获取更精确的结果。`;
-      }
-
-      return {
-        success: true,
-        files: displayFiles,
-        totalFiles: files.length,
-        matchedFileCount: matchedFiles.length,
-        truncated,
-        ...(hint ? { hint } : {}),
-      };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  },
-};
-
 // ==================== 核心辅助函数 ====================
 
 /**
@@ -603,121 +464,73 @@ async function searchFileContent(
   contextLines: number,
   maxMatches: number,
 ): Promise<GrepMatch[] | null> {
-  const matches: GrepMatch[] = [];
-  const lines: string[] = []; // 缓存已读行用于提供上下文
-
   return new Promise((resolve) => {
+    const matches: GrepMatch[] = [];
+    const beforeBuffer: string[] = [];
+    const pendingAfter: { match: GrepMatch; remaining: number }[] = [];
+    let lineNumber = 0;
+    let truncated = false;
+
     const rl = readline.createInterface({
       input: createReadStream(filePath, { encoding: 'utf-8' }),
       crlfDelay: Infinity,
     });
 
-    let currentLine = 0;
-
     rl.on('line', (line: string) => {
-      currentLine++;
+      if (truncated) return;
+      lineNumber++;
 
-      // 截断超长行
-      const truncatedLine = line.length > MAX_GREP_LINE_LENGTH
-        ? line.substring(0, MAX_GREP_LINE_LENGTH) + GREP_LINE_SUFFIX
-        : line;
-
-      lines.push(truncatedLine);
-
-      // 清理旧的缓存行（保留上下文窗口），防止大文件内存膨胀
-      const keepWindow = contextLines + 10;
-      if (lines.length > keepWindow * 2) {
-        lines.splice(0, lines.length - keepWindow);
+      // 二进制内容检测：含 NUL 字节直接放弃该文件
+      if (line.includes('\u0000')) {
+        truncated = true;
+        rl.close();
+        return;
       }
 
-      // 重置正则 lastIndex（防止粘性匹配问题）
+      // 补全前一个匹配的 after 上下文
+      for (const p of pendingAfter) {
+        if (p.remaining > 0) {
+          p.match.context.after.push(line.length > MAX_GREP_LINE_LENGTH ? line.substring(0, MAX_GREP_LINE_LENGTH) + GREP_LINE_SUFFIX : line);
+          p.remaining--;
+        }
+      }
+      while (pendingAfter.length > 0 && pendingAfter[0].remaining === 0) {
+        pendingAfter.shift();
+      }
+
       regex.lastIndex = 0;
-
       if (regex.test(line)) {
-        const relativePath = path.relative(basePath, filePath).replace(/\\/g, '/');
-
-        // 提取上下文行
-        const currentIdx = lines.length - 1;
-        const beforeStart = Math.max(0, currentIdx - contextLines);
-        const beforeLines = lines.slice(beforeStart, currentIdx).map(l => l);
-
-        matches.push({
-          file: relativePath,
-          line: currentLine,
-          content: truncatedLine,
+        const content = line.length > MAX_GREP_LINE_LENGTH
+          ? line.substring(0, MAX_GREP_LINE_LENGTH) + GREP_LINE_SUFFIX
+          : line;
+        const match: GrepMatch = {
+          file: path.relative(basePath, filePath).replace(/\\/g, '/'),
+          line: lineNumber,
+          content,
           context: {
-            before: beforeLines,
-            after: [], // after 行在后续 line 事件中填充
+            before: [...beforeBuffer],
+            after: [],
           },
-        });
-
-        // 达到最大匹配数，关闭流
+        };
+        matches.push(match);
+        if (contextLines > 0) {
+          pendingAfter.push({ match, remaining: contextLines });
+        }
         if (matches.length >= maxMatches) {
+          truncated = true;
           rl.close();
+          return;
         }
-      } else if (matches.length > 0) {
-        // 填充最近一个匹配的 after 上下文
-        const lastMatch = matches[matches.length - 1];
-        const linesAfter = currentLine - lastMatch.line;
-        if (linesAfter > 0 && linesAfter <= contextLines) {
-          lastMatch.context.after.push(truncatedLine);
-        }
+      }
+
+      beforeBuffer.push(line);
+      if (beforeBuffer.length > contextLines) {
+        beforeBuffer.shift();
       }
     });
 
     rl.on('close', () => {
       resolve(matches.length > 0 ? matches : null);
-    });
-
-    rl.on('error', () => {
-      resolve(null);
-    });
-  });
-}
-
-/**
- * 搜索文件内容，提取匹配片段摘要（用于 search_content 工具）
- */
-async function searchFileForSnippets(
-  filePath: string,
-  basePath: string,
-  regex: RegExp,
-  maxSnippets: number,
-): Promise<{ file: string; matchCount: number; snippets: string[] } | null> {
-  const snippets: string[] = [];
-  let matchCount = 0;
-
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: createReadStream(filePath, { encoding: 'utf-8' }),
-      crlfDelay: Infinity,
-    });
-
-    rl.on('line', (line: string) => {
-      regex.lastIndex = 0;
-      if (regex.test(line)) {
-        matchCount++;
-        if (snippets.length < maxSnippets) {
-          const trimmed = line.trim();
-          snippets.push(
-            trimmed.length > MAX_GREP_LINE_LENGTH
-              ? trimmed.substring(0, MAX_GREP_LINE_LENGTH) + GREP_LINE_SUFFIX
-              : trimmed
-          );
-        }
-      }
-    });
-
-    rl.on('close', () => {
-      if (matchCount === 0) {
-        resolve(null);
-        return;
-      }
-      resolve({
-        file: path.relative(basePath, filePath).replace(/\\/g, '/'),
-        matchCount,
-        snippets,
-      });
     });
 
     rl.on('error', () => {
@@ -885,4 +698,4 @@ function batchArray<T>(arr: T[], batchSize: number): T[][] {
 
 // ==================== 导出 ====================
 
-export const searchTools: Tool[] = [grepTool, globTool, searchContentTool];
+export const searchTools: Tool[] = [grepTool, globTool];

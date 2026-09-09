@@ -11,8 +11,9 @@
 import { execFile } from 'child_process';
 
 export function killProcessTree(
-  child: { kill: (signal?: string) => void; pid?: number },
-  signal: string = 'SIGKILL'
+  // kill 签名放宽为 any：兼容 ChildProcess（Signals|number）与 cross-spawn 的不同声明
+  child: { kill: (signal?: any) => any; pid?: number },
+  signal: any = 'SIGKILL'
 ): void {
   if (process.platform === 'win32' && child.pid) {
     try {
